@@ -1,0 +1,10 @@
+{
+ "entrypoint": [
+  "keyclerk/identity/membership",
+  "keyclerk/identity/reach",
+  "keyclerk/identity/actor"
+ ],
+ "source_sha256": "70c9997881dfa77db0904b3f418f90239e1af889f2f22458607f6388993c86ff",
+ "wasm_sha256": "d97b724232c291a1b77b80ce657e1f0cee0bc5238960793d9e20816b9044c6fc",
+ "opa": "1.21.0"
+}

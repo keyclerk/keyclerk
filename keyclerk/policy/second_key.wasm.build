@@ -1,0 +1,6 @@
+{
+ "entrypoint": "keyclerk/second_key/decision",
+ "source_sha256": "2cad29154d5c842285e98818dc66c0ffd911f7037cf8d72f988ccebb90d0629e",
+ "wasm_sha256": "d070953ba3520c4712ed00d929f793c562cd9d36474e28c62a7b9842bb603388",
+ "opa": "1.21.0"
+}

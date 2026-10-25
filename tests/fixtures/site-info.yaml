@@ -1,0 +1,10 @@
+# Info package data of the demonstration tenant's site. Changed only by a
+# two-person merge request; contacts are roles, never a requester's text.
+site:
+  name: "example office, Heverlee"
+  rules: ["Wear your badge visibly.", "Do not plug unknown devices into the network.", "Lock your screen when you leave it."]
+  safety: ["Assembly point: the car park at the front.", "Fire alarm: leave by the nearest exit, do not use the lift."]
+contacts:
+  sponsor: "your sponsor, named in your invitation"
+  security-desk: "the security desk, extension 200"
+  emergency: "112"

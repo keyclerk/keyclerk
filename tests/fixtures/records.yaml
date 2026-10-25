@@ -1,0 +1,229 @@
+# Grant records of the demonstration tenant's realm. Fictitious people, anchors are the
+# upstream IdP's immutable ids. Checked by tools/grants.py; the reconciler applies them to the broker's grant groups.
+realm: example
+home: example-host-1
+grants:
+  - grant_id: G-example-0001
+    subject: {anchor: "idp:7c1f-ann", kind: tenant}
+    role: tenant-admin
+    plane: tenant
+    class: functional
+    scope: {level: tenant, id: example}
+    label_ceiling: Sensitive
+    justification: {function: office-manager}
+    requested_by: "idp:2b9e-owner"
+    approved_by: ["idp:2b9e-owner-delegate"]
+    change: "demo!1"
+    start: 2026-10-01T00:00:00Z
+    end: 2026-10-31T00:00:00Z
+  - grant_id: G-example-0002
+    subject: {anchor: "idp:7c1f-ann", kind: tenant, persona: admin}
+    role: tenant-admin-privileged
+    plane: tenant
+    class: eligibility
+    scope: {level: tenant, id: example}
+    label_ceiling: Sensitive
+    justification: {function: office-manager}
+    requested_by: "idp:7c1f-ann"
+    approved_by: ["idp:2b9e-owner"]
+    change: "demo!2"
+    start: 2026-10-01T00:00:00Z
+    end: 2026-12-31T00:00:00Z
+  - grant_id: G-example-0003
+    subject: {anchor: "idp:7c1f-ann", kind: tenant, persona: admin}
+    role: tenant-admin-privileged
+    plane: tenant
+    class: activation
+    scope: {level: tenant, id: example}
+    label_ceiling: Sensitive
+    justification: {function: office-manager}
+    reason: "add the partner's identity provider"
+    requested_by: "idp:7c1f-ann"
+    approved_by: ["idp:2b9e-owner"]
+    change: "demo#41"
+    start: 2026-10-21T08:00:00Z
+    end: 2026-10-21T12:00:00Z
+  - grant_id: G-example-0004
+    subject: {anchor: "op:7a1e-oscar", kind: operator}
+    role: consultant
+    plane: tenant
+    class: functional
+    scope: {level: tenant, id: example}
+    label_ceiling: Internal
+    justification: {engagement: sounding-2026}
+    requested_by: "idp:2b9e-owner"
+    approved_by: ["idp:7c1f-ann"]
+    start: 2026-10-14T00:00:00Z
+    end: 2026-11-14T00:00:00Z
+  - grant_id: G-example-0005
+    subject: {anchor: "idp:91d0-bert", kind: tenant}
+    role: tenant-admin
+    plane: tenant
+    class: functional
+    scope: {level: tenant, id: example}
+    label_ceiling: Sensitive
+    justification: {function: it-coordinator}
+    requested_by: "idp:2b9e-owner"
+    approved_by: ["idp:7c1f-ann"]
+    start: 2026-09-25T00:00:00Z
+    end: 2026-10-25T00:00:00Z
+revocations:
+  - {grant_id: G-example-0005, at: 2026-10-15T09:12:00Z, by: "idp:2b9e-owner", reason: "mover: left IT coordination"}
+connected_organisations:
+  - {name: "PartnerWorks", issuer: "https://login.partnerworks.example/realms/staff", domains: [partnerworks.example], contact: "idp:2b9e-owner"}
+leases:
+  - lease_id: L-example-0001
+    anchor: "ext:3a71-carla"
+    identity_hash: "hmac-sha256:5be0c41f9a7d2e10"
+    category: contractor
+    sponsor: {anchor: "idp:7c1f-ann", kind: tenant}
+    resource_owner: "idp:91d0-bert"
+    label_ceiling: Internal
+    start: 2026-10-06T08:00:00Z
+    end: 2026-10-27T17:00:00Z
+    requested_end: 2026-11-30T17:00:00Z
+    approved_by: ["idp:7c1f-ann", "idp:91d0-bert"]
+    proofs:
+      - {kind: identity, checker: "idp:7c1f-ann", checked_at: 2026-10-06T08:10:00Z}
+      - {kind: safety-certificate, checker: "idp:7c1f-ann", checked_at: 2026-10-06T08:12:00Z, expiry: 2026-10-27T17:00:00Z, binds_lease: true, issuer: "a certification body", number_hash: "hmac-sha256:91aa03be55c2d7e4"}
+    sites: [example-host-1]
+  - lease_id: L-example-0002
+    anchor: "fed:partnerworks:8812"
+    identity_hash: "hmac-sha256:0c4e88d1b2a39f77"
+    category: partner
+    issuer: "https://login.partnerworks.example/realms/staff"
+    sponsor: {anchor: "idp:2b9e-owner", kind: tenant}
+    resource_owner: "idp:7c1f-ann"
+    start: 2026-09-01T00:00:00Z
+    end: 2027-02-28T00:00:00Z
+    requested_end: 2027-02-28T00:00:00Z
+    approved_by: ["idp:2b9e-owner", "idp:7c1f-ann"]
+    proofs:
+      - {kind: affiliation, checker: "idp:2b9e-owner", checked_at: 2026-09-01T09:00:00Z}
+
+# Delegated administration: the owner is the root trust owner; Ann manages the office
+# branch, Bert the sites branch, and Bert passed the Wilsele site on to its foreman Dirk (retired 2026-10-20).
+catalogue:
+  - {entitlement: admin-console, application: keyclerk, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: admin-overlay-device, application: netbird, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: admin-overlay, application: netbird, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: bank-customer, application: bank, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: bmc-a1, application: oob, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: bookkeeping-approve, application: bookkeeping, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: bookkeeping-write, application: bookkeeping, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: break-glass, application: pacs, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: building-entry, application: pacs, risk: low, owner: "idp:2b9e-owner"}
+  - {entitlement: cage-a, application: pacs, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: dock-entry, application: pacs, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: grant-records-read, application: keyclerk, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: guard-room, application: pacs, risk: low, owner: "idp:2b9e-owner"}
+  - {entitlement: key-cabinet-admin, application: pacs, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: key-cabinet, application: pacs, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: keyclerk-portal, application: keyclerk, risk: low, owner: "idp:2b9e-owner"}
+  - {entitlement: lockbox-a1, application: pacs, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: master-key, application: pacs, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: openbao-admin, application: openbao, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: openbao-bmc-read, application: openbao, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: paw-device, application: endpoints, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: paw-holder, application: endpoints, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: paw-login, application: endpoints, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: proof-vault-view, application: keyclerk, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: rack-a1, application: pacs, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: secure-floor, application: pacs, risk: elevated, owner: "idp:2b9e-owner"}
+  - {entitlement: server-room, application: pacs, risk: privileged, owner: "idp:2b9e-owner"}
+  - {entitlement: share-read, application: files, risk: low, owner: "idp:2b9e-owner"}
+  - {entitlement: site-entry, application: pacs, risk: low, owner: "idp:2b9e-owner"}
+  - {entitlement: site-office, application: pacs, risk: low, owner: "idp:2b9e-owner"}
+  - {entitlement: site-share, application: files, risk: low, owner: "idp:2b9e-owner"}
+  - {entitlement: strongroom, application: pacs, risk: privileged, owner: "idp:2b9e-owner"}
+sod:
+  - {sod_id: SOD-1, entitlements: [bookkeeping-write, bookkeeping-approve], reason: "one person never books and approves the same payment"}
+root:
+  officer: "idp:31ee-ingrid"
+  holders: [{anchor: "idp:2b9e-owner", appointed_by: "op:7a1e-oscar", from: 2026-10-01T00:00:00Z}]
+  on_call: ["idp:91d0-bert"]
+persons:
+  - {person: owner, kind: tenant, anchors: ["idp:2b9e-owner"]}
+  - {person: ann, kind: tenant, anchors: ["idp:7c1f-ann"]}
+  - {person: bert, kind: tenant, anchors: ["idp:91d0-bert"]}
+  - {person: dirk, kind: tenant, anchors: ["idp:44aa-dirk"]}
+  - {person: eva, kind: tenant, anchors: ["idp:55bb-eva"]}
+  - {person: finn, kind: tenant, anchors: ["idp:66cc-finn"]}
+  - {person: gina, kind: tenant, anchors: ["idp:77dd-gina"]}
+  - {person: ingrid, kind: tenant, anchors: ["idp:31ee-ingrid"]}
+  - {person: operator, kind: tenant, anchors: ["op:7a1e-oscar"]}
+  - {person: kai, kind: tenant, anchors: ["idp:bb11-kai"]}
+  - {person: guard, kind: tenant, anchors: ["idp:ee01-guard"]}
+  - {person: carla, kind: external, anchors: ["ext:3a71-carla"]}
+groups:
+  - {group_id: admins, parent: all, max_risk: privileged, carries: [{entitlement: admin-console, by: "idp:2b9e-owner"}]}
+  - {group_id: all, parent: null, max_risk: low, carries: []}
+  - {group_id: crisis-team, parent: office, place: "place:heverlee", max_risk: elevated, carries: [{entitlement: share-read, by: "idp:2b9e-owner"}]}
+  - {group_id: finance, parent: office, max_risk: elevated, carries: [{entitlement: bookkeeping-write, by: "idp:2b9e-owner"}]}
+  - {group_id: office-staff, parent: office, max_risk: low, carries: [{entitlement: share-read, by: "idp:2b9e-owner"}]}
+  - {group_id: office, parent: all, max_risk: low, carries: []}
+  - {group_id: payment-approvers, parent: office, max_risk: elevated, carries: [{entitlement: bookkeeping-approve, by: "idp:2b9e-owner"}]}
+  - {group_id: server-admins, parent: all, place: "place:heverlee", max_risk: privileged, carries: [{entitlement: site-entry, by: "idp:2b9e-owner"}, {entitlement: building-entry, by: "idp:2b9e-owner"}, {entitlement: secure-floor, by: "idp:2b9e-owner"}, {entitlement: server-room, by: "idp:2b9e-owner"}, {entitlement: guard-room, by: "idp:2b9e-owner"}, {entitlement: strongroom, by: "idp:2b9e-owner"}, {entitlement: key-cabinet, by: "idp:2b9e-owner"}, {entitlement: cage-a, by: "idp:2b9e-owner"}, {entitlement: rack-a1, by: "idp:2b9e-owner"}, {entitlement: lockbox-a1, by: "idp:2b9e-owner"}, {entitlement: bmc-a1, by: "idp:2b9e-owner"}, {entitlement: paw-holder, by: "idp:2b9e-owner"}, {entitlement: paw-device, by: "idp:2b9e-owner"}, {entitlement: paw-login, by: "idp:2b9e-owner"}, {entitlement: admin-overlay, by: "idp:2b9e-owner"}, {entitlement: admin-overlay-device, by: "idp:2b9e-owner"}, {entitlement: keyclerk-portal, by: "idp:2b9e-owner"}, {entitlement: openbao-bmc-read, by: "idp:2b9e-owner"}, {entitlement: openbao-admin, by: "idp:2b9e-owner"}, {entitlement: proof-vault-view, by: "idp:2b9e-owner"}]}
+  - {group_id: site-heverlee, parent: sites, place: "place:heverlee", max_risk: low, carries: [{entitlement: site-share, by: "idp:2b9e-owner"}]}
+  - {group_id: site-office, parent: all, place: "place:heverlee", max_risk: low, carries: [{entitlement: site-entry, by: "idp:2b9e-owner"}, {entitlement: building-entry, by: "idp:2b9e-owner"}, {entitlement: guard-room, by: "idp:2b9e-owner"}, {entitlement: site-office, by: "idp:2b9e-owner"}]}
+  - {group_id: site-security, parent: all, place: "place:heverlee", max_risk: privileged, carries: [{entitlement: site-entry, by: "idp:2b9e-owner"}, {entitlement: building-entry, by: "idp:2b9e-owner"}, {entitlement: secure-floor, by: "idp:2b9e-owner"}, {entitlement: dock-entry, by: "idp:2b9e-owner"}, {entitlement: guard-room, by: "idp:2b9e-owner"}, {entitlement: strongroom, by: "idp:2b9e-owner"}, {entitlement: key-cabinet, by: "idp:2b9e-owner"}, {entitlement: break-glass, by: "idp:2b9e-owner"}]}
+  - {group_id: site-wilsele, parent: sites, place: "place:wilsele", max_risk: low, carries: [{entitlement: site-share, by: "idp:2b9e-owner"}]}
+  - {group_id: sites, parent: all, max_risk: low, carries: []}
+delegations:
+  - {delegation_id: D-example-0001, delegate: "idp:7c1f-ann", group: office, powers: [members, subgroups, includes, rules, delegate], max_risk: elevated, max_membership_days: 180, depth_left: 1, start: 2026-10-01T00:00:00Z, end: 2027-03-30T00:00:00Z, by: "idp:2b9e-owner", parent: root, approved_by: ["idp:31ee-ingrid"]}
+  - {delegation_id: D-example-0002, delegate: "idp:91d0-bert", group: sites, powers: [members, delegate], max_risk: low, max_membership_days: 90, depth_left: 1, start: 2026-10-01T00:00:00Z, end: 2027-03-30T00:00:00Z, by: "idp:2b9e-owner", parent: root}
+  - {delegation_id: D-example-0003, delegate: "idp:44aa-dirk", group: site-wilsele, powers: [members], max_risk: low, max_membership_days: 30, depth_left: 0, start: 2026-10-10T00:00:00Z, end: 2026-12-31T00:00:00Z, by: "idp:91d0-bert", parent: D-example-0002}
+memberships:
+  - {membership_id: M-example-0001, group: office-staff, member: {anchor: "idp:91d0-bert"}, by: "idp:7c1f-ann", under: D-example-0001, start: 2026-10-02T00:00:00Z, end: 2027-03-01T00:00:00Z}
+  - {membership_id: M-example-0002, group: site-heverlee, member: {anchor: "idp:55bb-eva"}, by: "idp:91d0-bert", under: D-example-0002, start: 2026-10-05T00:00:00Z, end: 2026-12-31T00:00:00Z}
+  - {membership_id: M-example-0003, group: office-staff, member: {group: site-heverlee}, by: "idp:7c1f-ann", under: D-example-0001, approved_by: ["idp:91d0-bert"], start: 2026-10-06T00:00:00Z, end: 2027-03-01T00:00:00Z}
+  - {membership_id: M-example-0004, group: site-wilsele, member: {anchor: "idp:66cc-finn"}, by: "idp:44aa-dirk", under: D-example-0003, start: 2026-10-12T00:00:00Z, end: 2026-11-10T00:00:00Z}
+  - {membership_id: M-example-0005, group: finance, member: {anchor: "idp:77dd-gina"}, by: "idp:7c1f-ann", under: D-example-0001, start: 2026-10-03T00:00:00Z, end: 2027-03-01T00:00:00Z}
+  - {membership_id: M-example-0006, group: admins, member: {anchor: "idp:7c1f-ann"}, by: "idp:2b9e-owner", under: root, approved_by: ["op:7a1e-oscar"], start: 2026-10-01T00:00:00Z, end: 2026-12-31T00:00:00Z}
+  - {membership_id: M-example-0007, group: office-staff, member: {rule: {attribute: unit, values: [office], source: HR source, max_age_hours: 24}}, by: "idp:7c1f-ann", under: D-example-0001, start: 2026-10-07T00:00:00Z, end: 2027-03-01T00:00:00Z}
+  - {membership_id: M-example-0008, group: crisis-team, member: {anchor: "idp:77dd-gina"}, by: "idp:2b9e-owner", under: root, standby_from: high, start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0009, group: site-office, member: {anchor: "idp:7c1f-ann"}, by: "idp:2b9e-owner", under: root, approved_by: ["idp:31ee-ingrid"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0010, group: site-office, member: {anchor: "idp:55bb-eva"}, by: "idp:2b9e-owner", under: root, approved_by: ["idp:31ee-ingrid"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0011, group: site-office, member: {anchor: "idp:77dd-gina"}, by: "idp:2b9e-owner", under: root, approved_by: ["idp:31ee-ingrid"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0012, group: site-security, member: {anchor: "idp:31ee-ingrid"}, by: "idp:2b9e-owner", under: root, approved_by: ["op:7a1e-oscar"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0013, group: site-security, member: {anchor: "idp:91d0-bert"}, by: "idp:2b9e-owner", under: root, approved_by: ["idp:31ee-ingrid"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0014, group: site-security, member: {anchor: "op:7a1e-oscar"}, by: "idp:2b9e-owner", under: root, approved_by: ["idp:31ee-ingrid"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0015, group: site-security, member: {anchor: "idp:7c1f-ann"}, by: "idp:2b9e-owner", under: root, approved_by: ["idp:31ee-ingrid"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0016, group: server-admins, member: {anchor: "idp:31ee-ingrid"}, by: "idp:2b9e-owner", under: root, approved_by: ["op:7a1e-oscar"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0017, group: server-admins, member: {anchor: "idp:91d0-bert"}, by: "idp:2b9e-owner", under: root, approved_by: ["idp:31ee-ingrid"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0018, group: server-admins, member: {anchor: "op:7a1e-oscar"}, by: "idp:2b9e-owner", under: root, approved_by: ["idp:31ee-ingrid"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+  - {membership_id: M-example-0019, group: server-admins, member: {anchor: "idp:44aa-dirk"}, by: "idp:2b9e-owner", under: root, approved_by: ["idp:31ee-ingrid"], start: 2026-10-01T00:00:00Z, end: 2027-09-30T00:00:00Z}
+admin_revocations:
+  - {id: D-example-0003, at: 2026-10-20T08:00:00Z, by: "idp:91d0-bert", mode: retire, reason: "Dirk moved to the Heverlee site"}
+
+# Places and situation levels. Heverlee is the main site with the site; Wilsele
+# a second site; the Herent mast is an outpost run from Heverlee; the Herent hub a shared building with its own guard.
+places:
+  - {place_id: "place:vlaams-brabant", kind: region, within: null}
+  - {place_id: "place:heverlee", kind: site, within: "place:vlaams-brabant", hosts: [example-host-1], deputy: "idp:91d0-bert"}
+  - {place_id: "place:heverlee/main", kind: building, within: "place:heverlee"}
+  - {place_id: "place:heverlee/main/0", kind: floor, within: "place:heverlee/main"}
+  - {place_id: "place:heverlee/main/0/reception", kind: space, type: common_area, within: "place:heverlee/main/0"}
+  - {place_id: "place:heverlee/depot", kind: building, within: "place:heverlee"}
+  - {place_id: "place:wilsele", kind: site, within: "place:vlaams-brabant"}
+  - {place_id: "place:wilsele/yard", kind: space, type: yard, within: "place:wilsele"}
+  - {place_id: "place:herent-mast", kind: outpost, within: "place:vlaams-brabant", belongs_to: "place:heverlee"}
+  - {place_id: "place:herent-hub", kind: site, within: "place:vlaams-brabant", steward: "idp:ee01-guard", shared: true}
+org_units:
+  - {org_id: example, kind: tenant, parent: null, tenant: example}
+  - {org_id: office, kind: org_site, parent: example, tenant: example, occupies: ["place:heverlee/main"]}
+  - {org_id: site-crews, kind: org_site, parent: example, tenant: example, occupies: ["place:heverlee/depot", "place:wilsele"]}
+  - {org_id: herent-desk, kind: org_site, parent: example, tenant: example, occupies: ["place:herent-hub"]}
+situation_feeds:
+  - {feed: regional-threat, max_level: high, note: "the national threat level for the region, mapped in rule data"}
+situations:
+  - {situation_id: S-example-0001, level: elevated, scope: {kind: tenant}, source: "feed:regional-threat", by: "feed:regional-threat", at: 2026-10-18T09:00:00Z, issued_at: 2026-10-18T08:55:00Z, nonce: "rt-20261018-1", reason: "regional level raised"}
+  - {situation_id: S-example-0002, level: high, scope: {kind: tenant}, source: officer, by: "idp:31ee-ingrid", at: 2026-10-19T07:00:00Z, review_by: 2026-10-26T07:00:00Z, reason: "credible threat to construction sites in the region"}
+  - {situation_id: S-example-0003, level: high, scope: {kind: tenant}, source: officer, by: "idp:91d0-bert", at: 2026-10-19T08:00:00Z, reason: "on-call confirmation"}
+  - {situation_id: S-example-0004, level: elevated, scope: {kind: tenant}, source: officer, by: "idp:31ee-ingrid", approved_by: ["idp:2b9e-owner"], at: 2026-10-21T10:00:00Z, review_by: 2026-11-04T10:00:00Z, reason: "threat assessed as lower"}
+  - {situation_id: S-example-0005, level: high, scope: {kind: place, id: "place:wilsele"}, source: officer, by: "idp:31ee-ingrid", approved_by: ["idp:2b9e-owner"], at: 2026-10-21T12:00:00Z, review_by: 2026-10-28T12:00:00Z, reason: "break-in at the Wilsele yard"}
+  - {situation_id: S-example-0006, level: severe, scope: {kind: tenant}, source: officer, by: "idp:31ee-ingrid", at: 2026-10-23T09:00:00Z, exercise: true, reason: "yearly drill"}
+surge_packages:
+  - {package_id: SP-example-0001, groups: [site-heverlee], level_min: high, cap: 5, coordinator: "idp:91d0-bert", place: "place:heverlee", approved_by: ["idp:2b9e-owner", "idp:31ee-ingrid"], prepared_at: 2026-10-01T00:00:00Z, description: "temporary guards and extra crew on the Heverlee site"}
+surge_grants:
+  - {surge_id: SG-example-0001, package_id: SP-example-0001, anchor: "idp:bb11-kai", by: "idp:91d0-bert", at: 2026-10-19T10:00:00Z, end: 2026-10-21T10:00:00Z}

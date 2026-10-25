@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keyclerk.dev/schemas/trust-input-v1.json",
+  "title": "keyclerk-trust-input-v1",
+  "description": "The trust KeyClerk's risk port takes per person, shaped on FTEF 5.3 to 6.8: proof trust per claim with its freshness, the person's risk band, the situation level and risk acceptances. Standalone KeyClerk fills it from its own proof results; inside a larger platform the platform's risk and trust ports fill it. inputs carries the digests of the records and the policy used, so an evaluation can be replayed (FTEF 6.7).",
+  "type": "object",
+  "required": [
+    "anchor",
+    "source",
+    "proof",
+    "risk_band",
+    "situation_level",
+    "acceptances",
+    "inputs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "anchor": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "description": "what filled it: keyclerk itself, or the name of the platform's risk and trust port"
+    },
+    "proof": {
+      "type": "object",
+      "description": "per claim (identity, likeness, affiliation, qualification, undertaking): the evidenced band, the method and its freshness",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "band",
+          "method",
+          "valid_until"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "band": {
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "method": {
+            "type": "string"
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "risk_band": {
+      "enum": [
+        "green",
+        "amber",
+        "red",
+        "black"
+      ],
+      "description": "the person's band from the risk feed (adaptive-policy.yaml); red and black only narrow"
+    },
+    "situation_level": {
+      "type": "string",
+      "description": "one of risk_port.rule_data.situation_levels"
+    },
+    "acceptances": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "acceptance_id",
+          "claim",
+          "granted_band",
+          "decided_at",
+          "until",
+          "decided_by",
+          "situation_level",
+          "residual",
+          "limits"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "acceptance_id": {
+            "type": "string"
+          },
+          "claim": {
+            "type": "string"
+          },
+          "granted_band": {
+            "enum": [
+              "low",
+              "medium"
+            ],
+            "description": "never high (FTEF 5.5)"
+          },
+          "requested": {
+            "type": "object",
+            "description": "what was asked, when the decider granted less (FTEF 6.3)"
+          },
+          "decided_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "situation_level": {
+            "type": "string"
+          },
+          "residual": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "decision": {
+            "type": "string",
+            "description": "the signed decision object (FTEF 6.6), by reference"
+          },
+          "lapsed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lapse_reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "digests of the records and the policy used (FTEF 6.7)"
+    }
+  }
+}

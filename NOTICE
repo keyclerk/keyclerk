@@ -1,0 +1,8 @@
+KeyClerk
+Copyright 2026 VDHome and the KeyClerk contributors
+
+Licensed under the European Union Public Licence, version 1.2 or later (EUPL-1.2), the text of which is in LICENSE.
+Each file states its licence with an SPDX identifier, or is covered by REUSE.toml.
+
+Third-party code shipped with KeyClerk keeps its own licence: keyclerk/ui/vendor/cytoscape.min.js (MIT, see
+keyclerk/ui/vendor/cytoscape.LICENSE).

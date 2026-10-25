@@ -1,0 +1,10 @@
+{
+ "cytoscape.min.js": {
+  "package": "cytoscape",
+  "version": "3.30.2",
+  "licence": "MIT",
+  "from": "https://registry.npmjs.org/cytoscape/-/cytoscape-3.30.2.tgz (package/dist/cytoscape.min.js)",
+  "npm_integrity": "sha512-oICxQsjW8uSaRmn4UK/jkczKOqTrVqt5/1WL0POiJUT2EKNc9STM4hYFHv917yu55aTBMFNRzymlJhVAiWPCxw==",
+  "sha256": "83e8c54a6bec655bfd81df07df605649c268af69aeca67a5ea2da54ea42dac81"
+ }
+}

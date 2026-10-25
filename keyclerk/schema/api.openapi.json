@@ -1,0 +1,8221 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "KeyClerk API",
+  "version": "1",
+  "description": "Everything a KeyClerk front end can see and do. Reads are views over the records, filtered by who asks; writes are change requests that the engine applies, holds for a second key, or refuses with reasons. A browser session (cookie) sends the CSRF token from /me in the X-KeyClerk-CSRF header on every POST; a front end with its own broker client sends a bearer token from an allowed client. Errors share one shape."
+ },
+ "servers": [
+  {
+   "url": "/api/v1"
+  }
+ ],
+ "components": {
+  "schemas": {
+   "Error": {
+    "type": "object",
+    "required": [
+     "error"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "error": {
+      "type": "object",
+      "required": [
+       "code",
+       "message"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "code": {
+        "enum": [
+         "unauthenticated",
+         "forbidden",
+         "not_found",
+         "refused",
+         "invalid",
+         "busy",
+         "too_large",
+         "unsupported_media",
+         "csrf",
+         "not_allowed",
+         "rate_limited",
+         "internal"
+        ],
+        "x-meanings": {
+         "unauthenticated": "not signed in, or the bearer token is not valid here",
+         "forbidden": "signed in, but this view or action is not yours",
+         "not_found": "no such call, group, person or change",
+         "refused": "the desk or the engine said no; the message says why",
+         "invalid": "the request does not match the contract",
+         "busy": "every worker is busy; try again shortly",
+         "too_large": "the body is above 64 KiB",
+         "unsupported_media": "send application/json",
+         "csrf": "a browser session must send X-KeyClerk-CSRF from /me, from this site",
+         "not_allowed": "this method is not offered on this path",
+         "rate_limited": "too many requests from one person: 30 changes in 10 minutes, 4 requests at once",
+         "internal": "a fault on the server; nothing was changed by it"
+        }
+       },
+       "message": {
+        "type": "string",
+        "maxLength": 300
+       },
+       "next": {
+        "type": "array",
+        "maxItems": 10,
+        "description": "what would complete the intent: why, what to do, who can do it",
+        "items": {
+         "type": "object",
+         "required": [
+          "why",
+          "do",
+          "who"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "why": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "do": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "who": {
+           "type": "array",
+           "maxItems": 50,
+           "items": {
+            "type": "object",
+            "required": [
+             "anchor",
+             "name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+             "anchor": {
+              "type": "string",
+              "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+             },
+             "name": {
+              "anyOf": [
+               {
+                "type": "string",
+                "maxLength": 300
+               },
+               {
+                "type": "null"
+               }
+              ]
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "Entitlement": {
+    "type": "object",
+    "required": [
+     "entitlement",
+     "via"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "entitlement": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "via": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     }
+    }
+   },
+   "Delegation": {
+    "type": "object",
+    "required": [
+     "approved_by",
+     "by",
+     "by_name",
+     "can_end",
+     "chain",
+     "delegate",
+     "delegate_name",
+     "delegation_id",
+     "depth_left",
+     "end",
+     "grace_until",
+     "group",
+     "impact",
+     "max_membership_days",
+     "max_risk",
+     "parent",
+     "place",
+     "powers",
+     "start",
+     "status"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "delegation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "delegate": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "delegate_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "group": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "powers": {
+      "type": "array",
+      "items": {
+       "enum": [
+        "delegate",
+        "includes",
+        "members",
+        "rules",
+        "subgroups"
+       ]
+      },
+      "maxItems": 5
+     },
+     "max_risk": {
+      "enum": [
+       "low",
+       "elevated",
+       "privileged"
+      ]
+     },
+     "max_membership_days": {
+      "type": "integer"
+     },
+     "depth_left": {
+      "type": "integer"
+     },
+     "place": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "start": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "end": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "by": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "by_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "parent": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "approved_by": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     },
+     "status": {
+      "enum": [
+       "ok",
+       "grace",
+       "dead"
+      ]
+     },
+     "grace_until": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "chain": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     },
+     "can_end": {
+      "type": "boolean"
+     },
+     "impact": {
+      "type": "object",
+      "required": [
+       "delegations",
+       "memberships"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "delegations": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "maxItems": 10000
+       },
+       "memberships": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "maxItems": 10000
+       }
+      }
+     }
+    }
+   },
+   "Me": {
+    "type": "object",
+    "required": [
+     "account_url",
+     "anchor",
+     "approval_sign_in",
+     "csrf",
+     "delegations",
+     "entitlements",
+     "guests_waiting",
+     "kind",
+     "manages",
+     "name",
+     "person",
+     "realm",
+     "revision",
+     "roles",
+     "root",
+     "viewer",
+     "waiting_for_me"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "anchor": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "person": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "kind": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "roles": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 64
+     },
+     "viewer": {
+      "type": "boolean"
+     },
+     "root": {
+      "type": "boolean"
+     },
+     "realm": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "revision": {
+      "type": "integer"
+     },
+     "delegations": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Delegation"
+      },
+      "maxItems": 10000
+     },
+     "manages": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "group",
+        "powers"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "group": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "powers": {
+         "type": "array",
+         "items": {
+          "enum": [
+           "delegate",
+           "includes",
+           "members",
+           "rules",
+           "subgroups"
+          ]
+         },
+         "maxItems": 5
+        }
+       }
+      },
+      "maxItems": 10000
+     },
+     "entitlements": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Entitlement"
+      },
+      "maxItems": 10000
+     },
+     "waiting_for_me": {
+      "type": "integer"
+     },
+     "guests_waiting": {
+      "type": "integer",
+      "description": "arrived guests you host or organise and still have to acknowledge or confirm"
+     },
+     "csrf": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "approval_sign_in": {
+      "type": "boolean",
+      "description": "true: approving means signing in again at the broker (decision 0006)"
+     },
+     "account_url": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^https?://",
+        "maxLength": 2048,
+        "description": "where a person manages how they sign in, such as registering a passkey"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    }
+   },
+   "Person": {
+    "type": "object",
+    "required": [
+     "anchor",
+     "kind",
+     "person"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "anchor": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "person": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "kind": {
+      "enum": [
+       "tenant",
+       "external",
+       "agent"
+      ]
+     }
+    }
+   },
+   "PersonAccess": {
+    "type": "object",
+    "required": [
+     "anchor",
+     "delegations",
+     "entitlements",
+     "groups",
+     "kind",
+     "person"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "anchor": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "person": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "kind": {
+      "enum": [
+       "tenant",
+       "external",
+       "agent"
+      ]
+     },
+     "groups": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "group",
+        "paths"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "group": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "paths": {
+         "type": "array",
+         "items": {
+          "type": "array",
+          "items": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "maxItems": 10000
+         },
+         "maxItems": 10000
+        }
+       }
+      },
+      "maxItems": 10000
+     },
+     "entitlements": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Entitlement"
+      },
+      "maxItems": 10000
+     },
+     "delegations": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Delegation"
+      },
+      "maxItems": 10000
+     }
+    }
+   },
+   "GraphNode": {
+    "type": "object",
+    "required": [
+     "id",
+     "kind",
+     "label"
+    ],
+    "additionalProperties": true,
+    "properties": {
+     "id": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "kind": {
+      "enum": [
+       "subject",
+       "account",
+       "person",
+       "group",
+       "scope",
+       "place"
+      ],
+      "description": "subject: the person asked about; account: one of their anchors, with its identity source; scope: a top part of the group tree, drawn as a box"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 300
+     }
+    }
+   },
+   "GraphEdge": {
+    "type": "object",
+    "required": [
+     "from",
+     "id",
+     "kind",
+     "label",
+     "source",
+     "status",
+     "target",
+     "to"
+    ],
+    "additionalProperties": true,
+    "properties": {
+     "id": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "kind": {
+      "type": "string",
+      "maxLength": 40,
+      "description": "account, member, added, approved, manages, delegated, approver, steward, deputy, front_office, lease, sponsor, within"
+     },
+     "source": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "target": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "from": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "to": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "status": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    }
+   },
+   "TreeNode": {
+    "type": "object",
+    "required": [
+     "id",
+     "kind",
+     "label",
+     "parent",
+     "status"
+    ],
+    "additionalProperties": true,
+    "properties": {
+     "id": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "kind": {
+      "enum": [
+       "root",
+       "delegation"
+      ],
+      "description": "root: the root holder at the moment"
+     },
+     "label": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "parent": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "status": {
+      "type": "string",
+      "maxLength": 20,
+      "description": "pending, active, grace, ended, revoked, or dead (a link above it broke)"
+     }
+    }
+   },
+   "DelegationTree": {
+    "type": "object",
+    "required": [
+     "at",
+     "edges",
+     "held",
+     "marks",
+     "nodes",
+     "whole"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "nodes": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/TreeNode"
+      },
+      "maxItems": 5000
+     },
+     "edges": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "id",
+        "source",
+        "status",
+        "target"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "id": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "source": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "target": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "status": {
+         "type": "string",
+         "maxLength": 300
+        }
+       }
+      },
+      "maxItems": 5000
+     },
+     "marks": {
+      "type": "object",
+      "required": [
+       "after",
+       "before"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "before": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "format": "date-time"
+        },
+        "maxItems": 20
+       },
+       "after": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "format": "date-time"
+        },
+        "maxItems": 20
+       }
+      },
+      "description": "the moments just before and after `at` where a delegation starts or stops"
+     },
+     "whole": {
+      "type": "boolean",
+      "description": "true for a viewer or the root: the whole tree"
+     },
+     "held": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000,
+      "description": "the delegations you hold or held, in the tree"
+     }
+    }
+   },
+   "VisitSummary": {
+    "type": "object",
+    "required": [
+     "closes",
+     "end",
+     "host",
+     "host_name",
+     "opens",
+     "organiser",
+     "organiser_name",
+     "parties",
+     "place",
+     "place_name",
+     "purpose",
+     "start",
+     "suspended",
+     "unregistered",
+     "vehicles",
+     "visit_id",
+     "waiting_for_me",
+     "when"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "place": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "place_name": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "host": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "host_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "organiser": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "organiser_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "purpose": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "start": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "end": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "opens": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "closes": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "when": {
+      "enum": [
+       "upcoming",
+       "open",
+       "closed"
+      ]
+     },
+     "parties": {
+      "type": "integer"
+     },
+     "unregistered": {
+      "type": "integer"
+     },
+     "vehicles": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "maxLength": 300
+      },
+      "maxItems": 4
+     },
+     "suspended": {
+      "type": "integer"
+     },
+     "waiting_for_me": {
+      "type": "integer",
+      "description": "arrived guests you still have to acknowledge or confirm"
+     }
+    }
+   },
+   "VisitDetail": {
+    "type": "object",
+    "required": [
+     "at",
+     "parties",
+     "timeline",
+     "visit_id",
+     "zones"
+    ],
+    "additionalProperties": true,
+    "properties": {
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "zones": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10
+     },
+     "parties": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "actions",
+        "arrived",
+        "gate",
+        "name",
+        "party",
+        "registered",
+        "role"
+       ],
+       "additionalProperties": true,
+       "properties": {
+        "party": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "role": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "registered": {
+         "type": "boolean"
+        },
+        "name": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "arrived": {
+         "anyOf": [
+          {
+           "type": "string",
+           "format": "date-time"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "gate": {
+         "type": "object",
+         "description": "what the entry policy says now"
+        },
+        "actions": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "maxLength": 300
+         },
+         "maxItems": 4,
+         "description": "what you may record for this party now"
+        }
+       }
+      },
+      "maxItems": 12
+     },
+     "timeline": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "at",
+        "kind",
+        "text"
+       ],
+       "additionalProperties": true,
+       "properties": {
+        "at": {
+         "type": "string",
+         "format": "date-time"
+        },
+        "kind": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "text": {
+         "type": "string",
+         "maxLength": 300
+        }
+       }
+      },
+      "maxItems": 500,
+      "description": "the window, what happened and the timer steps ahead (each re-checks its reason)"
+     }
+    }
+   },
+   "PersonGraph": {
+    "type": "object",
+    "required": [
+     "at",
+     "edges",
+     "marks",
+     "nodes",
+     "realm_sources",
+     "subject"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "subject": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "nodes": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/GraphNode"
+      },
+      "maxItems": 2000
+     },
+     "edges": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/GraphEdge"
+      },
+      "maxItems": 5000
+     },
+     "marks": {
+      "type": "object",
+      "required": [
+       "after",
+       "before"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "before": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "format": "date-time"
+        },
+        "maxItems": 20
+       },
+       "after": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "format": "date-time"
+        },
+        "maxItems": 20
+       }
+      },
+      "description": "the moments just before and after `at` where something in the graph starts or ends"
+     },
+     "realm_sources": {
+      "anyOf": [
+       {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "required": [
+          "accounts",
+          "id",
+          "kind",
+          "name",
+          "persons"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "id": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "name": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "kind": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "persons": {
+           "type": "integer"
+          },
+          "accounts": {
+           "type": "integer"
+          }
+         }
+        },
+        "maxItems": 100,
+        "description": "for a viewer or the root: the identity sources the realm's people come through"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    }
+   },
+   "Group": {
+    "type": "object",
+    "required": [
+     "carries",
+     "depth",
+     "description",
+     "effective_risk",
+     "group_id",
+     "max_risk",
+     "members",
+     "my_powers",
+     "parent",
+     "place"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "group_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "parent": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "depth": {
+      "type": "integer"
+     },
+     "max_risk": {
+      "enum": [
+       "low",
+       "elevated",
+       "privileged"
+      ]
+     },
+     "effective_risk": {
+      "enum": [
+       "low",
+       "elevated",
+       "privileged"
+      ]
+     },
+     "place": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "description": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "carries": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     },
+     "members": {
+      "type": "integer"
+     },
+     "my_powers": {
+      "type": "array",
+      "items": {
+       "enum": [
+        "delegate",
+        "includes",
+        "members",
+        "rules",
+        "subgroups"
+       ]
+      },
+      "maxItems": 5
+     }
+    }
+   },
+   "Membership": {
+    "type": "object",
+    "required": [
+     "approved_by",
+     "by",
+     "by_name",
+     "can_end",
+     "chain",
+     "end",
+     "kind",
+     "member",
+     "member_name",
+     "membership_id",
+     "start",
+     "status",
+     "under"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "membership_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "kind": {
+      "enum": [
+       "anchor",
+       "group",
+       "rule"
+      ]
+     },
+     "member": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "member_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "by": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "by_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "under": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "chain": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     },
+     "approved_by": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     },
+     "start": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "end": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "status": {
+      "enum": [
+       "active",
+       "pending",
+       "ended",
+       "revoked",
+       "void",
+       "lapsed",
+       "invalid",
+       "standby"
+      ]
+     },
+     "can_end": {
+      "type": "boolean"
+     }
+    }
+   },
+   "Manager": {
+    "type": "object",
+    "required": [
+     "anchor",
+     "chain",
+     "delegation_id",
+     "name",
+     "over",
+     "powers",
+     "status"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "anchor": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "delegation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "over": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "powers": {
+      "type": "array",
+      "items": {
+       "enum": [
+        "delegate",
+        "includes",
+        "members",
+        "rules",
+        "subgroups"
+       ]
+      },
+      "maxItems": 5
+     },
+     "status": {
+      "enum": [
+       "ok",
+       "grace",
+       "dead"
+      ]
+     },
+     "chain": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     }
+    }
+   },
+   "GroupDetail": {
+    "type": "object",
+    "required": [
+     "ancestors",
+     "carries",
+     "children",
+     "description",
+     "effective_members",
+     "effective_risk",
+     "group_id",
+     "included_by",
+     "managers",
+     "max_risk",
+     "memberships",
+     "my_powers",
+     "parent",
+     "place"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "group_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "parent": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "ancestors": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     },
+     "children": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     },
+     "max_risk": {
+      "enum": [
+       "low",
+       "elevated",
+       "privileged"
+      ]
+     },
+     "effective_risk": {
+      "enum": [
+       "low",
+       "elevated",
+       "privileged"
+      ]
+     },
+     "place": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "description": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "carries": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     },
+     "included_by": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10000
+     },
+     "memberships": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Membership"
+      },
+      "maxItems": 10000
+     },
+     "effective_members": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "anchor",
+        "in_broker",
+        "name",
+        "paths"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "anchor": {
+         "type": "string",
+         "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "name": {
+         "anyOf": [
+          {
+           "type": "string",
+           "maxLength": 300
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "paths": {
+         "type": "array",
+         "items": {
+          "type": "array",
+          "items": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "maxItems": 10000
+         },
+         "maxItems": 10000
+        },
+        "in_broker": {
+         "anyOf": [
+          {
+           "type": "boolean"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        }
+       }
+      },
+      "maxItems": 10000
+     },
+     "managers": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/Manager"
+      },
+      "maxItems": 10000
+     },
+     "my_powers": {
+      "type": "array",
+      "items": {
+       "enum": [
+        "delegate",
+        "includes",
+        "members",
+        "rules",
+        "subgroups"
+       ]
+      },
+      "maxItems": 5
+     }
+    }
+   },
+   "PendingChange": {
+    "type": "object",
+    "required": [
+     "action",
+     "actor",
+     "actor_name",
+     "approval_names",
+     "approvals",
+     "at",
+     "can_approve",
+     "can_sign",
+     "can_withdraw",
+     "change_id",
+     "expired",
+     "needs",
+     "reasons",
+     "summary",
+     "waiting_for",
+     "what"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "change_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "summary": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "action": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "actor": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "actor_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "reasons": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "maxLength": 300
+      },
+      "maxItems": 50
+     },
+     "expired": {
+      "type": "boolean"
+     },
+     "approvals": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 20
+     },
+     "needs": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "maxLength": 300
+      },
+      "maxItems": 5,
+      "description": "what it waits for, in plain words"
+     },
+     "waiting_for": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "anchor",
+        "name"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "anchor": {
+         "type": "string",
+         "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "name": {
+         "anyOf": [
+          {
+           "type": "string",
+           "maxLength": 300
+          },
+          {
+           "type": "null"
+          }
+         ]
+        }
+       }
+      },
+      "maxItems": 50,
+      "description": "who could add the key it still needs"
+     },
+     "can_approve": {
+      "type": "boolean"
+     },
+     "can_withdraw": {
+      "type": "boolean"
+     },
+     "can_sign": {
+      "type": "boolean"
+     },
+     "what": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/ChangeLine"
+      },
+      "maxItems": 20,
+      "description": "what it changes, one line per record: check it before you sign"
+     },
+     "approval_names": {
+      "type": "array",
+      "items": {
+       "anyOf": [
+        {
+         "type": "string",
+         "maxLength": 300
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "maxItems": 20
+     }
+    }
+   },
+   "ChangeLine": {
+    "type": "object",
+    "required": [
+     "detail",
+     "end",
+     "group",
+     "kind",
+     "member",
+     "member_name",
+     "risk",
+     "start",
+     "under"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "kind": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "group": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "risk": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "member": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "member_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "start": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "end": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "detail": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "under": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "the delegation chain it is made under, up to the root"
+     }
+    }
+   },
+   "LogEntry": {
+    "type": "object",
+    "required": [
+     "seq",
+     "at",
+     "outcome",
+     "sha256",
+     "prev"
+    ],
+    "properties": {
+     "seq": {
+      "type": "integer"
+     },
+     "at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "outcome": {
+      "enum": [
+       "applied",
+       "pending",
+       "refused",
+       "withdrawn",
+       "recovered"
+      ]
+     },
+     "sha256": {
+      "type": "string"
+     },
+     "prev": {
+      "type": "string"
+     },
+     "action": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "what was asked"
+     },
+     "summary": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "actor": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "actor_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "approved_by": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "approver_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 300
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "reasons": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "maxLength": 300
+      },
+      "maxItems": 50
+     },
+     "revision": {
+      "type": "integer"
+     },
+     "change_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "additionalProperties": true
+   },
+   "Changes": {
+    "type": "object",
+    "required": [
+     "log",
+     "pending"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "pending": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/PendingChange"
+      },
+      "maxItems": 10000
+     },
+     "log": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/LogEntry"
+      },
+      "maxItems": 10000
+     }
+    }
+   },
+   "PersonKey": {
+    "type": "object",
+    "required": [
+     "active",
+     "at",
+     "credential_id",
+     "key_id",
+     "public_key",
+     "ssh_key"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "public_key": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "ssh_key": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 900
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "credential_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 400
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "active": {
+      "type": "boolean"
+     }
+    }
+   },
+   "RelayItem": {
+    "type": "object",
+    "required": [
+     "created",
+     "edge",
+     "expires",
+     "key_id",
+     "purpose",
+     "relay_id",
+     "taken"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "relay_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "edge": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "purpose": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "created": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "expires": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "taken": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    }
+   },
+   "RelayTaken": {
+    "type": "object",
+    "required": [
+     "envelope",
+     "key_id",
+     "purpose",
+     "relay_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "relay_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "purpose": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "envelope": {
+      "type": "object",
+      "required": [
+       "context",
+       "ct",
+       "epk",
+       "format",
+       "nonce"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "format": {
+        "const": "kc-relay-v1"
+       },
+       "epk": {
+        "type": "string",
+        "maxLength": 300
+       },
+       "nonce": {
+        "type": "string",
+        "maxLength": 300
+       },
+       "ct": {
+        "type": "string",
+        "maxLength": 8192
+       },
+       "context": {
+        "type": "string",
+        "maxLength": 300
+       }
+      },
+      "description": "X25519 + HKDF-SHA256 + AES-256-GCM to your person key (keyclerk/relay.py)"
+     }
+    }
+   },
+   "SignedCeiling": {
+    "type": "object",
+    "required": [
+     "ceiling"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "ceiling": {
+      "type": "object",
+      "required": [
+       "bytes",
+       "key",
+       "key_id",
+       "signature"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "bytes": {
+        "type": "string",
+        "maxLength": 65536
+       },
+       "signature": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{128}$"
+       },
+       "key": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+       },
+       "key_id": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{16}$"
+       }
+      },
+      "description": "kc-edge-ceiling-v2: the ceiling sealed by the officer (python -m keyclerk.edge_cli seal); the bundle carries these bytes as they are (amendment 0014d)"
+     }
+    }
+   },
+   "ChangeResult": {
+    "type": "object",
+    "required": [
+     "change_id",
+     "outcome",
+     "reasons",
+     "records",
+     "revision",
+     "summary"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "change_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "outcome": {
+      "enum": [
+       "applied",
+       "pending",
+       "refused",
+       "withdrawn"
+      ]
+     },
+     "summary": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "reasons": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "maxLength": 300
+      },
+      "maxItems": 50
+     },
+     "records": {
+      "type": "object"
+     },
+     "revision": {
+      "type": "integer"
+     },
+     "next": {
+      "type": "array",
+      "maxItems": 10,
+      "description": "what would complete the intent: why, what to do, who can do it",
+      "items": {
+       "type": "object",
+       "required": [
+        "why",
+        "do",
+        "who"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "why": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "do": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "who": {
+         "type": "array",
+         "maxItems": 50,
+         "items": {
+          "type": "object",
+          "required": [
+           "anchor",
+           "name"
+          ],
+          "additionalProperties": false,
+          "properties": {
+           "anchor": {
+            "type": "string",
+            "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+           },
+           "name": {
+            "anyOf": [
+             {
+              "type": "string",
+              "maxLength": 300
+             },
+             {
+              "type": "null"
+             }
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "SignIn": {
+    "type": "object",
+    "required": [
+     "redirect"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "redirect": {
+      "type": "string",
+      "pattern": "^https?://",
+      "maxLength": 4096,
+      "description": "go here to sign in and approve"
+     }
+    }
+   },
+   "Statement": {
+    "type": "object",
+    "required": [
+     "by",
+     "change_id",
+     "nonce",
+     "purpose",
+     "records",
+     "required",
+     "summary"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "change_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "nonce": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "the OIDC nonce to sign in with"
+     },
+     "summary": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "records": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 20
+     },
+     "by": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "required": {
+      "type": "boolean",
+      "description": "whether this desk accepts an approval only with a proof"
+     },
+     "purpose": {
+      "enum": [
+       "approval",
+       "proposal"
+      ],
+      "description": "approval, or proposal: the proposer signs their own high-risk change (decision 0015)"
+     }
+    }
+   },
+   "PhoneLink": {
+    "type": "object",
+    "required": [
+     "change_id",
+     "expires_at",
+     "qr",
+     "url"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "change_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+     },
+     "url": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "open it on the other device"
+     },
+     "qr": {
+      "type": "string",
+      "pattern": "^/approve-qr/",
+      "maxLength": 2048,
+      "description": "the same link as a QR image, on this desk"
+     },
+     "expires_at": {
+      "type": "string",
+      "format": "date-time"
+     }
+    }
+   },
+   "ApproveRequest": {
+    "type": "object",
+    "required": [],
+    "additionalProperties": false,
+    "properties": {
+     "proof": {
+      "type": "string",
+      "maxLength": 16384,
+      "description": "the ID token the broker issued after a fresh sign-in with the statement's nonce"
+     }
+    }
+   },
+   "Preview": {
+    "type": "object",
+    "required": [
+     "next",
+     "outcome",
+     "reasons",
+     "records",
+     "revision",
+     "summary"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "enum": [
+       "applied",
+       "pending",
+       "refused"
+      ]
+     },
+     "summary": {
+      "type": "string",
+      "maxLength": 300
+     },
+     "reasons": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "maxLength": 300
+      },
+      "maxItems": 50
+     },
+     "records": {
+      "type": "object"
+     },
+     "revision": {
+      "type": "integer"
+     },
+     "next": {
+      "type": "array",
+      "maxItems": 10,
+      "description": "what would complete the intent: why, what to do, who can do it",
+      "items": {
+       "type": "object",
+       "required": [
+        "why",
+        "do",
+        "who"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "why": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "do": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "who": {
+         "type": "array",
+         "maxItems": 50,
+         "items": {
+          "type": "object",
+          "required": [
+           "anchor",
+           "name"
+          ],
+          "additionalProperties": false,
+          "properties": {
+           "anchor": {
+            "type": "string",
+            "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+           },
+           "name": {
+            "anyOf": [
+             {
+              "type": "string",
+              "maxLength": 300
+             },
+             {
+              "type": "null"
+             }
+            ]
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "Broker": {
+    "type": "object",
+    "required": [
+     "log_intact",
+     "manual_changes",
+     "observed",
+     "revision",
+     "runs"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "revision": {
+      "type": "integer"
+     },
+     "observed": {
+      "type": "integer"
+     },
+     "runs": {
+      "type": "array",
+      "items": {
+       "type": "object"
+      },
+      "maxItems": 20
+     },
+     "log_intact": {
+      "type": "boolean"
+     },
+     "manual_changes": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "at",
+        "by",
+        "client",
+        "group",
+        "member",
+        "member_name"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "at": {
+         "anyOf": [
+          {
+           "type": "string",
+           "maxLength": 300
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "group": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "member": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "member_name": {
+         "anyOf": [
+          {
+           "type": "string",
+           "maxLength": 300
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "by": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "client": {
+         "type": "string",
+         "maxLength": 300
+        }
+       }
+      },
+      "maxItems": 50
+     }
+    }
+   },
+   "Request_add_member": {
+    "type": "object",
+    "required": [
+     "action",
+     "anchor",
+     "group"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "add_member"
+     },
+     "group": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the group to add to (you need the members power over it)"
+     },
+     "anchor": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the person, by anchor"
+     },
+     "days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650,
+      "description": "how long; at most what your delegation allows"
+     }
+    },
+    "description": "Add a person to a group"
+   },
+   "Request_include_group": {
+    "type": "object",
+    "required": [
+     "action",
+     "group",
+     "include"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "include_group"
+     },
+     "group": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the group that includes (the includes power)"
+     },
+     "include": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the group whose members join it; its manager's key may be needed"
+     },
+     "days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650,
+      "description": "how long"
+     }
+    },
+    "description": "Nest a group in another"
+   },
+   "Request_end_membership": {
+    "type": "object",
+    "required": [
+     "action",
+     "membership_id",
+     "reason"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "end_membership"
+     },
+     "membership_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the membership to end"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "why; kept in the records (3 characters or more)"
+     }
+    },
+    "description": "End a membership or a nesting"
+   },
+   "Request_create_group": {
+    "type": "object",
+    "required": [
+     "action",
+     "group_id",
+     "parent"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "create_group"
+     },
+     "parent": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the group to create it under (the subgroups power)"
+     },
+     "group_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+      "description": "lower case letters, digits and dashes"
+     },
+     "max_risk": {
+      "enum": [
+       "low",
+       "elevated",
+       "privileged"
+      ],
+      "description": "its class; not above your delegation's"
+     },
+     "description": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "one line"
+     }
+    },
+    "description": "Create a subgroup"
+   },
+   "Request_delegate": {
+    "type": "object",
+    "required": [
+     "action",
+     "delegate",
+     "group",
+     "powers"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "delegate"
+     },
+     "group": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the subtree you hand on (the delegate power)"
+     },
+     "delegate": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "who receives it"
+     },
+     "powers": {
+      "type": "array",
+      "items": {
+       "enum": [
+        "delegate",
+        "includes",
+        "members",
+        "rules",
+        "subgroups"
+       ]
+      },
+      "minItems": 1,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "description": "a subset of your own powers"
+     },
+     "max_risk": {
+      "enum": [
+       "low",
+       "elevated",
+       "privileged"
+      ],
+      "description": "the highest class they may act on; not above yours"
+     },
+     "max_membership_days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650,
+      "description": "the longest membership they may grant"
+     },
+     "depth_left": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "description": "how many times they may delegate again"
+     },
+     "days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650,
+      "description": "how long the delegation lasts"
+     }
+    },
+    "description": "Delegate part of what you hold"
+   },
+   "Request_end_delegation": {
+    "type": "object",
+    "required": [
+     "action",
+     "delegation_id",
+     "reason"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "end_delegation"
+     },
+     "delegation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the delegation to end"
+     },
+     "mode": {
+      "enum": [
+       "retire",
+       "revoke"
+      ],
+      "description": "retire: orderly, with a grace period; revoke: for cause"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "why; kept in the records"
+     }
+    },
+    "description": "End a delegation"
+   },
+   "Request_appoint_approver": {
+    "type": "object",
+    "required": [
+     "action",
+     "anchor",
+     "reason"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "appoint_approver"
+     },
+     "anchor": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "who may give second keys"
+     },
+     "days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3650,
+      "description": "how long; at most the configured maximum"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "why; kept in the records"
+     }
+    },
+    "description": "Appoint a named approver (the root; waits for the security officer's key)"
+   },
+   "Request_end_approver": {
+    "type": "object",
+    "required": [
+     "action",
+     "approver_id",
+     "reason"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "end_approver"
+     },
+     "approver_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the appointment to end"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "why; kept in the records"
+     }
+    },
+    "description": "End a named approver's appointment (the root or the security officer)"
+   },
+   "Request_register_visit": {
+    "type": "object",
+    "required": [
+     "action",
+     "attendees",
+     "end",
+     "place",
+     "purpose",
+     "start"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "register_visit"
+     },
+     "place": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the place visited (a site or a place within one)"
+     },
+     "host": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "who receives the guest, someone of the tenant; you when absent"
+     },
+     "organiser": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "who organised it; you when absent"
+     },
+     "purpose": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "one line"
+     },
+     "start": {
+      "type": "string",
+      "format": "date-time",
+      "description": "the meeting starts"
+     },
+     "end": {
+      "type": "string",
+      "format": "date-time",
+      "description": "the meeting ends; the visit opens and closes around it by policy"
+     },
+     "zones": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10,
+      "description": "zones asked for (a Restricted zone needs a RESTRICTED badge)"
+     },
+     "escorts": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 20,
+      "description": "staff who accompany guests that may not walk unescorted"
+     },
+     "delegation": {
+      "type": "object",
+      "required": [
+       "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "name": {
+        "type": "string",
+        "maxLength": 80
+       },
+       "organisation": {
+        "type": "string",
+        "maxLength": 80
+       },
+       "contact": {
+        "type": "string",
+        "maxLength": 120
+       }
+      },
+      "description": "optional: the group they come as"
+     },
+     "attendees": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [],
+       "additionalProperties": false,
+       "properties": {
+        "anchor": {
+         "type": "string",
+         "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+         "description": "a registered person"
+        },
+        "name": {
+         "type": "string",
+         "maxLength": 80,
+         "description": "someone invited by name, not registered yet"
+        },
+        "unregistered": {
+         "type": "boolean",
+         "description": "a companion without identity, with a label"
+        },
+        "label": {
+         "type": "string",
+         "maxLength": 60
+        },
+        "organisation": {
+         "type": "string",
+         "maxLength": 80
+        },
+        "expected": {
+         "type": "string",
+         "format": "date-time",
+         "description": "when they are expected, inside the visit window"
+        },
+        "escort": {
+         "type": "string",
+         "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+         "description": "who accompanies them"
+        },
+        "kit": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "required": [
+           "class"
+          ],
+          "additionalProperties": false,
+          "properties": {
+           "class": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "a kit class from the policy"
+           },
+           "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+           },
+           "note": {
+            "type": "string",
+            "maxLength": 80
+           }
+          }
+         },
+         "maxItems": 20,
+         "description": "what they bring"
+        }
+       }
+      },
+      "maxItems": 60,
+      "description": "one per person, each arriving when and how they like; they become P1, P2, ..."
+     },
+     "vehicles": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "plate"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "plate": {
+         "type": "string",
+         "maxLength": 20,
+         "description": "kept only as a keyed digest and its last three characters"
+        },
+        "make": {
+         "type": "string",
+         "maxLength": 40
+        },
+        "model": {
+         "type": "string",
+         "maxLength": 40
+        },
+        "colour": {
+         "type": "string",
+         "maxLength": 30
+        },
+        "driver": {
+         "type": [
+          "integer",
+          "string"
+         ],
+         "description": "the driver's position (1) or id (P1), a registered attendee"
+        }
+       }
+      },
+      "maxItems": 10,
+      "description": "vehicles announced beforehand (optional)"
+     }
+    },
+    "description": "Register a visit (the host or the organiser)"
+   },
+   "Request_record_entry": {
+    "type": "object",
+    "required": [
+     "action"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "record_entry"
+     },
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the visit"
+     },
+     "party": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "P1, P2, ..."
+     },
+     "presented": {
+      "enum": [
+       "qr",
+       "visitor-badge",
+       "restricted-badge",
+       "none"
+      ],
+      "description": "what the party showed"
+     },
+     "vehicle": {
+      "type": "boolean",
+      "description": "drives a vehicle in (a registered attendee only)"
+     },
+     "vehicle_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the announced vehicle they drive in (K1, ...)"
+     },
+     "plate": {
+      "type": "string",
+      "maxLength": 20,
+      "description": "or the plate typed at the gate; kept only as a keyed digest"
+     },
+     "zone": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the zone entered, when not the site itself"
+     },
+     "token": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "the scanned QR code; it names the visit and party, and is checked online"
+     },
+     "checkpoint": {
+      "type": "string",
+      "maxLength": 80,
+      "description": "where (a gate, a reception desk)"
+     }
+    },
+    "description": "Record an entry at a checkpoint (the front office): the visit and party, or the scanned code; the entry policy decides"
+   },
+   "Request_acknowledge_arrival": {
+    "type": "object",
+    "required": [
+     "action",
+     "party",
+     "visit_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "acknowledge_arrival"
+     },
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the visit"
+     },
+     "party": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "P1, P2, ..."
+     }
+    },
+    "description": "Acknowledge a guest's arrival (the host or organiser)"
+   },
+   "Request_confirm_guest": {
+    "type": "object",
+    "required": [
+     "action",
+     "party",
+     "visit_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "confirm_guest"
+     },
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the visit"
+     },
+     "party": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "P1, P2, ..."
+     }
+    },
+    "description": "Confirm the guest is with you (the host or organiser), before the timer suspends them"
+   },
+   "Request_add_attendee": {
+    "type": "object",
+    "required": [
+     "action",
+     "attendee",
+     "visit_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "add_attendee"
+     },
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the visit"
+     },
+     "attendee": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+       "anchor": {
+        "type": "string",
+        "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       },
+       "name": {
+        "type": "string",
+        "maxLength": 80
+       },
+       "unregistered": {
+        "type": "boolean"
+       },
+       "label": {
+        "type": "string",
+        "maxLength": 60
+       },
+       "organisation": {
+        "type": "string",
+        "maxLength": 80
+       },
+       "escort": {
+        "type": "string",
+        "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+       }
+      },
+      "description": "an anchor, a name, or unregistered with a label"
+     }
+    },
+    "description": "Add someone not on the list (the host, the organiser or the front office)"
+   },
+   "Request_register_on_site": {
+    "type": "object",
+    "required": [
+     "action",
+     "anchor",
+     "party",
+     "visit_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "register_on_site"
+     },
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the visit"
+     },
+     "party": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "P1, P2, ..."
+     },
+     "anchor": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "their account after self-registering"
+     }
+    },
+    "description": "Link an invited or unregistered attendee to their account, identity checked at the front office"
+   },
+   "Request_issue_qr": {
+    "type": "object",
+    "required": [
+     "action",
+     "party",
+     "visit_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "issue_qr"
+     },
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the visit"
+     },
+     "party": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "P1, P2, ..."
+     }
+    },
+    "description": "Issue a new QR code to a registered guest; the old one stops working (the guest, host or organiser)"
+   },
+   "Request_issue_badge": {
+    "type": "object",
+    "required": [
+     "action",
+     "badge",
+     "kind",
+     "party",
+     "visit_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "issue_badge"
+     },
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the visit"
+     },
+     "party": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "P1, P2, ..."
+     },
+     "kind": {
+      "enum": [
+       "visitor",
+       "restricted"
+      ],
+      "description": "visitor (escorted) or RESTRICTED (a second person signs)"
+     },
+     "badge": {
+      "type": "string",
+      "maxLength": 40,
+      "description": "the number on the badge; kept only as a keyed digest"
+     },
+     "until": {
+      "type": "string",
+      "format": "date-time",
+      "description": "when it ends; never after the visit closes"
+     }
+    },
+    "description": "Hand out a badge (the place's front office); a RESTRICTED one waits for a second key"
+   },
+   "Request_return_badge": {
+    "type": "object",
+    "required": [
+     "action",
+     "badge_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "return_badge"
+     },
+     "badge_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the badge handed back"
+     }
+    },
+    "description": "Record that a badge was handed back (the front office)"
+   },
+   "Request_record_departure": {
+    "type": "object",
+    "required": [
+     "action",
+     "party",
+     "visit_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "record_departure"
+     },
+     "visit_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the visit"
+     },
+     "party": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "P1, P2, ..."
+     }
+    },
+    "description": "Record that a party left"
+   },
+   "Request_enrol_edge": {
+    "type": "object",
+    "required": [
+     "action",
+     "edge_id",
+     "enrolment_key",
+     "officer",
+     "officer_key",
+     "profile",
+     "statement",
+     "targets"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "enrol_edge"
+     },
+     "edge_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the edge's id"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "a readable name"
+     },
+     "enrolment_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "the edge agent's Ed25519 public key, hex"
+     },
+     "officer": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the edge's officer: never the root, the security officer or a privileged member"
+     },
+     "officer_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "the officer's ceiling-signing public key (a hardware key), hex"
+     },
+     "profile": {
+      "enum": [
+       "assured",
+       "basic"
+      ],
+      "description": "the hardware profile claimed; attestation proves it"
+     },
+     "custodians": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 10,
+      "description": "the people break-glass halves may be escrowed to (at least two)"
+     },
+     "unlock_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{87}$",
+      "description": "the edge node's P-256 public key for phoned unlock (kc-unlock-v2), uncompressed SEC1, base64url; in its TPM where it has one"
+     },
+     "unlock_approvers": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 20,
+      "description": "who may read an unlock code (never the person unlocked)"
+     },
+     "statement": {
+      "type": "object",
+      "required": [
+       "bytes",
+       "signatures"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "bytes": {
+        "type": "string",
+        "maxLength": 16384
+       },
+       "signatures": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "required": [
+          "key",
+          "key_id",
+          "signature"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "key": {
+           "type": "string",
+           "pattern": "^[0-9a-f]{64}$"
+          },
+          "key_id": {
+           "type": "string",
+           "pattern": "^[0-9a-f]{16}$"
+          },
+          "signature": {
+           "type": "string",
+           "pattern": "^[0-9a-f]{128}$"
+          }
+         }
+        },
+        "maxItems": 3
+       }
+      },
+      "description": "the kc-edge-officer-v2 statement (purpose enrolment: edge, officer, officer key, the node's enrolment key, unlock key and TPM commitment), signed over the same bytes by the officer and by the edge (amendment 0014d)"
+     },
+     "targets": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "required": [
+        "entitlement",
+        "role",
+        "target"
+       ],
+       "additionalProperties": false,
+       "properties": {
+        "target": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "role": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "entitlement": {
+         "type": "string",
+         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+        },
+        "max_session_hours": {
+         "type": "integer",
+         "minimum": 1,
+         "maximum": 24
+        }
+       }
+      },
+      "maxItems": 200,
+      "description": "the bastion targets, each with the role it grants and the entitlement that leads to it"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "why; kept in the records"
+     }
+    },
+    "description": "Enrol an edge (the root; waits for the security officer's key)"
+   },
+   "Request_enrol_person_key": {
+    "type": "object",
+    "required": [
+     "action",
+     "public_key",
+     "user_verification"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "enrol_person_key"
+     },
+     "public_key": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "the X25519 public key derived from your passkey through PRF, base64url"
+     },
+     "ssh_key": {
+      "type": "string",
+      "maxLength": 900,
+      "description": "the ssh-ed25519 public key your hardware key holds"
+     },
+     "credential_id": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "the WebAuthn credential id the key came from"
+     },
+     "user_verification": {
+      "const": true,
+      "description": "the authenticator verified you (PIN or biometric)"
+     },
+     "attestation": {
+      "type": "string",
+      "maxLength": 40,
+      "description": "the attestation format the authenticator gave, if any"
+     }
+    },
+    "description": "Register your hardware key (yourself; waits for a second key)"
+   },
+   "Request_grant_visit_lease": {
+    "type": "object",
+    "required": [
+     "action",
+     "edge",
+     "hours",
+     "person",
+     "ssh_key",
+     "targets"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "grant_visit_lease"
+     },
+     "edge": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the assured edge"
+     },
+     "person": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "who visits"
+     },
+     "ssh_key": {
+      "type": "string",
+      "maxLength": 900,
+      "description": "their registered hardware SSH key"
+     },
+     "targets": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      },
+      "maxItems": 20,
+      "description": "targets on that edge"
+     },
+     "from": {
+      "type": "string",
+      "format": "date-time",
+      "description": "when the window opens (default now)"
+     },
+     "hours": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 720,
+      "description": "the window, at most what edge.rego and the ceiling allow"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "why; kept in the records"
+     }
+    },
+    "description": "Grant a visit lease on an assured edge (waits for a second key)"
+   },
+   "Request_rotate_edge": {
+    "type": "object",
+    "required": [
+     "action",
+     "edge_id",
+     "enrolment_key",
+     "officer",
+     "officer_key",
+     "statement"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "rotate_edge"
+     },
+     "edge_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the edge"
+     },
+     "enrolment_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "the edge's new (or same) enrolment key"
+     },
+     "officer": {
+      "type": "string",
+      "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "the edge's (new or same) officer"
+     },
+     "officer_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "the officer's (new or same) key"
+     },
+     "unlock_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{87}$",
+      "description": "the edge node's P-256 public key for phoned unlock (kc-unlock-v2), uncompressed SEC1, base64url; in its TPM where it has one"
+     },
+     "statement": {
+      "type": "object",
+      "required": [
+       "bytes",
+       "signatures"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "bytes": {
+        "type": "string",
+        "maxLength": 16384
+       },
+       "signatures": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "required": [
+          "key",
+          "key_id",
+          "signature"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "key": {
+           "type": "string",
+           "pattern": "^[0-9a-f]{64}$"
+          },
+          "key_id": {
+           "type": "string",
+           "pattern": "^[0-9a-f]{16}$"
+          },
+          "signature": {
+           "type": "string",
+           "pattern": "^[0-9a-f]{128}$"
+          }
+         }
+        },
+        "maxItems": 3
+       }
+      },
+      "description": "the kc-edge-officer-v2 statement with purpose rotation, signed by the (new) officer and the edge's (new) enrolment key"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "why; kept in the records"
+     }
+    },
+    "description": "Rotate an edge's enrolment key or officer (waits for the security officer's key)"
+   },
+   "Request_end_edge_record": {
+    "type": "object",
+    "required": [
+     "action",
+     "id",
+     "reason"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "const": "end_edge_record"
+     },
+     "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$",
+      "description": "an edge, a person key or a visit lease"
+     },
+     "reason": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "why; kept in the records"
+     }
+    },
+    "description": "End an edge, a person key or a visit lease"
+   },
+   "ChangeRequest": {
+    "oneOf": [
+     {
+      "$ref": "#/components/schemas/Request_add_member"
+     },
+     {
+      "$ref": "#/components/schemas/Request_include_group"
+     },
+     {
+      "$ref": "#/components/schemas/Request_end_membership"
+     },
+     {
+      "$ref": "#/components/schemas/Request_create_group"
+     },
+     {
+      "$ref": "#/components/schemas/Request_delegate"
+     },
+     {
+      "$ref": "#/components/schemas/Request_end_delegation"
+     },
+     {
+      "$ref": "#/components/schemas/Request_appoint_approver"
+     },
+     {
+      "$ref": "#/components/schemas/Request_end_approver"
+     },
+     {
+      "$ref": "#/components/schemas/Request_register_visit"
+     },
+     {
+      "$ref": "#/components/schemas/Request_record_entry"
+     },
+     {
+      "$ref": "#/components/schemas/Request_acknowledge_arrival"
+     },
+     {
+      "$ref": "#/components/schemas/Request_confirm_guest"
+     },
+     {
+      "$ref": "#/components/schemas/Request_add_attendee"
+     },
+     {
+      "$ref": "#/components/schemas/Request_register_on_site"
+     },
+     {
+      "$ref": "#/components/schemas/Request_issue_qr"
+     },
+     {
+      "$ref": "#/components/schemas/Request_issue_badge"
+     },
+     {
+      "$ref": "#/components/schemas/Request_return_badge"
+     },
+     {
+      "$ref": "#/components/schemas/Request_record_departure"
+     },
+     {
+      "$ref": "#/components/schemas/Request_enrol_edge"
+     },
+     {
+      "$ref": "#/components/schemas/Request_enrol_person_key"
+     },
+     {
+      "$ref": "#/components/schemas/Request_grant_visit_lease"
+     },
+     {
+      "$ref": "#/components/schemas/Request_rotate_edge"
+     },
+     {
+      "$ref": "#/components/schemas/Request_end_edge_record"
+     }
+    ]
+   }
+  },
+  "securitySchemes": {
+   "bearer": {
+    "type": "http",
+    "scheme": "bearer",
+    "bearerFormat": "JWT (RS256, from the broker; azp an allowed client)"
+   },
+   "session": {
+    "type": "apiKey",
+    "in": "cookie",
+    "name": "keyclerk_session"
+   },
+   "edge": {
+    "type": "apiKey",
+    "in": "header",
+    "name": "KeyClerk-Edge",
+    "description": "edge;unix seconds;nonce;Ed25519 signature hex over kc-edge-request-v1, METHOD, path with query, seconds, nonce and the body's sha256, newline-separated (decision 0014; keyclerk/edge.py)"
+   }
+  }
+ },
+ "paths": {
+  "/me/keys": {
+   "get": {
+    "summary": "My registered person keys (decision 0014)",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/PersonKey"
+         },
+         "maxItems": 10000
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/relay": {
+   "get": {
+    "summary": "Ciphertexts waiting for me: what they are for and when they expire, never their content",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/RelayItem"
+         },
+         "maxItems": 10000
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/relay/{relay_id}/take": {
+   "post": {
+    "summary": "Take a ciphertext once, within 10 minutes of a fresh sign-in; your browser decrypts it with the key your passkey derives",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RelayTaken"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "relay_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/edges": {
+   "get": {
+    "summary": "Edges and their state (a viewer, the root, the security officer, or an edge's officer)",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "type": "object"
+         },
+         "maxItems": 10000
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edges/{edge_id}/ceiling": {
+   "post": {
+    "summary": "Set an edge's ceiling: the officer's signed data (decision 0014 point 4)",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "edge_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SignedCeiling"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/relay/{relay_id}/confirm": {
+   "post": {
+    "summary": "Confirm you opened it: a credential is deleted, an escrow half recorded",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "relay_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/edge/escrow/{item_id}": {
+   "get": {
+    "summary": "Whether both custodians opened their halves; forget the value only then",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "item_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/edge/lease/{lease_id}/email": {
+   "get": {
+    "summary": "The verified address of a live lease's person, sealed for this request (edge protocol 1.3); the edge keeps it nowhere",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "lease_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/edges/{edge_id}/unlock": {
+   "post": {
+    "summary": "Read a phoned-unlock code (an unlock approver of the edge, never the person)",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "edge_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edges/{edge_id}/incidents/{incident_id}/close": {
+   "post": {
+    "summary": "Close an edge incident (its officer or the security officer)",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "edge_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     },
+     {
+      "name": "incident_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/me/visit-leases": {
+   "get": {
+    "summary": "My visit leases on edges",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "type": "object"
+         },
+         "maxItems": 10000
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/me/visit-leases/{lease_id}/carried": {
+   "post": {
+    "summary": "A carried visit lease for the edge (after a fresh sign-in)",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "lease_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/edge-key": {
+   "get": {
+    "summary": "The bundle key's public half, which an edge pins at enrolment (public)",
+    "tags": [
+     "read"
+    ],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edge/bundle": {
+   "get": {
+    "summary": "The signed bundle for the calling edge (decision 0014 point 3)",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edge/module/{sha256}": {
+   "get": {
+    "summary": "A policy module the edge's bundle names by hash: fetched once per change and kept by hash; the agent checks the bytes against the hash",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "sha256",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/edge/report": {
+   "post": {
+    "summary": "What the edge applied, its attestation and drift",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edge/attest/challenge": {
+   "get": {
+    "summary": "A credential activation challenge for the edge's TPM (decision 0016)",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edge/attest/activate": {
+   "post": {
+    "summary": "The recovered challenge: the attestation key is in the pinned TPM",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edge/relay": {
+   "post": {
+    "summary": "A ciphertext for one person key, relayed once",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edge/escrow": {
+   "post": {
+    "summary": "A break-glass value as two custodian ciphertexts; a signed acknowledgement",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edge/incident": {
+   "post": {
+    "summary": "An incident the edge saw (break-glass used, drift, evidence floor)",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edge/evidence": {
+   "get": {
+    "summary": "The evidence chain's head as the desk holds it (after a lost acknowledgement)",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "summary": "Recording hashes as a chain; a signed acknowledgement up to a sequence",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/me": {
+   "get": {
+    "summary": "Who I am, what I hold and manage, the CSRF token for a browser session",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Me"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/people": {
+   "get": {
+    "summary": "Everyone the records know",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Person"
+         },
+         "maxItems": 10000
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/people/{anchor}": {
+   "get": {
+    "summary": "One person's access and why (yourself; a viewer or the root: anyone)",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PersonAccess"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "anchor",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/people/{anchor}/graph": {
+   "get": {
+    "summary": "One person's graph at a moment: accounts by identity source, groups, delegations, places and the people around them, as far as you may see (view policy); marks are the changes before and after the moment",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PersonGraph"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "anchor",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^(?![uU][iI][dD]:)[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     },
+     {
+      "name": "at",
+      "in": "query",
+      "required": false,
+      "description": "the moment (RFC 3339); now when absent",
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      }
+     }
+    ]
+   }
+  },
+  "/groups": {
+   "get": {
+    "summary": "The group tree with my powers on each group",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Group"
+         },
+         "maxItems": 10000
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/groups/{group_id}": {
+   "get": {
+    "summary": "A group: members and why, nesting, managers and their chains",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/GroupDetail"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "group_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/delegations": {
+   "get": {
+    "summary": "Every delegation, its chain and state",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/Delegation"
+         },
+         "maxItems": 10000
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/visits": {
+   "get": {
+    "summary": "Visits you host, organise, receive at your place's front office, or come on",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/VisitSummary"
+         },
+         "maxItems": 10000
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/visits/{visit_id}": {
+   "get": {
+    "summary": "One visit at a moment: parties, vehicle, kit, the timeline, what the gate says, what you may record",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/VisitDetail"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "visit_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     },
+     {
+      "name": "at",
+      "in": "query",
+      "required": false,
+      "description": "the moment (RFC 3339); now when absent",
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      }
+     }
+    ]
+   }
+  },
+  "/visits/{visit_id}/qr/{party}": {
+   "get": {
+    "summary": "A guest's current QR code: the code, the link it opens and the image (the guest, the host or the organiser)",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "required": [
+          "image",
+          "party",
+          "serial",
+          "token",
+          "until",
+          "url",
+          "visit_id"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "visit_id": {
+           "type": "string",
+           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+          },
+          "party": {
+           "type": "string",
+           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+          },
+          "serial": {
+           "type": "integer"
+          },
+          "until": {
+           "type": "string",
+           "format": "date-time"
+          },
+          "token": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "url": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "image": {
+           "type": "string",
+           "maxLength": 300
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "visit_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     },
+     {
+      "name": "party",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/scan/{token}": {
+   "get": {
+    "summary": "The phone scan (no sign-in): may this guest walk unescorted, and until when; checked online now; nothing else is told",
+    "tags": [
+     "visit"
+    ],
+    "security": [],
+    "parameters": [
+     {
+      "name": "token",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "maxLength": 400
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "the answer",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "required": [
+          "at",
+          "checked",
+          "unescorted",
+          "until"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "unescorted": {
+           "type": "boolean"
+          },
+          "checked": {
+           "enum": [
+            "online"
+           ]
+          },
+          "at": {
+           "type": "string",
+           "format": "date-time"
+          },
+          "until": {
+           "anyOf": [
+            {
+             "type": "string",
+             "format": "date-time"
+            },
+            {
+             "type": "null"
+            }
+           ]
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/qr-key": {
+   "get": {
+    "summary": "The public key visit codes are signed with, for checkpoints that check offline (signature and expiry only; no sign-in)",
+    "tags": [
+     "visit"
+    ],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "the key",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "required": [
+          "alg",
+          "format",
+          "key",
+          "kid"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "kid": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "alg": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "key": {
+           "type": "string",
+           "maxLength": 300
+          },
+          "format": {
+           "type": "string",
+           "maxLength": 300
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/delegations/tree": {
+   "get": {
+    "summary": "The delegation tree at a moment: what was handed on, to whom, how deep, until when, as far as you may see (tree policy)",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DelegationTree"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "at",
+      "in": "query",
+      "required": false,
+      "description": "the moment (RFC 3339); now when absent",
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      }
+     }
+    ]
+   }
+  },
+  "/changes": {
+   "get": {
+    "summary": "Changes waiting for a key, and the change log",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Changes"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "summary": "Request a change: applied, pending (waits for a key) or refused, with reasons",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ChangeResult"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChangeRequest"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/changes/preview": {
+   "post": {
+    "summary": "What a change request would answer, without doing anything: nothing is applied, held or logged",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Preview"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ChangeRequest"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/changes/{change_id}/statement": {
+   "get": {
+    "summary": "What my approval of a waiting change must sign: the nonce for a fresh sign-in at the broker (decision 0006)",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Statement"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "change_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/changes/{change_id}/approval-sign-in": {
+   "post": {
+    "summary": "Start approving in a browser session on this desk: the answer names the broker's sign-in to go to (the sign-in signs the change)",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/SignIn"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "change_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/changes/{change_id}/phone-link": {
+   "get": {
+    "summary": "A short-lived link (and its QR image) to approve this change on another device, such as a phone: the same signed approval",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PhoneLink"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "change_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/changes/{change_id}/approve": {
+   "post": {
+    "summary": "Add my key to a waiting change; where approvals need proofs, the body carries the broker's ID token from a fresh sign-in with the statement's nonce",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ChangeResult"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "change_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ApproveRequest"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/changes/{change_id}/withdraw": {
+   "post": {
+    "summary": "Withdraw a waiting change (who proposed it, or the root)",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ChangeResult"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "change_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/broker": {
+   "get": {
+    "summary": "What the reconciler did with the records: its last runs",
+    "tags": [
+     "read"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Broker"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/openapi.json": {
+   "get": {
+    "summary": "This contract (no sign-in needed)",
+    "tags": [
+     "about"
+    ],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "the OpenAPI document",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

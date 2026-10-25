@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: EUPL-1.2
+# Every push and pull request: the policy tests, the check that each compiled policy belongs to its source, the whole
+# Python suite in the pinned base image with hash-locked dependencies, licensing (REUSE), lint (ruff), and the leak gate over the
+# repository itself. Actions are pinned to full commit hashes; the token is read-only.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    container:
+      image: python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
+    timeout-minutes: 30
+    steps:
+      - name: git for the checkout and the tests
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends git > /dev/null
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dependencies, hash-locked
+        run: |
+          pip install -q --require-hashes --only-binary=:all: -r requirements.lock
+          pip install -q --require-hashes --only-binary=:all: -r requirements-test.txt
+      - name: OPA, pinned and verified
+        run: python tools/fetch_opa.py
+      - name: Policy tests
+        run: opa test keyclerk/policy/
+      - name: Compiled policies match their sources
+        run: python tools/build_policy.py --check
+      - name: Test suite
+        run: timeout 1500 python -m pytest -q -p no:cacheprovider --durations=15
+  hygiene:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Licensing (REUSE) and lint (ruff)
+        run: |
+          python3 -m pip install --quiet --user --require-hashes -r requirements-ci.txt
+          python3 -m reuse lint
+          python3 -m ruff check keyclerk tools tests
+      - name: Leak gate over the repository
+        run: python3 tools/leak_gate.py .

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keyclerk"
+version = "0.26.1"
+description = "Access leases, delegated administration and access paths for Keycloak, decided by policy and driven by configuration"
+readme = "README.md"
+license = "EUPL-1.2"
+requires-python = ">=3.11"
+dependencies = ["pyyaml>=6", "jsonschema>=4", "cryptography>=42", "segno>=1.6", "wasmtime>=49"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "hypothesis==6.168.5", "libosdp==3.2.7"]
+
+[tool.setuptools.packages.find]
+include = ["keyclerk*"]
+
+[tool.setuptools.package-data]
+"keyclerk.schema" = ["*.json"]
+"keyclerk.policy" = ["*.rego", "*.wasm", "*.wasm.build"]
+"keyclerk" = ["ui/*", "ui/vendor/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle, bugbear. Long lines stay a matter of review (tables, messages and docstrings run wide here).
+select = ["E", "F", "W", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# tests import pytest fixtures by name (F401, F811); tools and tests put the checkout on sys.path before importing (E402)
+"tests/*" = ["F401", "F811", "E402", "E731"]   # and name small lambdas (E731)
+"tools/*" = ["E402"]

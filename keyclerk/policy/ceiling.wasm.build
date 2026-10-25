@@ -1,0 +1,6 @@
+{
+ "entrypoint": "keyclerk/ceiling/decision",
+ "source_sha256": "ac75797d4c3a2bdfdd0345054cc1ca40fe3e6c93d5cca2187461917390650428",
+ "wasm_sha256": "8db9a04fe3e2e886de8d6af2fcc8cb52163860b4480ed7ff85efde29c1876d1c",
+ "opa": "1.21.0"
+}

@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: EUPL-1.2
+# A tag v* becomes a release: the wheel and source distribution built here, their SHA-256 sums, a build provenance
+# attestation GitHub signs, a GitHub release, and PyPI through trusted publishing (no stored token; the pypi
+# environment requires a maintainer's approval). Verify: gh attestation verify FILE --repo keyclerk/keyclerk
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the wheel and the source distribution
+        run: |
+          python3 -m pip install --quiet --user --require-hashes -r requirements-build.txt
+          python3 -m build --outdir dist .
+          cd dist && sha256sum * > SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dist
+          path: dist/
+  github-release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --title "${GITHUB_REF_NAME}" \
+            --notes "KeyClerk ${GITHUB_REF_NAME}. Verify: sha256sum -c SHA256SUMS; gh attestation verify FILE --repo ${GITHUB_REPOSITORY}." \
+            dist/*
+  pypi:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Keep only the distributions
+        run: rm -f dist/SHA256SUMS
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3

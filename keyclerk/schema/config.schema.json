@@ -1,0 +1,993 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keyclerk.dev/schemas/config-v2.json",
+  "title": "KeyClerk configuration",
+  "description": "Every rule KeyClerk applies. A deployment keeps this as code in its own repository; the engine only reads it. Every number is bounded so a typo cannot turn a limit off.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "roles",
+    "grant_limits",
+    "external_access",
+    "delegation",
+    "attributes",
+    "situation",
+    "risk_port",
+    "places",
+    "access_paths",
+    "availability",
+    "reconcile"
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+    },
+    "ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/id"
+      },
+      "uniqueItems": true,
+      "maxItems": 500
+    },
+    "hours": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 8760
+    },
+    "days": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3650
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "level": {
+      "enum": [
+        "normal",
+        "elevated",
+        "high",
+        "severe"
+      ]
+    },
+    "band": {
+      "enum": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "risk": {
+      "enum": [
+        "low",
+        "elevated",
+        "privileged"
+      ]
+    },
+    "per_level_number": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normal",
+        "elevated",
+        "high",
+        "severe"
+      ],
+      "properties": {
+        "normal": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "elevated": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "high": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "severe": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  "properties": {
+    "roles": {
+      "type": "object",
+      "maxProperties": 500,
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "plane",
+          "class"
+        ],
+        "properties": {
+          "plane": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/id"
+              },
+              {
+                "$ref": "#/$defs/ids"
+              }
+            ]
+          },
+          "class": {
+            "enum": [
+              "baseline",
+              "functional",
+              "activation",
+              "special",
+              "eligibility"
+            ]
+          },
+          "scope_max": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    },
+    "grant_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "activation_max_hours",
+        "functional_max_hours",
+        "phase_one",
+        "operator_kind",
+        "subject_kinds",
+        "scope_levels",
+        "operator_tenant_roles",
+        "tenant_infrastructure_roles"
+      ],
+      "properties": {
+        "activation_max_hours": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/hours"
+          }
+        },
+        "functional_max_hours": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/hours"
+          }
+        },
+        "phase_one": {
+          "type": "boolean"
+        },
+        "operator_kind": {
+          "$ref": "#/$defs/id"
+        },
+        "subject_kinds": {
+          "$ref": "#/$defs/ids"
+        },
+        "scope_levels": {
+          "$ref": "#/$defs/ids"
+        },
+        "operator_tenant_roles": {
+          "$ref": "#/$defs/ids"
+        },
+        "tenant_infrastructure_roles": {
+          "$ref": "#/$defs/ids"
+        }
+      }
+    },
+    "external_access": {
+      "type": "object",
+      "required": [
+        "categories",
+        "steps",
+        "totals"
+      ],
+      "properties": {
+        "categories": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/id"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "max_days"
+            ],
+            "properties": {
+              "max_days": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3650
+              }
+            }
+          }
+        },
+        "steps": {
+          "type": "object",
+          "required": [
+            "during",
+            "offboarding"
+          ],
+          "properties": {
+            "during": {
+              "type": "object",
+              "required": [
+                "reminder_days"
+              ],
+              "properties": {
+                "reminder_days": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 365
+                  },
+                  "maxItems": 20
+                }
+              }
+            },
+            "offboarding": {
+              "type": "object",
+              "required": [
+                "retention"
+              ],
+              "properties": {
+                "retention": {
+                  "type": "object",
+                  "required": [
+                    "account_delete_days"
+                  ],
+                  "properties": {
+                    "account_delete_days": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3650
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "totals": {
+          "type": "object"
+        }
+      }
+    },
+    "delegation": {
+      "type": "object",
+      "required": [
+        "max_include_depth",
+        "max_delegation_days",
+        "retire_grace_days",
+        "widenings_per_deputy_per_day",
+        "widenings_per_subtree_per_day",
+        "max_direct_delegates",
+        "root_max_membership_days"
+      ],
+      "properties": {
+        "max_include_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "max_delegation_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 730
+        },
+        "retire_grace_days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 90
+        },
+        "widenings_per_deputy_per_day": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "widenings_per_subtree_per_day": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "max_direct_delegates": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "root_max_membership_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1095
+        },
+        "rule_change_second_key_above": {
+          "$ref": "#/$defs/count"
+        },
+        "review_days": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 730
+          }
+        },
+        "second_key_standing": {
+          "enum": [
+            "off",
+            "warn",
+            "enforce"
+          ],
+          "description": "off: a second key is anyone independent of the actor; warn: the same, and the approvals that would stop counting are listed; enforce: a second key also needs standing (decision 0008)"
+        },
+        "reciprocity_days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365,
+          "description": "under enforce, an approver whose key counted for the actor (or the reverse) within this many days does not count; 0 makes it a signal only"
+        },
+        "max_approver_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 730
+        }
+      }
+    },
+    "attributes": {
+      "type": "object",
+      "maxProperties": 1000,
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "provided_by",
+          "ttl_hours"
+        ],
+        "properties": {
+          "provided_by": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "maxItems": 20
+          },
+          "ttl_hours": {
+            "$ref": "#/$defs/hours"
+          },
+          "pedigree": {
+            "enum": [
+              "authoritative",
+              "sourced",
+              "derived",
+              "self_asserted"
+            ]
+          },
+          "may_widen": {
+            "type": "boolean"
+          },
+          "self_write": {
+            "type": "boolean"
+          },
+          "allowed_values": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "maxItems": 1000
+          },
+          "offline": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "authority": {
+            "type": "string",
+            "maxLength": 300
+          }
+        }
+      }
+    },
+    "situation": {
+      "type": "object",
+      "required": [
+        "floor_raise",
+        "visitors",
+        "lease_max_days",
+        "pause_derived_rules_from",
+        "rate_factor",
+        "surge",
+        "feed",
+        "confirm_hours",
+        "min_dwell_hours"
+      ],
+      "properties": {
+        "floor_raise": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/per_level_number"
+          }
+        },
+        "visitors": {
+          "type": "object"
+        },
+        "lease_max_days": {
+          "$ref": "#/$defs/per_level_number"
+        },
+        "pause_derived_rules_from": {
+          "$ref": "#/$defs/level"
+        },
+        "rate_factor": {
+          "$ref": "#/$defs/per_level_number"
+        },
+        "surge": {
+          "type": "object",
+          "required": [
+            "max_hours",
+            "review_days_after_fall",
+            "max_days_per_person"
+          ],
+          "properties": {
+            "max_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168
+            },
+            "review_days_after_fall": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 90
+            },
+            "max_days_per_person": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365
+            }
+          }
+        },
+        "feed": {
+          "type": "object",
+          "required": [
+            "max_level",
+            "max_age_hours",
+            "min_interval_hours"
+          ],
+          "properties": {
+            "max_level": {
+              "$ref": "#/$defs/level"
+            },
+            "max_age_hours": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 168
+            },
+            "min_interval_hours": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 168
+            }
+          }
+        },
+        "confirm_hours": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 168
+        },
+        "min_dwell_hours": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 168
+        }
+      }
+    },
+    "risk_port": {
+      "type": "object",
+      "required": [
+        "floor_by_risk",
+        "usable_risk_bands",
+        "no_acceptance_for",
+        "acceptance_max_band",
+        "acceptance_max_days",
+        "situation_levels"
+      ],
+      "properties": {
+        "floor_by_risk": {
+          "type": "object",
+          "required": [
+            "low",
+            "elevated",
+            "privileged"
+          ],
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/band"
+            }
+          }
+        },
+        "usable_risk_bands": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "green",
+              "amber",
+              "red",
+              "black"
+            ]
+          }
+        },
+        "no_acceptance_for": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/risk"
+          }
+        },
+        "acceptance_max_band": {
+          "enum": [
+            "low",
+            "medium"
+          ]
+        },
+        "acceptance_max_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365
+        },
+        "situation_levels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/level"
+          },
+          "minItems": 1
+        },
+        "require_trust": {
+          "type": "boolean",
+          "description": "true: an elevated or privileged group without trust input for a member keeps that member dormant (fail closed)"
+        }
+      }
+    },
+    "places": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kinds",
+        "nest_same_kind"
+      ],
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "contains": {
+            "const": "site"
+          },
+          "maxItems": 20
+        },
+        "nest_same_kind": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "maxItems": 20
+        }
+      }
+    },
+    "access_paths": {
+      "type": "object",
+      "required": [
+        "min_independent_layers",
+        "max_path_length",
+        "scenarios",
+        "two_person_for",
+        "obligations",
+        "obligation_conflicts"
+      ],
+      "properties": {
+        "min_independent_layers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          }
+        },
+        "max_path_length": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 64
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "contains": {
+            "const": "normal"
+          },
+          "maxItems": 20
+        },
+        "two_person_for": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 50
+          }
+        },
+        "obligations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "maxItems": 100
+        },
+        "obligation_conflicts": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        }
+      }
+    },
+    "availability": {
+      "type": "object",
+      "required": [
+        "pool_factor",
+        "site_office_entitlement",
+        "allowed_steps",
+        "remote_steps_until_level",
+        "steps"
+      ],
+      "properties": {
+        "pool_factor": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "site_office_entitlement": {
+          "$ref": "#/$defs/id"
+        },
+        "allowed_steps": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "enum": [
+                "remote_confirm",
+                "supervised",
+                "deferred",
+                "never"
+              ]
+            }
+          }
+        },
+        "remote_steps_until_level": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/level"
+          }
+        },
+        "steps": {
+          "type": "object"
+        }
+      }
+    },
+    "reconcile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_removals_per_run",
+        "max_removal_share",
+        "logout_retry_minutes",
+        "keep_runs",
+        "managed_marker"
+      ],
+      "properties": {
+        "max_removals_per_run": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "description": "above this, a run aborts unless an override record allows it"
+        },
+        "max_removal_share": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "description": "share of current managed memberships one run may remove"
+        },
+        "logout_retry_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "keep_runs": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 100000
+        },
+        "managed_marker": {
+          "$ref": "#/$defs/id",
+          "description": "the group attribute KeyClerk sets on the groups it creates; a managed-looking group without it is never touched"
+        },
+        "logout_on_removal": {
+          "type": "boolean",
+          "default": true,
+          "description": "log a person out when a removal takes a membership away; it needs a credential that may manage users, so a deployment whose writer holds only group membership (fine-grained permissions) turns it off and relies on short access tokens"
+        },
+        "ready_max_age_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "default": 900,
+          "description": "the desk is ready only while the reconciler's last run started at most this long ago (decision 0018)"
+        }
+      }
+    },
+    "approvals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proofs"
+      ],
+      "description": "approvals as the approver's own signature (decision 0006)",
+      "properties": {
+        "proofs": {
+          "enum": [
+            "required",
+            "off"
+          ],
+          "description": "required: every approval needs a broker-signed proof"
+        },
+        "max_age_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 3600,
+          "default": 300,
+          "description": "how fresh the approver's sign-in must be when the broker issues the proof"
+        },
+        "accepted_without_proof": {
+          "type": "array",
+          "maxItems": 100000,
+          "description": "approvals made before proofs, pinned record by record",
+          "items": {
+            "type": "object",
+            "required": [
+              "record",
+              "by",
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "record": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "by": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "keyclerk.approvals.record_hash of the record as approved"
+              }
+            }
+          }
+        },
+        "acr": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "the authentication level every proof must carry (the broker's acr), such as a level bound to a passkey"
+        }
+      }
+    },
+    "identity_sources": {
+      "type": "array",
+      "description": "where accounts come from, by anchor prefix: drawn in the person graph (decision 0009)",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "prefix": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "oidc",
+              "saml",
+              "local",
+              "federation",
+              "unknown",
+              "workload",
+              "agent"
+            ]
+          },
+          "pattern": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "a regular expression the whole anchor matches, for anchors without a prefix (such as an object id from a brokered directory)"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,40}$"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "prefix"
+            ]
+          },
+          {
+            "required": [
+              "pattern"
+            ]
+          }
+        ]
+      }
+    },
+    "visits": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "visits (decision 0009); every value has a default",
+      "properties": {
+        "early_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 720
+        },
+        "late_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 720
+        },
+        "confirm_after_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240
+        },
+        "grace_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240
+        },
+        "max_visit_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 72
+        },
+        "max_parties": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "kit_classes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "class",
+              "name"
+            ],
+            "properties": {
+              "class": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "qr_required": {
+          "type": "boolean",
+          "description": "a QR entry counts only when the desk checked the code online (default true)"
+        },
+        "scan_per_minute": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600,
+          "description": "public phone scans per minute per address (default 30)"
+        },
+        "badges_required": {
+          "type": "boolean",
+          "description": "a badge shown at the gate counts only when it was issued and holds (default true)"
+        },
+        "retention_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "days after a visit closes before the desk erases it (its file; the log keeps only its id); default 30"
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "personas, workloads and agents (decision 0011); every value has a secure default",
+      "properties": {
+        "privileged_needs_admin": {
+          "type": "boolean",
+          "description": "a privileged group takes an admin persona, never a daily account (default true)"
+        },
+        "machines_in_privileged": {
+          "type": "boolean",
+          "description": "workloads and agents in privileged groups (default false)"
+        },
+        "persona_rule": {
+          "enum": [
+            "off",
+            "warn",
+            "enforce"
+          ],
+          "description": "decision 0011a: enforce (default since 0.16.1) judges every effective member by persona and KeyClerk's own powers by account; warn lists the impact and changes nothing"
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "the desk's side of the edge protocol (decision 0026)",
+      "properties": {
+        "long_poll_max": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000,
+          "description": "open bundle long-polls the desk holds at once; beyond it an edge is answered at once, as a plain pull (default 256)"
+        }
+      }
+    },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "where the desk keeps the records (decision 0022): the signed YAML store, the default, or the signed change log, which the desk runs on from engine 0.26.0",
+      "properties": {
+        "kind": {
+          "enum": [
+            "yaml",
+            "sqlite"
+          ],
+          "description": "yaml (the default) or sqlite (the signed change log)"
+        }
+      }
+    }
+  }
+}

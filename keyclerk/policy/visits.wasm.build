@@ -1,0 +1,13 @@
+{
+ "entrypoint": [
+  "keyclerk/visits/act",
+  "keyclerk/visits/entry",
+  "keyclerk/visits/timers",
+  "keyclerk/visits/see",
+  "keyclerk/visits/unescorted",
+  "keyclerk/visits/badge"
+ ],
+ "source_sha256": "7067bee61ab4de86e00899717a20ea063b4a7f54a974ef58426d17d11a16df6f",
+ "wasm_sha256": "ec666b87b56532fd32c5adae48b27492625b20f9661af5e935733f9f5884f3c7",
+ "opa": "1.21.0"
+}

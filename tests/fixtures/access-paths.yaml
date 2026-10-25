@@ -1,0 +1,75 @@
+# Access paths of the demo tenant: the Heverlee site from the road to a lockbox in a rack, with the loading
+# dock and an emergency exit as other ways in, the KeyClerk portal hosted in that rack, and the digital path from a
+# privileged access workstation to the proof vault. depends_on groups what fails together: every PACS door shares the
+# head-end and the badge, every login, gateway and application decision shares the IdP. Keys: an electronic key cabinet
+# and a break-glass safe in the staffed guard room, a cage key and a master key with a sealed backup, a split code for
+# the lockbox, and the BMC password checked out from OpenBao with a sealed key share as its backup.
+realm: example
+nodes:
+  - {node_id: road, kind: outside, entrance: true}
+  - {node_id: yard, kind: space, place: "place:heverlee"}
+  - {node_id: lobby, kind: space, place: "place:heverlee/main/0/reception"}
+  - {node_id: mantrap, kind: space, type: mantrap, place: "place:heverlee/main/0"}
+  - {node_id: hallway, kind: space, place: "place:heverlee/main/0"}
+  - {node_id: server-room, kind: space, place: "place:heverlee/main/0"}
+  - {node_id: guard-room, kind: space, place: "place:heverlee/main/0"}
+  - {node_id: key-cabinet, kind: container, type: electronic-key-cabinet, keybox: true}
+  - {node_id: strongroom, kind: space, type: strongroom, place: "place:heverlee/main/0"}
+  - {node_id: breakglass-safe, kind: container, type: safe, keybox: true, no_override: true}
+  - {node_id: bank-lobby, kind: space, place: "bank (off-site)"}
+  - {node_id: bank-vault, kind: space, place: "bank (off-site)"}
+  - {node_id: box-room, kind: space, place: "bank (off-site)"}
+  - {node_id: deposit-box, kind: container, type: safe-deposit-box, keybox: true, no_override: true}
+  - {node_id: cage-a, kind: space, type: cage, place: "place:heverlee/main/0"}
+  - {node_id: rack-a1, kind: container, type: rack}
+  - {node_id: lockbox-a1, kind: container, type: lockbox, label: Restricted}
+  - {node_id: internet, kind: outside, entrance: true}
+  - {node_id: paw-07, kind: device, type: privileged-access-workstation}
+  - {node_id: paw-07-session, kind: session}
+  - {node_id: admin-overlay, kind: segment}
+  - {node_id: openbao, kind: workload, keybox: true}
+  - {node_id: keyclerk-portal, kind: workload, hosted_in: rack-a1, console_requires: bmc-a1, console_pep: "BMC behind the out-of-band network", console_depends_on: [bmc-a1], console_keys: [bmc-a1-password]}
+  - {node_id: grant-records, kind: data, label: Sensitive}
+  - {node_id: proof-vault, kind: data, label: Restricted}
+checkpoints:
+  - {checkpoint_id: site-gate, from: road, to: yard, kind: perimeter_gate, layer: physical, pep: "gate guard", requires: site-entry, depends_on: [guard-post], exit: free, records_passage: true, tailgate_resistance: interlock_with_sensor, escort: allowed, fallback: [remote_confirm, deferred]}
+  - {checkpoint_id: main-door, from: yard, to: lobby, kind: building_door, layer: physical, pep: PACS, requires: building-entry, depends_on: [pacs-headend, badge], exit: free, records_passage: true, escort: allowed, fails: {fire: open}, fallback: [remote_confirm, deferred]}
+  - {checkpoint_id: mantrap-in, from: lobby, to: mantrap, kind: mantrap, layer: physical, pep: PACS, requires: secure-floor, depends_on: [pacs-headend, badge, pin], exit: free, records_passage: true, tailgate_resistance: interlock_with_sensor, escort: allowed, fails: {fire: open}, fallback: [remote_confirm, deferred]}
+  - {checkpoint_id: mantrap-out, from: mantrap, to: hallway, kind: mantrap, layer: physical, pep: PACS, requires: secure-floor, depends_on: [pacs-headend, badge, pin], exit: free, records_passage: true, tailgate_resistance: interlock_with_sensor, escort: allowed, fails: {fire: open}, fallback: [remote_confirm, deferred]}
+  - {checkpoint_id: loading-dock, from: yard, to: hallway, kind: building_door, layer: physical, pep: PACS, requires: dock-entry, depends_on: [pacs-headend, badge], exit: free, records_passage: true, escort: allowed, fails: {fire: open}, fallback: [remote_confirm, deferred]}
+  - {checkpoint_id: hallway-fire-exit, from: yard, to: hallway, kind: building_door, layer: physical, pep: "exit hardware with held-open and forced-door alarm", requires: exit-hardware, depends_on: [exit-alarm-hallway], exit: free}
+  - {checkpoint_id: server-room-door, from: hallway, to: server-room, kind: door, layer: physical, pep: PACS, requires: server-room, depends_on: [pacs-headend, badge, biometric-template], exit: free, records_passage: true, tailgate_resistance: anti_passback, escort: allowed, fails: {fire: open}, fallback: [remote_confirm, deferred]}
+  - {checkpoint_id: guard-room-door, from: lobby, to: guard-room, kind: door, layer: physical, pep: "staffed reception desk", requires: guard-room, depends_on: [guard-on-duty], exit: free, records_passage: true}
+  - {checkpoint_id: key-cabinet-release, from: strongroom, to: key-cabinet, kind: lock, layer: physical, pep: "electronic key cabinet (badge and PIN, releases each key to its holders only, logs every release and return)", requires: key-cabinet, depends_on: [key-cabinet-controller], records_passage: true, fails: {power: closed}}
+  - {checkpoint_id: key-cabinet-admin, from: strongroom, to: key-cabinet, kind: admin, layer: physical, pep: "key cabinet administration at the cabinet (changes release rules; two-person for keys to Restricted)", requires: key-cabinet-admin, depends_on: [key-cabinet-controller, cabinet-admin-console], records_passage: true, fails: {power: closed}}
+  - {checkpoint_id: key-cabinet-override, from: strongroom, to: key-cabinet, kind: override, layer: physical, pep: "mechanical override lock of the cabinet (works without power)", requires: possession, keys: [cabinet-override-key], depends_on: [cabinet-override-lock], records_passage: true}
+  - {checkpoint_id: strongroom-door, from: guard-room, to: strongroom, kind: door, layer: physical, pep: "fire-rated strongroom door, mechanical, stays locked in a fire", requires: strongroom, depends_on: [strongroom-lock], exit: free, records_passage: true}
+  - {checkpoint_id: breakglass-open, from: strongroom, to: breakglass-safe, kind: lock, layer: physical, pep: "safe with tamper-evident seals", requires: break-glass, depends_on: [breakglass-safe-lock], two_person: true, alarm: true, records_passage: true, fallback: [remote_confirm, deferred]}
+  - {checkpoint_id: cage-a-door, from: server-room, to: cage-a, kind: cage_door, layer: physical, pep: "cage lock", requires: possession, keys: {m: 1, of: [cage-key-a, master-key-1]}, depends_on: [cage-lock], exit: free, escort: allowed, fallback: [remote_confirm, deferred]}
+  - {checkpoint_id: rack-a1-lock, from: cage-a, to: rack-a1, kind: lock, layer: physical, pep: "rack lock", requires: rack-a1, depends_on: [rack-lock-controller]}
+  - {checkpoint_id: lockbox-a1-code, from: rack-a1, to: lockbox-a1, kind: combination, layer: physical, pep: "lockbox, split code, logs every opening", requires: lockbox-a1, keys: {m: 2, of: [lockbox-code-half-1, lockbox-code-half-2]}, depends_on: [lockbox-mechanism], two_person: true, records_passage: true, fallback: [deferred, never]}
+  - {checkpoint_id: bank-entry, from: road, to: bank-lobby, kind: building_door, layer: physical, pep: "bank reception, identity check", requires: bank-customer, depends_on: [bank-reception], exit: free, records_passage: true}
+  - {checkpoint_id: bank-vault-door, from: bank-lobby, to: bank-vault, kind: door, layer: physical, pep: "bank vault, staff escort", requires: bank-customer, depends_on: [bank-vault-controls], exit: free, records_passage: true}
+  - {checkpoint_id: box-room-door, from: bank-vault, to: box-room, kind: door, layer: physical, pep: "bank staff escort into the box room", requires: bank-customer, depends_on: [bank-staff-escort], exit: free, records_passage: true}
+  - {checkpoint_id: deposit-box-open, from: box-room, to: deposit-box, kind: lock, layer: physical, pep: "safe-deposit box, bank key and customer key", requires: possession, keys: {m: 2, of: [bank-guard-key, deposit-box-key]}, depends_on: [deposit-box-lock], two_person: true, alarm: true, records_passage: true, fallback: [deferred]}
+  - {checkpoint_id: paw-issue, from: internet, to: paw-07, kind: device_possession, layer: device, pep: "issued device, TPM-measured boot", requires: paw-holder, subject: both, device_requires: paw-device, depends_on: [paw-tpm]}
+  - {checkpoint_id: paw-login, from: paw-07, to: paw-07-session, kind: os_login, layer: identity, pep: "OS login with passkey", requires: paw-login, depends_on: [idp]}
+  - {checkpoint_id: overlay-admission, from: paw-07-session, to: admin-overlay, kind: overlay_policy, layer: network, pep: NetBird, requires: admin-overlay, subject: both, device_requires: admin-overlay-device, depends_on: [netbird-management, device-certificate]}
+  - {checkpoint_id: openbao-checkout, from: admin-overlay, to: openbao, kind: application_authz, layer: application, pep: "OpenBao with a hardware-token second factor", requires: openbao-bmc-read, depends_on: [openbao, hardware-token], records_passage: true}
+  - {checkpoint_id: openbao-admin, from: admin-overlay, to: openbao, kind: admin, layer: application, pep: "OpenBao root token generation by quorum of unseal key holders", requires: openbao-admin, depends_on: [openbao-root, hardware-token], two_person: true, records_passage: true, fallback: [remote_confirm, deferred]}
+  - {checkpoint_id: portal-gateway, from: admin-overlay, to: keyclerk-portal, kind: gateway_authz, layer: application, pep: "Envoy Gateway with OPA", requires: keyclerk-portal, depends_on: [idp, opa-bundle]}
+  - {checkpoint_id: grant-records-rbac, from: keyclerk-portal, to: grant-records, kind: application_authz, layer: application, pep: KeyClerk, requires: grant-records-read, depends_on: [idp], obligations: [read_only, recorded], enforces: [read_only, recorded]}
+  - {checkpoint_id: proof-vault-kas, from: keyclerk-portal, to: proof-vault, kind: data_control, layer: data, pep: "key access service", requires: proof-vault-view, depends_on: [key-access-service, hsm], two_person: true, broker: true, obligations: [view_only, no_export, masked, recorded], enforces: [view_only, no_export, masked, recorded], fallback: [remote_confirm, deferred]}
+credentials:
+  - {credential_id: cage-key-a, kind: mechanical_key, stored_in: key-cabinet, release_requires: cage-a, logged: true, copies: 2, copy_resistance: restricted_keyway}
+  - {credential_id: master-key-1, kind: mechanical_key, master: true, stored_in: key-cabinet, release_requires: master-key, logged: true, copy_resistance: restricted_keyway}
+  - {credential_id: master-key-backup, kind: mechanical_key, copy_resistance: restricted_keyway, sealed: true, backup_of: master-key-1, stored_in: breakglass-safe, tamper_evident: true, on_use: replace, logged: true}
+  - {credential_id: lockbox-code-half-1, kind: code, held_by: ["idp:91d0-bert"], logged: true, on_leaver: change}
+  - {credential_id: lockbox-code-half-2, kind: code, held_by: ["idp:31ee-ingrid"], logged: true, on_leaver: change}
+  - {credential_id: lockbox-code-backup, kind: key_share, sealed: true, backup_of: lockbox-code-half-2, stored_in: breakglass-safe, tamper_evident: true, on_use: replace, logged: true}
+  - {credential_id: lockbox-code-backup-1, kind: key_share, sealed: true, backup_of: lockbox-code-half-1, stored_in: deposit-box, tamper_evident: true, on_use: replace, logged: true}
+  - {credential_id: bmc-a1-password, kind: secret, stored_in: openbao, release_requires: bmc-a1, logged: true, on_read: rotate, register: "credentials.yaml (static, to be declared with the BMC)"}
+  - {credential_id: bmc-a1-recovery, kind: key_share, sealed: true, backup_of: bmc-a1-password, stored_in: breakglass-safe, tamper_evident: true, on_use: replace, logged: true}
+  - {credential_id: cabinet-override-key, kind: mechanical_key, copy_resistance: restricted_keyway, sealed: true, stored_in: breakglass-safe, tamper_evident: true, on_use: replace, logged: true}
+  - {credential_id: bank-guard-key, kind: mechanical_key, copy_resistance: restricted_keyway, held_by: ["bank:vault-staff-1", "bank:vault-staff-2"], logged: true, on_leaver: revoke}
+  - {credential_id: deposit-box-key, kind: mechanical_key, copy_resistance: restricted_keyway, held_by: ["idp:2b9e-owner", "op:7a1e-oscar"], logged: true, on_leaver: revoke}

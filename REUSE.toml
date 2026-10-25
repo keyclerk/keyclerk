@@ -1,0 +1,26 @@
+version = 1
+SPDX-PackageName = "KeyClerk"
+SPDX-PackageSupplier = "VDHome"
+
+# Files that cannot carry a header (compiled policy, data, images) or whose bytes are pinned by hash (the Rego sources:
+# a header would change the compiled modules and their published hashes).
+[[annotations]]
+path = ["keyclerk/policy/**", "keyclerk/schema/**", "tests/**/*.json", "tests/**/*.yaml", "brand/**", "keyclerk/ui/*.svg",
+        "keyclerk/ui/*.ico", "keyclerk/ui/*.png", "docs/**", "*.md", "examples/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 VDHome and the KeyClerk contributors"
+SPDX-License-Identifier = "EUPL-1.2"
+
+# Everything else of ours: the copyright line beside each file's own SPDX-License-Identifier header (aggregate, so a
+# file's header still counts), and the licence for files that carry none (configuration, hooks, scripts).
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 VDHome and the KeyClerk contributors"
+SPDX-License-Identifier = "EUPL-1.2"
+
+[[annotations]]
+path = "keyclerk/ui/vendor/**"
+precedence = "override"
+SPDX-FileCopyrightText = "The Cytoscape Consortium"
+SPDX-License-Identifier = "MIT"

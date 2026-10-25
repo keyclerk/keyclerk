@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: EUPL-1.2
+# Fuzzing with ClusterFuzzLite: the bundle verifier (keyclerk.edge.verify_bundle) through tools/fuzz_verifier.py. Each pull
+# request is fuzzed for two minutes; every week a ten-minute batch run. The actions are pinned to a full commit hash;
+# the token is read-only.
+name: fuzz
+on:
+  pull_request:
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: fuzz-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Build the fuzz targets
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          language: python
+          sanitizer: address
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fuzz
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+        with:
+          language: python
+          sanitizer: address
+          mode: ${{ github.event_name == 'pull_request' && 'code-change' || 'batch' }}
+          fuzz-seconds: ${{ github.event_name == 'pull_request' && 120 || 600 }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

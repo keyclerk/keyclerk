@@ -1,0 +1,6 @@
+{
+ "entrypoint": "keyclerk/tree/decision",
+ "source_sha256": "546a124da3ff01996e6fb1ba18deaa12e25a03633674b2431f6b0bf685a8fb34",
+ "wasm_sha256": "ff129ba5bbb83b0a831a46d93bbd14ef6e0e9e2f0dbba829c497bef7db2cf3b0",
+ "opa": "1.21.0"
+}

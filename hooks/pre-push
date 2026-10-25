@@ -1,0 +1,5 @@
+#!/bin/sh
+# The engine's gate: unit tests, the Rego tests, and the guard that no deployment is named.
+set -e
+python -m pytest -q
+opa test keyclerk/policy/

@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: EUPL-1.2 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>KeyClerk</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#17142b" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0e17" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="/app.css">
+<!-- the graph library looks for this id and then leaves its one rule (position: relative) to app.css: no inline style -->
+<meta id="__________cytoscape_stylesheet" name="keyclerk-graph-style" content="app.css">
+<script src="/personkey.js" defer></script>
+<script src="/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header>
+  <div class="bar">
+    <a class="brand" href="#/"><span class="mark"><img src="/mark-dark.svg" alt="" width="26" height="26"></span><span class="name">KeyClerk</span></a>
+    <span id="realm" class="realm"></span>
+    <nav id="nav" aria-label="Sections"></nav>
+    <span id="whoami" class="whoami"></span>
+  </div>
+</header>
+<div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
+<main id="main" tabindex="-1" aria-busy="true"><p class="loading" role="status">Loading...</p></main>
+<footer>Every view and every action here goes through the KeyClerk API (<a href="/api/v1/openapi.json">contract</a>); the
+engine's checks decide, the reconciler applies.</footer>
+</body>
+</html>
