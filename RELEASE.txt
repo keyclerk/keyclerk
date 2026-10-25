@@ -278,7 +278,6 @@ files:
   tests/test_edge_slice_d.py  sha256 61ecb7a1503f083f96dd5364b01051bed2eccfbdb4e6e9f397e76032d7c12efc
   tests/test_edges.py  sha256 7b3e155c3bf653aa6126498fd4145a551a94585a6c692c1bef55b791d07832e2
   tests/test_events.py  sha256 d1bf15120c08dfa450b484c2c13082acf1243852384575e2c62add33dacb80ae
-  tests/test_export_public.py  sha256 acfd95c1323784803831f27207b220036fb11804a1e66fd8f632fb50c5398b38
   tests/test_fullcheck.py  sha256 edac044438ef1a0b4fc1ce37debe71129f0fd5311e6027efc5eb6817f7ab3199
   tests/test_grants.py  sha256 3cc1bc4c2fd3f009618b2d8d77b771afe325cc9008a99ae1edc4afd33244d136
   tests/test_guard.py  sha256 0611372033ac7beebdd4ed023b5abdd9390fd5b83084f56ec7c043fec9fb8ff3
@@ -300,8 +299,6 @@ files:
   tests/test_piam.py  sha256 1bde13c290e041aaf099bae6f69b710c3bed80d5c3e1528b6a30b70dfcc5e60a
   tests/test_pools.py  sha256 e02fdd8f736d9b0d28af861927eacc79818141a48ebabf861cdf6cb988706a1e
   tests/test_proposer_proofs.py  sha256 066a64052416054aa579141889bc7b3ee753d4eed8f657f1f5ef416014e2a87b
-  tests/test_public_envelope.py  sha256 ac3414f76803e51364b0048f2da3735f88b1e061b05beb174aa641ef623872e7
-  tests/test_public_references.py  sha256 83ba35e857903cd5d629e70047bef450921a06329026d30943449a08fc7f9bbe
   tests/test_readme.py  sha256 d5f9104dcfba0fb320e8b1d36768ed3a9ff6df1d89738a3208bda292cfb7d523
   tests/test_reconcile.py  sha256 ae32f768579c30f840373eec481de06a94156ddac0576760c98c180e3e3eb106
   tests/test_reconcile_log.py  sha256 f06250f97796c14264dcfba9151d76a736e3ca161d723c647baffe336c984b5c
@@ -331,7 +328,6 @@ files:
   tools/bench_store.py  sha256 c52df9188bef84ef3bd3375eb60e404b3eed7236324f085ea9859b193a98cc07
   tools/build_policy.py  sha256 a33fa31c1be51c050a3dd4d9221f0baed8b16d62199d23d18e18f22fe14c7fa2
   tools/edge_verifier_vectors.py  sha256 1a006268bf0ba6b879b124f2c75322261fa495a905451769a586c183ecd8bccd
-  tools/export_public.py  sha256 2aa1def3f1d6dcd804120292e1149c4a9b230f8e702363377161ea6277225f0d
   tools/fetch_opa.py  sha256 e726e429085004bfcc125b18e434d3f5818a077d739b1c4ad8c946660db7ad49
   tools/fuzz_verifier.py  sha256 e6f06d3b3eab59cc8edd3c393713fe719b8850a3bec7e533a10ff9d7cdc26de9
   tools/gen_api_contract.py  sha256 73541943e3b689ba118f7c9f61c554a5e9b20c83aaf5647973145f53315bb3ad
