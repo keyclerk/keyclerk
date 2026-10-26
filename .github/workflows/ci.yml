@@ -22,6 +22,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - name: The trust store as in the image (tools/distrust_cas.sh)
+        run: sh tools/distrust_cas.sh
       - name: Dependencies, hash-locked
         run: |
           pip install -q --require-hashes --only-binary=:all: -r requirements.lock

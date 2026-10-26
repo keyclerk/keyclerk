@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keyclerk"
-version = "0.26.1"
+version = "0.26.3"
 description = "Access leases, delegated administration and access paths for Keycloak, decided by policy and driven by configuration"
 readme = "README.md"
 license = "EUPL-1.2"
