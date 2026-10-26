@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: EUPL-1.2
-# Every push and pull request: the policy tests, the check that each compiled policy belongs to its source, the whole
+# Every push, pull request and merge-queue group: the policy tests, the check that each compiled policy belongs to its source, the whole
 # Python suite in the pinned base image with hash-locked dependencies, licensing (REUSE), lint (ruff), and the leak gate over the
 # repository itself. Actions are pinned to full commit hashes; the token is read-only.
 name: ci
@@ -7,6 +7,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:                  # the merge queue tests each group on top of main before it lands
 permissions:
   contents: read
 jobs:
