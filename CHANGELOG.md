@@ -3,7 +3,15 @@
 Each release's notes come from its section here. Earlier entries are the releases' own one-line summaries;
 the decision records (docs/decisions) hold the reasoning.
 
-## Unreleased
+## 0.26.3 (2026-10-26)
+- The image's trust store leaves out the emSign roots that certifi 2026.10.19 dropped after the eMudhra intermediate
+  key incident (emSign ECC Root CA - G3, emSign Root CA - C1, emSign ECC Root CA - C3), so the desk, the reconciler
+  and the signer never accept a server certificate chaining to them; the base image's Python (3.12.15) does not
+  reject the affected intermediates itself yet. `tools/distrust_cas.sh` does it, in the Containerfile and in CI;
+  `tests/test_trust_store.py` checks it. Dependency installs were already safe: every one is hash-locked.
+- 0.26.2 was tagged internally only; its section below is part of this release.
+
+## 0.26.2 (2026-10-26)
 Hardening after a review of the change log, the identity boundary and the reconciler (decision 0028, 2026-10-26):
 - The checking signer has a second listener for the reconciler (`--reconciler-listen`, `--reconciler-token`), the only
   one that records a broker subject; the desk's listener refuses `link_subject`. **Deployments on the change log:**
