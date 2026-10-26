@@ -78,7 +78,7 @@ def scan(root: Path, names_file: Path | None = None) -> list[str]:
                           if (m := re.match(r"(00\d\d[a-z]?)-", f.name, re.I)))   # records released in this tree
     hits = []
     for f in sorted(root.rglob("*")):
-        if not f.is_file() or {".git", ".ruff_cache", ".pytest_cache", "__pycache__"} & set(f.parts):
+        if not f.is_file() or {".git", ".ruff_cache", ".pytest_cache", ".hypothesis", "__pycache__"} & set(f.parts):
             continue
         rel = f.relative_to(root).as_posix()
         if DEPLOYMENT.search(rel):
