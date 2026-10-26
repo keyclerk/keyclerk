@@ -160,12 +160,13 @@ fails if this repository names one.
 ## Running
 
 One image, three commands: the reconciler (the one writer of the broker's managed groups), the read-only console and
-the desk (`keyclerk.api`).
+the desk (`keyclerk.api`). Build from a reviewed commit or a signed tag; the image installs only the hash-locked
+`requirements.lock`.
 
 ```
-git archive v0.15.0 | podman build -t keyclerk:0.15.0 -
-podman run --read-only -v ./keyclerk.yaml:/etc/keyclerk/keyclerk.yaml:ro -v ./records.yaml:/etc/keyclerk/records.yaml:ro   -v ./records.yaml.sig:/etc/keyclerk/records.yaml.sig:ro -v ./records.pub:/etc/keyclerk/records.pub:ro   -v ./writer:/run/secrets/writer:ro -v ./reader:/run/secrets/reader:ro -v keyclerk-state:/var/lib/keyclerk keyclerk:0.15.0   keyclerk.reconcile --config /etc/keyclerk/keyclerk.yaml --records /etc/keyclerk/records.yaml   --signing-key /etc/keyclerk/records.pub --keycloak https://id.example --realm example   --secret-file /run/secrets/writer --reader-client keyclerk-reader --reader-secret-file /run/secrets/reader   --state /var/lib/keyclerk --apply
-podman run --read-only -p 127.0.0.1:8090:8090 ... keyclerk:0.15.0 keyclerk.console --host 0.0.0.0   --allowed-host console.example --oidc-public-issuer https://id.example/realms/example   --oidc-redirect https://console.example/callback ...
+git archive HEAD | podman build -t keyclerk:0.26.1 -   # or a signed release tag, once releases are published
+podman run --read-only -v ./keyclerk.yaml:/etc/keyclerk/keyclerk.yaml:ro -v ./records.yaml:/etc/keyclerk/records.yaml:ro   -v ./records.yaml.sig:/etc/keyclerk/records.yaml.sig:ro -v ./records.pub:/etc/keyclerk/records.pub:ro   -v ./writer:/run/secrets/writer:ro -v ./reader:/run/secrets/reader:ro -v keyclerk-state:/var/lib/keyclerk keyclerk:0.26.1   keyclerk.reconcile --config /etc/keyclerk/keyclerk.yaml --records /etc/keyclerk/records.yaml   --signing-key /etc/keyclerk/records.pub --keycloak https://id.example --realm example   --secret-file /run/secrets/writer --reader-client keyclerk-reader --reader-secret-file /run/secrets/reader   --state /var/lib/keyclerk --apply
+podman run --read-only -p 127.0.0.1:8090:8090 ... keyclerk:0.26.1 keyclerk.console --host 0.0.0.0   --allowed-host console.example --oidc-public-issuer https://id.example/realms/example   --oidc-redirect https://console.example/callback ...
 ```
 
 Without `--apply` a run is a dry run. Records are applied only when they pass every check, carry a valid signature
@@ -182,7 +183,8 @@ client with PKCE and a `keyclerk-viewer` role for the people allowed to look.
 
 `python -m keyclerk.api` serves the desk: people sign in at the broker and see what they hold and manage and why;
 deputies add and remove members, nest groups, create subgroups and delegate, each change applied, held for a second
-key, or refused by the engine with its reasons. Applied changes are signed record revisions the reconciler applies.
+key, or refused by the engine with its reasons. Applied changes are signed: on the YAML store as record revisions, on the change log as links the checking signer
+judges and signs; the reconciler applies either.
 
 The front end in `keyclerk/ui` is only one client of the API. Build your own against `/api/v1` (contract:
 `keyclerk/schema/api.openapi.json`, also served at `/api/v1/openapi.json`): a browser front end on the desk's own
@@ -215,6 +217,13 @@ desk's key; at start the desk repairs what a crash left (a cut log line, an unre
 revision file, half-published records), only towards a revision a signed log line vouches for, and records what it
 did in the log. Anything else stops it with a StoreFault: restore the store from a backup. A store written by 0.4.3 or
 earlier has unsigned log lines and does not start: seed a new one.
+
+On the signed change log (`store.kind: sqlite`, decision 0022) the desk holds no signing key: it runs with
+`--signer unix:/run/keyclerk/signer.sock` (or `tcp:` with `--signer-token`), proposes every change to the checking
+signer (`python -m keyclerk.signer --key ... --state ... --config ... --listen ...`), and follows the signer's log every
+15 s. With the signer down, reads go on and writes are refused, never queued; readiness says why. A running YAML desk
+moves with `python -m keyclerk.store.migrate`: the runbook, with the way back, is
+[docs/migrate-to-change-log.md](docs/migrate-to-change-log.md).
 
 ## Health and metrics
 
