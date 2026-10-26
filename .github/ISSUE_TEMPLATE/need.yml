@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: A need KeyClerk does not meet
+description: Something your deployment needs that the engine cannot do, or cannot be configured to do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        KeyClerk holds no deployment's rules: most needs are configuration (keyclerk/schema/config.schema.json) or
+        policy. Say what you need to happen, not how; a change of what the engine does starts as a decision record.
+  - type: textarea
+    id: need
+    attributes:
+      label: What you need, and for whom
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today instead
+  - type: textarea
+    id: records
+    attributes:
+      label: Decision records or documentation you read
+      description: Which ones come closest, and where they fall short.
