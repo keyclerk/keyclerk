@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: EUPL-1.2
-# OpenSSF Scorecard: weekly and on main, results to code scanning and the public Scorecard API.
+# OpenSSF Scorecard: weekly, on main and by hand, results to code scanning and the public Scorecard API.
 name: scorecard
 on:
+  workflow_dispatch:
   schedule:
     - cron: "17 5 * * 1"
   push:
