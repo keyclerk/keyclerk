@@ -167,7 +167,9 @@ class ScimTarget(MembershipTarget):
         for path, anchor in plan["remove"]:               # reductions first; a failure is reported, never silent
             try:
                 g = self.group(path)
-                u = {"id": guard.uuid(anchor[4:])} if anchor.startswith("uid:") else self.user(anchor)
+                seen = (getattr(self, "_anchors", None) or {}).get((path, anchor))   # the member the read found
+                u = ({"id": guard.uuid(anchor[4:])} if anchor.startswith("uid:") else
+                     {"id": seen} if seen else self.user(anchor))   # a copied attribute elsewhere never blocks a removal
                 if not u or not g:
                     done["failed"].append({"group": path, "anchor": anchor, "why": "person or group not found"})
                     continue

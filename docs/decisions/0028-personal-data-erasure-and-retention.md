@@ -68,6 +68,21 @@
   never its free text: the summary and the reasons, which can name people, stay in the desk's activity log, whose line
   points at the link. Free text inside records (a reason a person typed) is the personal-data release's.
 
+## Who may link a subject, and what a link and a row may carry (2026-10-26, after an adversarial review)
+- A subject link is never undone and decides whose sign-ins and proofs count as whom, so only the reconciler records
+  one, on the signer's second listener with its own credential (`--reconciler-listen`, `--reconciler-token`); the
+  desk's listener refuses `link_subject`, and the desk's credential never opens the reconciler's. The reconciler links
+  only on an applying run, only a membership the records want, and only when exactly one account in the realm carries
+  the anchor attribute and it is the member seen.
+- A new account's mapping row is {anchor, idp, salt, label?}: it never arrives with a subject. An identity provider id
+  never starts with `sub:` (the reverse table keys subjects as `sub:` and the subject), and no anchor may use that
+  prefix either.
+- The signer checks a link's entry itself: the fields above, each in its shape (an id, a word, an internal anchor or an
+  engine actor, a visit's summary of ids); a desk's free text or provider id is refused, not trusted to the honest desk.
+- A follower (a desk or the reconciler) swaps in a resynced log only when it extends the history it verified: a signer
+  restored from an older backup that signed a second history is refused, never followed.
+- A proof whose token was erased is a reason ("the proof's token was erased"), never an exception.
+
 ## Consequences
 - The engine never claims "anonymous" or "compliant". It gives the deployer erasure, retention, restriction and
   receipts. Their DPIA states why an append-only history is kept, and for how long.

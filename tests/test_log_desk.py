@@ -103,7 +103,7 @@ def test_a_refused_change_leaves_the_desk_where_it_was(started):
     bad = copy.deepcopy(before)
     bad["memberships"].append({**bad["memberships"][0], "membership_id": "M-example-9999", "group": "no-such-group"})
     with pytest.raises(SignerRefused, match="unknown group"):
-        st.commit(bad, {"action": "add_member", "actor": "idp:7c1f-ann", "outcome": "applied"})
+        st.commit(bad, {"action": "add_member", "actor": "keyclerk:test", "outcome": "applied"})
     assert st.store.size() == size and st.load() == before
 
 
@@ -114,7 +114,7 @@ def test_a_change_whose_answer_was_lost_is_not_applied_twice(started):
     rec = st.load()
     rec["memberships"][0] = {**rec["memberships"][0], "end": "2027-02-01T00:00:00Z"}   # ends a month earlier
     ops, _ = ops_between(st.load(), rec)
-    entry = {"change_id": "C-face01", "action": "extend", "actor": "idp:7c1f-ann", "outcome": "applied"}
+    entry = {"change_id": "C-face01", "action": "extend", "actor": "keyclerk:test", "outcome": "applied"}
     s.propose(st.follower.base(), {"ops": ops, "entry": entry}, [])   # applied; the desk never heard
     size = s.replica.size()
     st._propose(ops, [], [], entry)                                     # the desk proposes it again

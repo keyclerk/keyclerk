@@ -374,7 +374,10 @@ def run_once(args, at: datetime | None = None, target: KeycloakTarget | None = N
         # records required before. Memberships the records never required (added in the broker by hand, members
         # without an anchor) are intrusions: always removed, so they cannot be used to block the run.
         before = state.last_desired()
-        lawful = [r for r in plan["remove"] if before is not None and tuple(r) in before]
+        # with no earlier desired set (a first run, a lost or set-aside state) nothing tells an intrusion from a lawful
+        # holder, so every anchored member counts against the cap; only members without an anchor always go
+        lawful = [r for r in plan["remove"]
+                  if (tuple(r) in before if before is not None else not str(r[1]).startswith("uid:"))]
         intruders = [r for r in plan["remove"] if r not in lawful]
         run["intrusions_removed"] = len(intruders)
         # the override names the lawful plan: the revision, what it adds and what it takes away
@@ -413,8 +416,8 @@ def run_once(args, at: datetime | None = None, target: KeycloakTarget | None = N
                 if isinstance(rev, int) and rev != mark and hasattr(target, "set_high_water"):
                     target.set_high_water(rev)
         state.observed(target.read_full() if args.apply else have)
-        if log_ids is not None:                           # phase 2: people seen through their attribute get linked
-            run["findings"] = run.get("findings", []) + target.link_subjects(log_ids["signer"])
+        if log_ids is not None and args.apply:            # phase 2: people seen through their attribute get linked
+            run["findings"] = run.get("findings", []) + target.link_subjects(log_ids["signer"], want)   # never on a dry run
         state.usernames(getattr(target, "usernames", {}) or {})
         state.emails(getattr(target, "emails", {}) or {})
     except (Refused, guard.InputRejected, LogRefused) as e:

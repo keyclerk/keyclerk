@@ -489,10 +489,15 @@ def handler(desk: Desk, auth, allowed_hosts: set[str], api_clients: tuple[str, .
             ip, now = self.client_address[0], time.monotonic()
             per = int(V.rules().get("scan_per_minute", 30))
             with scan_lock:
+                if ip not in scans and len(scans) >= 10000:     # full: forget addresses quiet for a minute first
+                    for k in [k for k, d in scans.items() if not d or now - d[-1] > 60]:
+                        del scans[k]
+                    if len(scans) >= 10000:                    # still full: only a new address waits, never everyone
+                        raise ApiError(429, "rate_limited", "too many scans right now; wait a minute")
                 q = scans.setdefault(ip, deque())
                 while q and now - q[0] > 60:
                     q.popleft()
-                if len(q) >= per or len(scans) > 10000:
+                if len(q) >= per:
                     raise ApiError(429, "rate_limited", "too many scans from here; wait a minute")
                 q.append(now)
             token = unquote(u.path[len("/api/v1/scan/"):])

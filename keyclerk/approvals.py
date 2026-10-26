@@ -37,7 +37,9 @@ from keyclerk.oidc import rs256
 KEYED = (("memberships", "membership_id"), ("delegations", "delegation_id"), ("grants", "grant_id"),
          ("approvers", "approver_id"), ("badges", "badge_id"),
          ("edges", "edge_id"), ("person_keys", "key_id"), ("edge_visit_leases", "lease_id"),   # decision 0014: every kind
-         ("edge_rotations", "rotation_id"))                    # the desk adds approved_by to (Desk._with_approvals)
+         ("edge_rotations", "rotation_id"),                    # the desk adds approved_by to (Desk._with_approvals)
+         ("situations", "situation_id"), ("surge_packages", "package_id"), ("leases", "lease_id"))   # and the kinds whose
+#   two-person rules read approved_by from records reviewed as code: a proof each, or a pin in accepted_without_proof
 MAX_ARCHIVED_KEYS = 64
 
 
@@ -108,6 +110,9 @@ def check(doc: dict, verify, policy: dict) -> list[str]:
             items = [index[str(x)] for x in p["records"] if str(x) in index]
             if len(items) != len(p["records"]):
                 why = "the proof names a record that is not in these records"
+                continue
+            if not isinstance(p.get("token"), str):     # erased (decision 0028): a fact that held, never an exception
+                why = "the proof's token was erased"
                 continue
             try:
                 verify(p["token"], statement(doc["realm"], items, by), by)
@@ -223,6 +228,9 @@ def check_proposals(old: dict, new: dict, verify, policy: dict) -> list[str]:
             items = [index[str(x)] for x in p["records"] if str(x) in index]
             if len(items) != len(p["records"]):
                 why = "the proof names a record that is not in these records"
+                continue
+            if not isinstance(p.get("token"), str):     # erased (decision 0028): a fact that held, never an exception
+                why = "the proof's token was erased"
                 continue
             try:
                 verify(p["token"], statement(new["realm"], items, by, purpose="proposal"), by)

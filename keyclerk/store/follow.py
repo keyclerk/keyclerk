@@ -71,7 +71,14 @@ class Follower:
         self.resync()
 
     def resync(self):
-        """A new store built from the signer's links and tokens, verified against the signer's head, swapped in."""
+        """A new store built from the signer's links and tokens, verified against the signer's head, swapped in, and
+        only when it extends the history this store had verified: a signer restored from an older backup that signed
+        a second history is refused, never followed (it would drop what the newer branch holds, revocations too)."""
+        try:
+            kept = self.store.size()
+            mine = self.store.link(kept - 1) if kept else None
+        except Exception:   # noqa: BLE001 - a lost or broken store has no verified history left to keep
+            kept, mine = 0, None
         new = self.fresh()
         for kind in DESK_SIDE:                    # what only the desk holds, while the old store still reads
             try:
@@ -92,6 +99,10 @@ class Follower:
         head = self.client.head()
         if new.size() != head["size"] or new.head().hex() != head["head"] or new.root().hex() != head["root"]:
             raise StoreRefused("a resync did not reach the signer's head: the signer changed during it, resync again")
+        if mine is not None and (new.size() < kept or new.link(kept - 1) != mine):
+            raise StoreRefused(f"the signer's log does not extend the {kept} links this store verified: a signer "
+                               "restored from an older backup, or a fork; not followed. Restore the signer's newest "
+                               "state; the desk keeps its own until then")
         old, self.store = self.store, new
         try:
             old.close()

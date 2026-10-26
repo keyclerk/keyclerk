@@ -4,6 +4,29 @@ Each release's notes come from its section here. Earlier entries are the release
 the decision records (docs/decisions) hold the reasoning.
 
 ## Unreleased
+Hardening after a review of the change log, the identity boundary and the reconciler (decision 0028, 2026-10-26):
+- The checking signer has a second listener for the reconciler (`--reconciler-listen`, `--reconciler-token`), the only
+  one that records a broker subject; the desk's listener refuses `link_subject`. **Deployments on the change log:**
+  start the signer with `--reconciler-listen` and point the reconciler's `--signer` at it, or accounts are not linked
+  to their subject (access still works by anchor attribute, as in phase 1).
+- The reconciler links a subject only on an applying run, only for a membership the records want, and only when one
+  account carries the anchor attribute; a removal removes the member the read found, so a copy of an anchor on another
+  account never blocks it.
+- The signer refuses a mapping row that carries a subject or an identity provider id starting with `sub:`, refuses
+  `sub:` anchors, and checks a link's entry shape (no free text, no provider ids).
+- A follower refuses a resynced log that does not extend the history it verified.
+- Approvals recorded on situations, surge packages and leases need a proof (or a pin in
+  `approvals.accepted_without_proof`), like every other approval.
+- A proof whose token was erased is reported as such instead of failing the check.
+- The reconciler's removal cap counts every anchored member when it has no earlier desired set (a first run or a
+  lost state).
+- The desk: a refused approval names approvers only to someone the pending view shows them to; the public scan
+  budget forgets quiet addresses, so a full table never refuses everyone.
+- Edges: a lease credential is relayed only to the holder of that lease; a rotation meets the enrolment's rules for its
+  keys and officer; the address endpoint answers only what the officer's ceiling and independence allow at the time
+  of the request.
+- Edges: after a rotation to another officer or key, the previous officer's ceiling governs nothing (no leases, an
+  incident) until the officer in force signs one.
 - An approval that does not count as a key the change needs is refused, with the reason that names why (`X does
   not count: ...`), and the change waits as it did. Before, such an approval answered `pending` and was kept: a key
   that does not count only adds that tail to the reason it leaves open, and the desk took the changed text for

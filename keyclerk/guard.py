@@ -130,8 +130,8 @@ def anchor(value, what: str = "anchor") -> str:
     """A person's anchor: an identifier outside the reserved uid: prefix, which stands for a broker member without an
     anchor and must never be matched by a record."""
     ident(value, what)
-    if value.lower().startswith("uid:"):
-        raise InputRejected(f"{what} uses the reserved uid: prefix")
+    if value.lower().startswith(("uid:", "sub:")):    # uid: a member without an anchor; sub: a broker subject's key
+        raise InputRejected(f"{what} uses a reserved prefix (uid: or sub:)")
     return value
 
 

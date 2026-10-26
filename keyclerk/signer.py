@@ -64,6 +64,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import socket
 import socketserver
 import sys
@@ -589,6 +590,7 @@ class Signer:
                 raise SignerRefused(f"stale: the signer's head is {size}/{hexhead}; resync and propose again")
             if not isinstance(change, dict) or set(change) != {"ops", "entry"}:
                 raise SignerRefused("a change is exactly ops and entry")
+            _entry_shape(change["entry"])
             per_kind: dict[str, int] = {}
             for op in change["ops"] if isinstance(change["ops"], list) else []:
                 k = op.get("kind") if isinstance(op, dict) else None
@@ -708,9 +710,12 @@ class Signer:
         rows = rows or []
         out, seen = [], set()
         for row in rows:
-            if not isinstance(row, dict) or not isinstance(row.get("anchor"), str) or not isinstance(row.get("idp"), str):
-                raise SignerRefused("a mapping row is {anchor, idp, salt, label?}")
+            if not isinstance(row, dict) or not isinstance(row.get("anchor"), str) or not isinstance(row.get("idp"), str)                     or not set(row) <= {"anchor", "idp", "salt", "label"}:
+                raise SignerRefused("a mapping row is {anchor, idp, salt, label?}: a broker subject is linked only later, "
+                                    "by the reconciler")
             anchor, idp = row["anchor"], row["idp"]
+            if idp.startswith("sub:"):                  # the reverse table keys subjects as "sub:" + subject
+                raise SignerRefused(f"mapping row {anchor[:40]}: an identity provider id never starts with sub:")
             if not A.row_matches(row, vouched.get(anchor)):
                 raise SignerRefused(f"mapping row {anchor[:40]}: no accounts record this change puts carries its "
                                     "commitment")
@@ -836,15 +841,53 @@ def _now() -> str:
 
 # --- the socket ------------------------------------------------------------------------------------------------------
 
-def _handler(signer: Signer, token: str | None):
+_ENTRY_ID = re.compile(r"C-[0-9a-z-]{1,40}")
+_ENTRY_WORD = re.compile(r"[a-z_]{1,40}")
+_ENTRY_SUMMARY = re.compile(r"[a-z_]{1,40} on [A-Za-z0-9_:, -]{0,400}")    # the desk's "<action> on <visit ids>"
+
+
+def _entry_shape(entry) -> None:
+    """A link keeps an entry's structure, never its free text (decision 0028): the desk's LINK_ENTRY fields, each in
+    its shape, checked here because the signed log is kept for good and no erasure reaches it."""
+    if not isinstance(entry, dict) or not set(entry) <= {"change_id", "action", "actor", "outcome", "records", "summary"}:
+        raise SignerRefused("an entry is change_id, action, actor, outcome and records (and a visit's summary) only")
+    from keyclerk import anchors as A
+    checks = [("change_id", lambda v: isinstance(v, str) and _ENTRY_ID.fullmatch(v)),
+              ("action", lambda v: isinstance(v, str) and _ENTRY_WORD.fullmatch(v)),
+              ("outcome", lambda v: isinstance(v, str) and _ENTRY_WORD.fullmatch(v)),
+              ("actor", lambda v: v is None or A.is_internal(v) or (isinstance(v, str) and v.startswith("keyclerk:")
+                                                                     and _ENTRY_WORD.fullmatch(v[9:]))),
+              ("summary", lambda v: isinstance(v, str) and _ENTRY_SUMMARY.fullmatch(v)),
+              ("records", lambda v: isinstance(v, dict) and all(_ENTRY_WORD.fullmatch(str(k)) and isinstance(x, list)
+                                                                for k, x in v.items()))]
+    for key, ok in checks:
+        if key in entry and not ok(entry[key]):
+            raise SignerRefused(f"entry {key}: not in its shape (an internal anchor, an id, a word), never free text")
+
+
+# Who may ask what (decision 0028, amendment of 2026-10-26): a subject link is never undone and decides whose sign-ins
+# count as whom, so only the reconciler, which reads the broker, records one; the desk's credential cannot.
+READ_OPS = frozenset({"ping", "public_key", "head", "links", "anchors", "checkpoint"})
+ROLE_OPS = {"desk": READ_OPS | {"sign_line", "commit", "migrate", "propose", "start", "tokens"},
+            "reconciler": READ_OPS | {"link_subject"}}
+
+
+def _handler(signer: Signer, token: str | None, role: str = "desk"):
+    allowed = ROLE_OPS[role]
+
     class H(socketserver.StreamRequestHandler):
         def handle(self):
             line = self.rfile.readline(MAX_REQUEST + 1)
             try:
                 req = json.loads(line)
                 if token is not None and not hmac.compare_digest(str(req.get("token", "")), token):
-                    raise SignerRefused("not the desk: wrong token")
+                    raise SignerRefused(f"not the {role}: wrong token")
                 op = req.get("op")
+                if op == "link_subject" and op not in allowed:
+                    raise SignerRefused("a subject link comes only from the reconciler, on its own listener")
+                if op not in allowed:
+                    raise SignerRefused(f"not the {role}'s to ask" if op in ROLE_OPS["desk"] | ROLE_OPS["reconciler"]
+                                        else "unknown op")
                 if op == "ping":                                 # liveness (decision 0018): answers, signs nothing
                     out = {"ok": False, "broken": signer.broken} if signer.broken else \
                         {"ok": False, "not_ready": signer.not_ready} if signer.not_ready else {"ok": True}
@@ -887,12 +930,13 @@ class _TCP(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
 
 
-def serve(signer: Signer, listen: str, token: str | None):
+def serve(signer: Signer, listen: str, token: str | None, role: str = "desk"):
+    """One listener per role: the desk's, and the reconciler's (its own socket path or port and its own token)."""
     if listen.startswith("unix:"):
         path = listen[5:]
         if os.path.exists(path):
             os.unlink(path)
-        srv = socketserver.ThreadingUnixStreamServer(path, _handler(signer, None))   # file permissions are the guard
+        srv = socketserver.ThreadingUnixStreamServer(path, _handler(signer, None, role))   # file permissions are the guard
         os.chmod(path, 0o600)
     elif listen.startswith("tcp:"):
         host, port = listen[4:].rsplit(":", 1)
@@ -900,7 +944,7 @@ def serve(signer: Signer, listen: str, token: str | None):
             raise SystemExit("the signer listens on loopback only")
         if not token:
             raise SystemExit("over TCP the signer needs --token")
-        srv = _TCP((host, int(port)), _handler(signer, token))
+        srv = _TCP((host, int(port)), _handler(signer, token, role))
     else:
         raise SystemExit("--listen unix:/path or tcp:127.0.0.1:port")
     return srv
@@ -1043,6 +1087,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", required=True)
     ap.add_argument("--listen", help="unix:/path or tcp:127.0.0.1:port; not needed with --adopt")
     ap.add_argument("--token")
+    ap.add_argument("--reconciler-listen", help="the reconciler's own listener (unix:/path or tcp:127.0.0.1:port): the "
+                                                "only one that records a broker subject (link_subject)")
+    ap.add_argument("--reconciler-token", help="the reconciler's token file for a TCP listener; never the desk's")
     ap.add_argument("--approval-issuer", action="append", default=[])
     ap.add_argument("--approval-audience", action="append", default=[])
     ap.add_argument("--approval-jwks", help="the broker's published keys (its certs endpoint)")
@@ -1085,6 +1132,13 @@ def main(argv: list[str] | None = None) -> int:
     if signer.replica is not None and not signer.broken:
         signer.start_background(a.full_check_hours * 3600)
     srv = serve(signer, a.listen, token)
+    if a.reconciler_listen:
+        rtoken = Path(a.reconciler_token).read_text(encoding="utf-8").strip() if a.reconciler_token else None
+        if a.reconciler_listen == a.listen or (rtoken and token and hmac.compare_digest(rtoken, token)):
+            raise SystemExit("the reconciler's listener and token are its own, never the desk's")
+        rsrv = serve(signer, a.reconciler_listen, rtoken, role="reconciler")
+        threading.Thread(target=rsrv.serve_forever, daemon=True).start()
+        sys.stderr.write(f"keyclerk.signer: the reconciler's listener on {a.reconciler_listen}\n")
     sys.stderr.write(f"keyclerk.signer: listening on {a.listen}, key {signer.public_key()[:16]}...\n")
     srv.serve_forever()
     return 0
