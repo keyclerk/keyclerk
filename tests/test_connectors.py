@@ -61,9 +61,9 @@ def serve(data: Scim):
 
         def _list(self, items, q):
             f = q.get("filter", [""])[0]
-            m = re.match(r'(\S+) (eq|gt) "(.*)"$', f)
-            if m:
-                attr, op, val = m.groups()
+            attr, op, val = (f.split(" ", 2) + ["", ""])[:3]      # attr op "value", parsed without a regex
+            if op in ("eq", "gt") and len(val) >= 2 and val[0] == val[-1] == '"':
+                val = val[1:-1]
                 get = (lambda x: x.get("meta", {}).get("lastModified", "")) if attr == "meta.lastModified" else (lambda x: x.get(attr))
                 items = [x for x in items if (get(x) == val if op == "eq" else (get(x) or "") > val)]
             start, count = int(q.get("startIndex", ["1"])[0]), int(q.get("count", ["100"])[0])
