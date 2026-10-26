@@ -25,7 +25,7 @@ files:
   LICENSES/EUPL-1.2.txt  sha256 57fb42fbcd0b037ce528ed8f72f1ec095d67bc6825ecf1448ff39be1fe68a4b4
   LICENSES/MIT.txt  sha256 b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5
   NOTICE  sha256 6e6a422362f953e3bcb77b258746afba662cb29df799ccc7deba4c0a89c67317
-  README.md  sha256 d069e28a1724eef80fd4d8743a64c41772cd82bacb2f4a3db08b1298fcb3c9bc
+  README.md  sha256 b15a883a990675f0d8dd775daeea28c202c90defd5c1e0aef11e451a253c462b
   REUSE.toml  sha256 519c75d50035eb67653d06556a178e8014f6a7d2f346bbbecae3e95c146dc1b3
   SECURITY.md  sha256 7037b2de4f19026dec298344ff9956c8088884aea1a64cffb3de8834cab71700
   brand/BRAND.md  sha256 ecd14117ae1de075fe8a53ce25cab054a23b328caa8b3e3e8c164a0b2c9e7e70
@@ -84,14 +84,14 @@ files:
   docs/decisions/0027-relays-provisional-replacement-and-the-fleet-view.md  sha256 cba3a038aff5053e8ed4a669dea979ff067c919893295aa2ebbf143b36ac1df0
   docs/decisions/0028-personal-data-erasure-and-retention.md  sha256 ca54211c1b4cc401fdbc9be79f7f05728550e03b9317a20fc17309e986d80568
   docs/decisions/README.md  sha256 af0b5d5f3aac769a48f2605a572411d4931f382f3c662f1fef3021faeb4c5de7
-  docs/install.md  sha256 644d16cab94a546154a564aea03891d8c7b7a1f8974c9a8de5b0abd884f53ef1
+  docs/install.md  sha256 afb765d92cf318b33d3f9fdda71f32ea8ca64d3801c2fda3be7d475831428dfe
   docs/keyclerk-edge-interface.md  sha256 32c26ec06590bfce881db483f978cfec7f7813612bbbd0d352bdc401ada9f62f
   docs/migrate-to-change-log.md  sha256 91fe8ffb538567d95875d90f526f0be4ed1f33b4094f4053edc319165ee1c481
   docs/references.md  sha256 383ebc55abb3f488161a5914e7b0f23b6c997abaff2d6f2b1cbbccaa25ffcf23
   docs/templates/specification.md  sha256 8e6c15c9654190e417c165270b44b6f1437416f3f27ce71fa805070329166275
   docs/testing/concurrency-and-state-machines.md  sha256 9fceb319dc0a03056523d9edaefddadb4353315ae347c8fc5576dab6384acba1
   docs/testing/realistic-load.md  sha256 28ba796eb4c9a3b16362480a24485294a1c66b0ec60f557fdb3c79bbf81b4edc
-  docs/threat-model.md  sha256 3644e9a384400a24357138c97d335834dcd5367c967d1aebebc735d0bb5074a3
+  docs/threat-model.md  sha256 e4af7c24538df36d23c2052ffa1a8451d66c75bc18c2506f4aef905deeb6e782
   docs/use-cases/data-owner-and-system-owner.md  sha256 c1159ecaf8de8e6caf95a64ab6d2e1d69488af81b958738116ba4d0c401075d7
   docs/ux/desk-upgrade.md  sha256 ed4586ae67a0e63531700faa79bf21f7800de912840612a2dfa0f3dae3d21fb8
   docs/ux/persona-history.md  sha256 191c456333ad0384b47ff5f8f79e9f76b6fa942f933e93957311bbd001e5a4fe

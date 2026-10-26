@@ -31,6 +31,10 @@ This page describes defences that are built and tested; it is updated with each 
   `tests/test_proposer_proofs.py`)
 - **A separate signer checks everything it signs.** Whoever takes over the desk still cannot get a change signed that
   breaks the rules or lacks its approvals. (`keyclerk/signer.py`; `tests/test_signer.py`)
+- **Only the reconciler links a person to their sign-in account**, on the signer's own listener with its own
+  credential, and only for one account it read with that person's anchor; the signer bounds what a link and a new
+  account's row may carry. (`keyclerk/signer.py`, `keyclerk/store/log_reconcile.py`; `tests/test_signer_roles.py`,
+  `tests/test_reconcile_links.py`)
 - **Only signed, checked, non-rewriting records are applied**, and revocations can never be dropped from history.
   (`keyclerk/reconcile.py`, `keyclerk/records.py`; `tests/test_reconcile.py`)
 - **Edges trust only what was pinned on site:** bundles, ceilings and notices are checked against keys a person pinned,

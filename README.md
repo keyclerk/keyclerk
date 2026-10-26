@@ -221,7 +221,9 @@ earlier has unsigned log lines and does not start: seed a new one.
 On the signed change log (`store.kind: sqlite`, decision 0022) the desk holds no signing key: it runs with
 `--signer unix:/run/keyclerk/signer.sock` (or `tcp:` with `--signer-token`), proposes every change to the checking
 signer (`python -m keyclerk.signer --key ... --state ... --config ... --listen ...`), and follows the signer's log every
-15 s. With the signer down, reads go on and writes are refused, never queued; readiness says why. A running YAML desk
+15 s. The reconciler talks to the signer on a listener of its own (`--reconciler-listen` with its own
+`--reconciler-token`): only there is a person's sign-in account linked to them, never from the desk. With the signer
+down, reads go on and writes are refused, never queued; readiness says why. A running YAML desk
 moves with `python -m keyclerk.store.migrate`: the runbook, with the way back, is
 [docs/migrate-to-change-log.md](docs/migrate-to-change-log.md).
 
