@@ -48,8 +48,12 @@ from signed YAML revision n". The YAML-era history is kept aside as a file (step
 6. **Switch the reconciler to the change log**: replace `--records FILE --signing-key KEY` with
 
    ```
-   --log-replica STATE/log.db --signer unix:/run/keyclerk/signer.sock --records-key records.pub
+   --log-replica STATE/log.db --signer unix:/run/keyclerk/signer-reconciler.sock --records-key records.pub
    ```
+
+   The reconciler talks to the signer's own listener for it: start the signer with
+   `--reconciler-listen unix:/run/keyclerk/signer-reconciler.sock` (a socket only the reconciler's user can open), or a
+   TCP port with its own `--reconciler-token` file. The desk's socket refuses subject links (decision 0028, 2026-10-26).
 
    `records.pub` is the records public key in hex, the same key the YAML store's signature was checked with; pin it from
    your own copy, never from the signer. Run it once without `--apply` and read the plan: it must be empty, or hold

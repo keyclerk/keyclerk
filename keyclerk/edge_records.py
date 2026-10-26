@@ -191,6 +191,22 @@ def current(doc: dict, e: dict, at: datetime) -> dict:
             "unlock_key": r.get("unlock_key")}       # the rotation statement states the node whole (0014d)
 
 
+def _new_keys_errors(doc: dict, rid: str, r: dict) -> list[str]:
+    """What an enrolment requires of its keys and officer, for the keys and officer a rotation brings: two different
+    keys, a person of the organisation as officer, and an enrolment key no other edge has ever used (decision 0014a)."""
+    errs = []
+    if not (HEX64.fullmatch(str(r.get("enrolment_key"))) and HEX64.fullmatch(str(r.get("officer_key")))):
+        errs.append(f"{rid}: the enrolment and officer keys are Ed25519 public keys in hex")
+    if r.get("enrolment_key") == r.get("officer_key"):
+        errs.append(f"{rid}: the edge's enrolment key and its officer's key are different keys")
+    if D.kind_of(doc, r.get("officer")) != "tenant":
+        errs.append(f"{rid}: the edge's officer is a person of the organisation")
+    used = {x["enrolment_key"] for x in doc.get("edges", []) if x["edge_id"] != r["edge"]} |            {x["enrolment_key"] for x in doc.get("edge_rotations", []) if x["edge"] != r["edge"]}
+    if r.get("enrolment_key") in used:
+        errs.append(f"{rid}: an enrolment key serves one edge")
+    return errs
+
+
 def rotation_errors(doc: dict, r: dict) -> list[str]:
     from keyclerk import edge as E
     rid, t0, errs = r["rotation_id"], _ts(r["at"]), []
@@ -202,6 +218,7 @@ def rotation_errors(doc: dict, r: dict) -> list[str]:
         errs.append(f"{rid}: a rotation is proposed by the root or the edge's officer")
     if not _second_key(doc, [x for x in r.get("approved_by", []) if D.same(doc, x, officer)], [r["by"]], t0):
         errs.append(f"{rid}: rotating an edge's keys needs the security officer's key")
+    errs += _new_keys_errors(doc, rid, r)                 # the enrolment's own invariants hold for a rotation too
     tpm = e.get("tpm")
     errs += unlock_key_errors(rid, r.get("unlock_key"))
     st = E.officer_statement(r["edge"], r["officer"], r["officer_key"],

@@ -144,7 +144,7 @@ class LogTarget:
 
     def __init__(self, inner, ids: Identities):
         self.inner, self.ids = inner, ids
-        self.to_link: dict[str, str] = {}
+        self.to_link: dict[str, tuple[str, str, str]] = {}   # anchor -> (uid, group path, attribute)
         self.usernames: dict[str, str] = {}
         self.emails: dict[str, str] = {}
 
@@ -170,7 +170,7 @@ class LogTarget:
                 continue
             out.add((path, anchor))
             if uid and not self.ids.rows[anchor].get("sub") and uid not in self.ids.by_sub:
-                self.to_link[anchor] = uid
+                self.to_link[anchor] = (uid, path, x)
         for attr, name in (getattr(self.inner, "usernames", {}) or {}).items():
             a = self.ids.inward(attr, None)
             if a:
@@ -204,11 +204,20 @@ class LogTarget:
                   "remove": [self._outward(x) for x in plan["remove"]]}
         return self.inner.apply(broker, key=key, dry_run=dry_run)
 
-    def link_subjects(self, signer) -> list[dict]:
-        """Phase 2: each account seen through its attribute, not linked yet, linked to its subject at the signer."""
+    def link_subjects(self, signer, want: set) -> list[dict]:
+        """Phase 2: each account seen through its attribute, not linked yet, linked to its subject at the signer. Only
+        a membership the records want (an unwanted one is about to be removed: its holder proves nothing), and only
+        when exactly one account in the realm carries the attribute and it is this one; a link is never undone, so a
+        copied attribute must not become someone's subject."""
         findings = []
-        for anchor, uid in sorted(self.to_link.items())[:MAX_LINKS_PER_RUN]:
+        for anchor, (uid, path, attr) in sorted(self.to_link.items())[:MAX_LINKS_PER_RUN]:
+            if (path, anchor) not in want:
+                continue
             try:
+                holder = self.inner.user(attr)            # raises when the attribute is on more than one account
+                if not holder or holder.get("id") != uid:
+                    findings.append({"anchor": anchor, "why": "not linked: the attribute's one holder is not this member"})
+                    continue
                 signer.link_subject(anchor, uid)
             except Exception as e:   # noqa: BLE001 - a refused link is a finding; the run goes on by attribute
                 findings.append({"anchor": anchor, "why": f"not linked to its subject: {str(e)[:160]}"})

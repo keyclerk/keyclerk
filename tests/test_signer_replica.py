@@ -92,7 +92,7 @@ def test_a_change_is_signed_only_after_the_replica_checks_it(world, tmp_path):
     ops = change_ops(tmp_path, ADD, world)
     assert [o["kind"] for o in ops] == ["memberships"]
     base = {"size": s.replica.size(), "head": s.replica.head().hex()}
-    answer = s.propose(base, {"ops": ops, "entry": {"action": "add_member", "actor": "idp:7c1f-ann"}}, [])
+    answer = s.propose(base, {"ops": ops, "entry": {"action": "add_member", "actor": "keyclerk:test"}}, [])
     assert answer["revision"] == 2 and answer["hash"] == s.replica.head().hex()
     assert L.check_checkpoint(answer["checkpoint"], s.public_key(), "example", s.replica.size(), s.replica.root(),
                               s.replica.head())

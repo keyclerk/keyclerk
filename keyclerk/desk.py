@@ -688,6 +688,7 @@ class Desk:
         self._bundle_gen = 0
         self._long_polls: dict[str, list[dict]] = {}
         self._email_asks: dict[str, deque] = {}           # lease id -> when its address was asked (edge_email)
+        self._email_lock = threading.Lock()
         self._base: tuple[str, set] | None = None
         self._writes: dict[str, deque] = {}
         self._waiting_cache: dict = {}
@@ -841,7 +842,7 @@ class Desk:
                 if not (actor and D.same(doc, a, actor)) and D.authority(doc, a, gid, power, now)]
 
     def _next(self, doc: dict, actor: str | None, reasons, recs: dict | None = None, given=(), gid: str | None = None,
-              sc: dict | None = None) -> list[dict]:
+              sc: dict | None = None, viewer: str | None = None) -> list[dict]:
         """For each reason: why, what completes the intent, and who can do it."""
         import re as _re
         from keyclerk import remedies
@@ -858,7 +859,12 @@ class Desk:
             power = m.group(1) if m else ("includes" if "includ" in str(reason) else "members")
             if kind == "approvers" and recs is not None:
                 who = self._approvers(doc, recs, list(given), actor) or []
-                if not who:
+                groups = {r.get("group") for k in ("memberships", "delegations") for r in recs.get(k, [])}
+                if viewer is not None and who and not (                   # the same need to know as changes()
+                        (sc or {}).get("all") or D.same(doc, viewer, actor) or any(D.same(doc, viewer, x) for x in who)
+                        or groups & (sc or {}).get("manage", set())):
+                    who = [root]
+                elif not who:
                     do += (" Nobody in the records can add that key now: the root can appoint a named approver with the"
                            " security officer's key.")
                     who = [root]
@@ -1391,7 +1397,7 @@ class Desk:
             e = self._edge(doc, edge_id, now)
             settings = policy_wasm.edge("settings", {})
             horizons = settings["horizons"]
-            ceiling, sealed_ceiling = self.edge_store.ceiling(edge_id)
+            ceiling, sealed_ceiling = self._current_ceiling(doc, e, edge_id, now)
             state = self.edge_store.state(edge_id)
             attested, _ = self._attested(e, edge_id, quote, request)   # proved on this pull, never claimed (0016)
             leases, visits, dropped = [], [], []
@@ -1467,7 +1473,8 @@ class Desk:
             digests = dict(list((state.get("digests") or {}).items())[-15:])   # 0026: what recent serials said
             digests[str(serial)] = E.bundle_digest(out)
             self.edge_store.update_state(edge_id, last_dropped=dropped[:100], last_bundle=out, holders=holders, digests=digests,
-                                         lease_ids=sorted({x["lease_id"]: x["until"] for x in leases + visits}.items()))
+                                         lease_ids=sorted({x["lease_id"]: x["until"] for x in leases + visits}.items()),
+                                         lease_holders={x["lease_id"]: x["person"] for x in leases + visits})
             return out
 
     EDGE_MODULES = ("edge", "ceiling")
@@ -1513,6 +1520,7 @@ class Desk:
         if errs:
             raise Refusal("; ".join(errs))
         self.edge_store.set_ceiling(edge_id, body["ceiling"])
+        self.edge_store.update_state(edge_id, ceiling_stale=False)        # signed by the officer as they stand now
         self.edge_store.update_state(edge_id, ceiling_floor=c["serial"])
         self._bundles_may_change()
         self.store.note({"change_id": "C-" + secrets.token_hex(6), "action": "set_ceiling", "actor": who.get("anchor"),
@@ -1560,7 +1568,8 @@ class Desk:
         st = self.edge_store.state(edge_id)
         held = {lid: until for lid, until in st.get("lease_ids", [])}
         lid = purpose[len("lease:"):] if purpose.startswith("lease:") else None
-        if not lid or lid not in held or not any(D.same(doc, k["anchor"], h) for h in st.get("holders", [])):
+        holder = (st.get("lease_holders") or {}).get(lid)    # the holder of that lease, never any holder in the bundle
+        if not lid or lid not in held or holder is None or not D.same(doc, k["anchor"], holder):
             raise Refusal("an edge relays a lease credential only to a holder of that lease in its last bundle (purpose lease:<id>)")
         if body["envelope"]["context"] != purpose:
             raise Refusal("the envelope's context is its purpose: they must match")
@@ -1757,6 +1766,23 @@ class Desk:
 
     EMAIL_PER_LEASE = (6, 60)                     # answers per lease in seconds: a gateway sets a credential, it does not poll
 
+    def _current_ceiling(self, doc: dict, e: dict, edge_id: str, now) -> tuple[dict | None, dict | None]:
+        """The stored ceiling, only while it is signed by the edge's officer key as it stands now: after a rotation to
+        another officer or key, the old officer's ceiling governs nothing (no ceiling, so no leases) until the new
+        officer signs one; the first cut that finds this records an incident."""
+        from keyclerk import edge as E
+        from keyclerk import edge_records
+        ceiling, sealed = self.edge_store.ceiling(edge_id)
+        if sealed is None:
+            return None, None
+        errs, _ = E.check_ceiling(edge_id, edge_records.current(doc, e, now)["officer_key"], sealed)
+        if not errs:
+            return ceiling, sealed
+        if not self.edge_store.state(edge_id).get("ceiling_stale"):
+            self.edge_store.incident(edge_id, {"kind": "ceiling_not_current_officer", "detail": errs[0][:900]})
+            self.edge_store.update_state(edge_id, ceiling_stale=True)
+        return None, None
+
     def edge_email(self, edge_id: str, lease_id: str, request: tuple | None) -> dict:
         """The verified address of a lease's person (decision 0028 point 5, edge protocol 1.3): for a lease in the last
         bundle this edge was served and live now, on an edge whose officer is not frozen; sealed with the bundle key for
@@ -1779,12 +1805,22 @@ class Desk:
         live = next((x for x in self._edge_leases(doc, e, now, horizons) if x["lease_id"] == lease_id), None)
         if live is None or lease_id not in served:
             raise LookupError("no live lease by that id on this edge")
-        times = self._email_asks.setdefault(lease_id, deque())
-        while times and times[0] < time.monotonic() - self.EMAIL_PER_LEASE[1]:
-            times.popleft()
-        if len(times) >= self.EMAIL_PER_LEASE[0]:
-            raise Throttled("too many address requests for this lease: try again in a minute")
-        times.append(time.monotonic())
+        from keyclerk import edge_records
+        if edge_records.officer_errors(doc, e, now):          # decided now, not by what the last cut found
+            raise Refusal("this edge's officer is not independent of the core: it gets no leases, and no addresses")
+        ceiling, _ = self._current_ceiling(doc, e, edge_id, now)
+        hours = max(1, int((D._ts(live["until"]) - now).total_seconds() // 3600))
+        if not ceiling or not policy_wasm.ceiling({"ceiling": ceiling, "entry": {
+                "kind": "lease", "person": live["person"], "roles": live["roles"], "targets": [live["target"]],
+                "class": live["class"], "hours": hours}})["allow"]:
+            raise LookupError("no live lease by that id on this edge")    # outside the officer's ceiling as it stands
+        with self._email_lock:                               # check and count as one step: concurrent asks never overrun
+            times = self._email_asks.setdefault(lease_id, deque())
+            while times and times[0] < time.monotonic() - self.EMAIL_PER_LEASE[1]:
+                times.popleft()
+            if len(times) >= self.EMAIL_PER_LEASE[0]:
+                raise Throttled("too many address requests for this lease: try again in a minute")
+            times.append(time.monotonic())
         return E.email_answer(self.bundle_key, edge_id, lease_id, live["person"], self._emails().get(live["person"]),
                               nonce, now)
 
@@ -2333,7 +2369,9 @@ class Desk:
                 doc = self.store.load()
                 p = self.store.pending().get(str(cid))
                 actor = who.get("anchor")
-                e.next = self._next(doc, actor, [str(e)], p["records"] if p else None, p.get("approvals", []) if p else ())
+                e.next = self._next(doc, p["actor"] if p else actor, [str(e)], p["records"] if p else None,
+                                    p.get("approvals", []) if p else (), sc=self._scope(doc, who, self.clock()),
+                                    viewer=actor)
             raise
 
     def _approve(self, who: dict, cid: str, proof: str | None = None) -> dict:
