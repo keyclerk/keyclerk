@@ -1,12 +1,12 @@
 # Exact versions for the image and CI; hash-locking follows with a Linux build step.
 PyYAML==6.0.3
-jsonschema==4.23.0
+jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 referencing==0.37.0
-rpds-py==0.30.0
+rpds-py==2026.9.1
 attrs==26.1.0
 cryptography==50.0.2
-cffi==2.0.0
-pycparser==3.0
+cffi==2.1.1
+pycparser==3.12
 segno==1.6.6
-wasmtime==49.0.0
+wasmtime==50.0.1

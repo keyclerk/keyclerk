@@ -3,6 +3,11 @@
 Each release's notes come from its section here. Earlier entries are the releases' own one-line summaries;
 the decision records (docs/decisions) hold the reasoning.
 
+## Unreleased
+- Dependencies: wasmtime 50.0.1 (the runtime the compiled policies run in), jsonschema 4.26.0, cffi 2.1.1,
+  pycparser 3.12, rpds-py 2026.9.1; for tests pytest 9.1.1 (a tmpdir handling fix) and hypothesis 6.170.6. The image's
+  hash-locked `requirements.lock` is regenerated from `constraints.txt` with them.
+
 ## 0.26.1 (2026-10-25)
 - The compiled policy modules no longer carry the build machine's folders: the compiler kept each source's absolute
   path for its error locations, so a module named the folder it was built in and its bytes, which edges pin by hash,
