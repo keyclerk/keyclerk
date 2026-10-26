@@ -97,6 +97,8 @@ the desk's approval flow, before the first revision applies.
 The desk keeps the records in the folder `--store` names. The configuration's `store` section chooses how: `kind:
 yaml`, the signed YAML store and the default when the section is left out, or `kind: sqlite`, the signed change log
 (decision 0022), from 0.26.0. On the change log the desk never holds the records key: start it with `--signer`.
+Start the signer with `--reconciler-listen` too, and point the reconciler's `--signer` at that listener: it is the
+only one that links a person to their sign-in account.
 docs/migrate-to-change-log.md moves a running deployment over; a new deployment on the change log starts the signer
 empty and seeds it from `--seed`, its first change judged whole. The YAML store suits up to a few thousand people; the
 change log is built for organisations of tens of thousands.
