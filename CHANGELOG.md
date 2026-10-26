@@ -4,6 +4,10 @@ Each release's notes come from its section here. Earlier entries are the release
 the decision records (docs/decisions) hold the reasoning.
 
 ## Unreleased
+- An approval that does not count as a key the change needs is refused, with the reason that names why (`X does
+  not count: ...`), and the change waits as it did. Before, such an approval answered `pending` and was kept: a key
+  that does not count only adds that tail to the reason it leaves open, and the desk took the changed text for
+  progress, so the approver saw nothing change and no why.
 - Dependencies: wasmtime 50.0.1 (the runtime the compiled policies run in), jsonschema 4.26.0, cffi 2.1.1,
   pycparser 3.12, rpds-py 2026.9.1; for tests pytest 9.1.1 (a tmpdir handling fix) and hypothesis 6.170.6. The image's
   hash-locked `requirements.lock` is regenerated from `constraints.txt` with them.
