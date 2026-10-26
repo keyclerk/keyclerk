@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: EUPL-1.2
+blank_issues_enabled: false
+contact_links:
+  - name: A security problem
+    url: https://github.com/keyclerk/keyclerk/security/advisories/new
+    about: Report it privately, never in a public issue (SECURITY.md).
+  - name: Why KeyClerk works as it does
+    url: https://github.com/keyclerk/keyclerk/tree/main/docs/decisions
+    about: The decision records; read the one that covers your question first.

@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: EUPL-1.2
+name: A question or unclear documentation
+description: A decision record, the README or another document is unclear, wrong or missing something.
+labels: [documentation]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Which document
+      placeholder: docs/decisions/0022-signed-change-log-and-sqlite-store.md
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question, or what is unclear
+    validations:
+      required: true
