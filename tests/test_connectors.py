@@ -61,7 +61,7 @@ def serve(data: Scim):
 
         def _list(self, items, q):
             f = q.get("filter", [""])[0]
-            m = re.match(r'(\S+) (eq|gt) "(.*)"$', f)
+            m = re.fullmatch(r'([\w.]+) (eq|gt) "([^"]*)"', f)    # linear: no two parts can take the same text
             if m:
                 attr, op, val = m.groups()
                 get = (lambda x: x.get("meta", {}).get("lastModified", "")) if attr == "meta.lastModified" else (lambda x: x.get(attr))
