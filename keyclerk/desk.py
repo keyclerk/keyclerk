@@ -50,6 +50,15 @@ ACTIONS = ("add_member", "include_group", "end_membership", "create_group", "del
 VISIT_ACTIONS = ACTIONS[-15:-5]
 EDGE_ACTIONS = ACTIONS[-5:]
 KEY_ERRORS = ("second key", "security officer's key", "manager's key")
+_NOT_COUNTING = re.compile(r"; [^;]*? does not count: .*$")
+
+
+def _bare(reasons) -> set[str]:
+    """Reasons without their "; X does not count: why" tail: a key that does not count only adds that tail to the
+    same reason, which is no progress."""
+    return {_NOT_COUNTING.sub("", r) for r in reasons}
+
+
 APPROVERS_SHOWN = 3                  # names in "who can do it"; each is confirmed by a full evaluation (until 0022)
 GROUP_ID = re.compile(r"[a-z0-9][a-z0-9-]{1,62}")
 PENDING_DAYS = 7
@@ -822,7 +831,7 @@ class Desk:
                     errs += edge_records.visit_lease_errors(cand, v, hours)
             for r in add.get("edge_rotations", []):
                 errs += edge_records.rotation_errors(cand, r)
-        return {re.sub(r"; [^;]*? does not count: .*$", "", e) for e in errs if any(k in e for k in KEY_ERRORS)}
+        return _bare(e for e in errs if any(k in e for k in KEY_ERRORS))
 
     def _managers(self, doc: dict, gid: str | None, power: str, actor: str | None) -> list[str]:
         if not gid or gid not in D._groups(doc):
@@ -2367,8 +2376,8 @@ class Desk:
             if outcome == "applied" and p.get("needs_proposer"):   # every key is in; the proposer has not signed yet
                 outcome, reasons = "pending", [SIGN_OWN]
             if outcome == "pending":
-                before = set(self._evaluate(doc, self._with_approvals(p["records"], given))[1])
-                if not before - set(reasons):
+                before = _bare(self._evaluate(doc, self._with_approvals(p["records"], given))[1])
+                if not before - _bare(reasons):
                     raise Refusal("your approval does not count as a key this change needs: " + "; ".join(reasons))
                 p["approvals"], p["reasons"] = [*given, actor], reasons     # one key of several: it waits for the rest
                 p["proofs"] = proofs
@@ -3232,10 +3241,8 @@ class Desk:
         outcome, reasons, _ = self._evaluate(doc, self._with_approvals(p["records"], [*given, approver]))
         if outcome == "applied":
             return True
-        # a key that does not count only adds "...; X does not count: why" to the same reason: that is no progress
-        norm = lambda rs: {re.sub(r"; [^;]*? does not count: .*$", "", r) for r in rs}   # noqa: E731
-        before = norm(self._evaluate(doc, self._with_approvals(p["records"], given))[1])
-        return outcome == "pending" and bool(before - norm(reasons))
+        before = _bare(self._evaluate(doc, self._with_approvals(p["records"], given))[1])
+        return outcome == "pending" and bool(before - _bare(reasons))
 
     def broker(self, who: dict) -> dict:
         doc = self.store.load()

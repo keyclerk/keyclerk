@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from keyclerk import approvals, records
 from keyclerk.desk import Desk, Refusal, Store
 from keyclerk.signer import Signer, SignerClient, SignerRefused, serve
-from tests.test_approvals import ANN, BERT, FIXTURES, broker, proofs, required  # noqa: F401 - fixtures
+from tests.test_approvals import ANN, BERT, FIXTURES, W, broker, proofs, required  # noqa: F401 - fixtures
 
 FINN = "idp:66cc-finn"
 
@@ -87,3 +87,21 @@ def test_the_preview_says_a_high_risk_change_waits_for_its_proposer(tmp_path, pr
     p = desk.preview(ANN, {"action": "add_member", "group": "finance", "anchor": FINN, "days": 5})
     assert p["outcome"] == "pending" and any("your own signature" in x for x in p["reasons"])
     assert desk.store.revision() == 1                                       # a preview changes nothing
+
+
+def test_an_approval_that_does_not_count_is_refused_and_says_why(tmp_path, broker, proofs, required):
+    """A key that does not count only adds "; X does not count: why" to the reason it leaves open: the approval is
+    refused with that reason, and the change waits as it did (found in a full-stack run, 2026-10-26: such an approval
+    answered pending, so the approver saw no change and no why)."""
+    required()
+    desk = Desk(Store(tmp_path / "store", None, FIXTURES / "records.yaml", signer=_inproc(tmp_path)), proofs=proofs)
+    root, officer = W("idp:2b9e-owner"), W("idp:31ee-ingrid")
+    r = desk.propose(root, {"action": "add_member", "group": "admins", "anchor": "idp:31ee-ingrid", "days": 1})
+    cid = r["change_id"]
+    signed = desk.approve(root, cid, broker.token(desk.statement(root, cid)["nonce"], "idp:2b9e-owner"))
+    assert signed["outcome"] == "pending" and not any("your own signature" in x for x in signed["reasons"])
+    with pytest.raises(Refusal, match="does not count as a key.*idp:31ee-ingrid does not count: the member"):
+        desk.approve(officer, cid, broker.token(desk.statement(officer, cid)["nonce"], "idp:31ee-ingrid"))
+    assert desk.store.pending()[cid]["approvals"] == []
+    done = desk.approve(BERT, cid, broker.token(desk.statement(BERT, cid)["nonce"], "idp:91d0-bert"))
+    assert done["outcome"] == "applied", done["reasons"]
