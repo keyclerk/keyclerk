@@ -16,8 +16,8 @@
 Access leases for Keycloak. KeyClerk receives people, checks who they are, and hands out keys that end by
 themselves: for employees, contractors, visitors and partners, for applications, privileged roles and doors.
 
-> Status: engine 0.24.1, not released. It runs on one host for a demo and a local test stack; nobody else should run
-> it in production yet. What follows separates what runs today, what exists as a tested library that nothing runs yet,
+> Status: engine 0.26.1 (2026-10-25). The source is public; no package is released yet. It runs on one host for a demo
+> and a local test stack; nobody else should run it in production yet. What follows separates what runs today, what exists as a tested library that nothing runs yet,
 > and what is designed only. A claim moves up a column only with the code and a test.
 
 ## Why
@@ -34,7 +34,10 @@ meant to grow: [docs/what-sets-keyclerk-apart.md](docs/what-sets-keyclerk-apart.
   against `keyclerk/schema/records.schema.json`. The desk writes it: each change becomes a new revision, signed with the
   desk's key, with its log line signed and hash-chained. History is append-only (`records.guard`): a revoked grant
   never comes back. A deployment may keep the document in git; KeyClerk does not require it and has no merge-request
-  flow of its own.
+  flow of its own. From 0.26.0 a deployment can choose the signed change log on SQLite instead (`store.kind: sqlite`,
+  decision 0022): the desk proposes each change through the checking signer, which judges it and signs a checkpoint
+  per change; personal data stays outside the log, which carries internal anchors only (decision 0028). A running
+  YAML desk moves with `keyclerk.store.migrate` (docs/migrate-to-change-log.md).
 - **Policy decides, in process.** The Rego in `keyclerk/policy/` is compiled to WebAssembly and evaluated in process
   (wasmtime); no OPA server runs. Some policies (`access.rego`, `delegation.rego`, `fallback.rego`) are still mirrored in
   Python and their Rego is only tested, not evaluated at run time.
@@ -47,8 +50,9 @@ meant to grow: [docs/what-sets-keyclerk-apart.md](docs/what-sets-keyclerk-apart.
 - **The desk and its API** (`keyclerk.api`): people sign in at the broker and see what they hold and manage and why;
   deputies change groups, and each change is applied, held for a second key, or refused with its reasons. Approvals can
   be the approver's own signature at the broker (decision 0006). What that proof does not cover is written in
-  `keyclerk/approvals.py`: a desk compromised while it serves its pages could show one change and have another signed,
-  and the proposer is vouched for by the desk alone.
+  `keyclerk/approvals.py`: a desk compromised while it serves its pages could show one change and have another signed.
+  A high-risk change also carries its proposer's own signature, which the checking signer requires (decision 0015);
+  a low-risk change's proposer is vouched for by the desk alone.
 - **The read-only console** (`keyclerk.console`) and need-to-know views: the persona graph and the delegation tree.
 - **Leases for externals:** lease records, lease groups, and generated Keycloak Workflow definitions for reminders and
   blocking (`keyclerk/leases.py`); the Workflows themselves run in Keycloak.
@@ -63,7 +67,8 @@ meant to grow: [docs/what-sets-keyclerk-apart.md](docs/what-sets-keyclerk-apart.
   signed, takes signed requests from the edge agent only (`keyclerk/edge.py`), relays ciphertexts to person keys that a
   passkey derives through WebAuthn PRF and that the desk cannot read (`keyclerk/relay.py`, `keyclerk/ui/personkey.js`),
   and acknowledges escrowed break-glass halves and evidence chains. The edge policy ships as compiled WebAssembly with a
-  conformance set (`tests/conformance/edge.json`). The bundle key is a file of its own until the checking signer exists.
+  conformance set (`tests/conformance/edge.json`). The bundle key is still a file of its own; moving every granting key into the checking signer is decision 0021,
+  not built. Since edge protocol 1.3 a bundle carries no e-mail address: an edge fetches it sealed when it needs it.
 
 ## Tested libraries that nothing runs yet
 
@@ -84,10 +89,8 @@ PACS or OSDP). Each has unit tests; none is wired into the reconciler, the desk 
   and restore safety (0019), every granting key in the checking signer (0021).
 - Many targets per deployment and one writer enforced by credential (decision 0013), persona history (0012), admin
   personas by plane changes 2 to 5 (0011a), invitations and access in hours (0010).
-- The signed change log as the source of truth on SQLite, for 500,000 identities: a checkpoint per change, signed
-  snapshots, personal data outside the log (decision 0022; the store from 0.25.0, the desk on it and the migration
-  from 0.26.0). PostgreSQL later, as a replica. All state is files in the desk's store, the signer's and the
-  reconciler's state directories.
+- For the signed change log (decision 0022, running since 0.26.0): PostgreSQL as a replica, signed snapshots, the
+  witness co-signing the per-change checkpoints (0021).
 
 How KeyClerk is kept secure, and how to report a problem privately: [SECURITY.md](SECURITY.md) and the threat model
 ([docs/threat-model.md](docs/threat-model.md)). Why it works as it does: the decision records in
@@ -96,8 +99,9 @@ implements and the projects it stands on: [docs/references.md](docs/references.m
 
 ## Footprint
 
-One image, three commands: `keyclerk.reconcile`, `keyclerk.console` and `keyclerk.api` (the desk). No database; the desk
-keeps its store on a volume. The image is built from a tag with hash-locked dependencies.
+One image, three commands: `keyclerk.reconcile`, `keyclerk.console` and `keyclerk.api` (the desk). No database server; the desk
+keeps its store on a volume: the YAML document, or the change log in one SQLite file. All state is files in the
+desk's store and the signer's and the reconciler's state directories. The image is built from a tag with hash-locked dependencies.
 
 Measured on 0.23.0 (2026-10-24, x86-64, the test fixture's 12 people):
 
@@ -109,12 +113,11 @@ Measured on 0.23.0 (2026-10-24, x86-64, the test fixture's 12 people):
 
 Of the image, KeyClerk itself is under 3 MB; wasmtime (32 MB) and cryptography (16 MB) are the largest packages.
 Size today: the engine checks are near linear since 0017 (`tools/bench_checks.py`: 1,000 extra people 4.4 s, 5,000 in
-29 s; 136 s at 50 people before), but the records are one YAML document, loaded and signed whole on every change. That
-fits up to about 1,000 people: at the desk (`tools/bench_desk.py`) a change takes 7 s at 200 extra people and 32 s at
+29 s; 136 s at 50 people before). On the YAML store the records are one document, loaded and signed whole on every
+change. That fits up to about 1,000 people: at the desk (`tools/bench_desk.py`) a change takes 7 s at 200 extra people and 32 s at
 1,000, a preview 9 s and 45 s, a desk start 8 s and 41 s; at 5,000 the document alone is 19 MB and takes about 25 s to
-parse and validate. Decision 0022
-replaces it with a signed change log on SQLite for 500,000 identities (from 0.26.0): at 20,000 employees a desk change
-takes about 3.4 s (docs/testing/realistic-load.md).
+parse and validate. The signed change log on SQLite (decision 0022, from 0.26.0) is built for 500,000 identities:
+at 20,000 employees a desk change takes about 3.4 s and a desk start 52 s (docs/testing/realistic-load.md).
 
 ## Configuration as code
 
