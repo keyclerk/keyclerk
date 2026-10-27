@@ -7,6 +7,7 @@
 <p align="center"><em>Every key signed. Every key returned.</em></p>
 <p align="center">
   <a href="https://github.com/keyclerk/keyclerk/actions/workflows/ci.yml"><img src="https://github.com/keyclerk/keyclerk/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pypi.org/project/keyclerk/"><img src="https://img.shields.io/pypi/v/keyclerk" alt="PyPI version"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/keyclerk/keyclerk"><img src="https://api.scorecard.dev/projects/github.com/keyclerk/keyclerk/badge" alt="OpenSSF Scorecard"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/licence-EUPL--1.2-blue" alt="Licence: EUPL-1.2"></a>
 </p>
@@ -16,7 +17,7 @@
 Access leases for Keycloak. KeyClerk receives people, checks who they are, and hands out keys that end by
 themselves: for employees, contractors, visitors and partners, for applications, privileged roles and doors.
 
-> Status: engine 0.26.3 (2026-10-26). The source is public; no package is released yet. It runs on one host for a demo
+> Status: engine 0.26.3 (2026-10-26). The source is public and released on PyPI (`pip install keyclerk`). It runs on one host for a demo
 > and a local test stack; nobody else should run it in production yet. What follows separates what runs today, what exists as a tested library that nothing runs yet,
 > and what is designed only. A claim moves up a column only with the code and a test.
 
@@ -164,7 +165,7 @@ the desk (`keyclerk.api`). Build from a reviewed commit or a signed tag; the ima
 `requirements.lock`.
 
 ```
-git archive HEAD | podman build -t keyclerk:0.26.3 -   # or a signed release tag, once releases are published
+git archive HEAD | podman build -t keyclerk:0.26.3 -   # or a signed release tag: git archive v0.26.3
 podman run --read-only -v ./keyclerk.yaml:/etc/keyclerk/keyclerk.yaml:ro -v ./records.yaml:/etc/keyclerk/records.yaml:ro   -v ./records.yaml.sig:/etc/keyclerk/records.yaml.sig:ro -v ./records.pub:/etc/keyclerk/records.pub:ro   -v ./writer:/run/secrets/writer:ro -v ./reader:/run/secrets/reader:ro -v keyclerk-state:/var/lib/keyclerk keyclerk:0.26.3   keyclerk.reconcile --config /etc/keyclerk/keyclerk.yaml --records /etc/keyclerk/records.yaml   --signing-key /etc/keyclerk/records.pub --keycloak https://id.example --realm example   --secret-file /run/secrets/writer --reader-client keyclerk-reader --reader-secret-file /run/secrets/reader   --state /var/lib/keyclerk --apply
 podman run --read-only -p 127.0.0.1:8090:8090 ... keyclerk:0.26.3 keyclerk.console --host 0.0.0.0   --allowed-host console.example --oidc-public-issuer https://id.example/realms/example   --oidc-redirect https://console.example/callback ...
 ```
