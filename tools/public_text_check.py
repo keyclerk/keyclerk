@@ -40,8 +40,13 @@ def published_decisions() -> frozenset[str]:
     return frozenset(m.group(1).lower() for f in d.glob("*.md") if (m := re.match(r"(00\d\d[a-z]?)-", f.name, re.I)))
 
 
+# GitHub's own public addresses: bots sign their commits with them (Dependabot's Signed-off-by), and a noreply address
+# names an account, not a mailbox. Every other address is still a hit.
+GITHUB_PUBLIC = re.compile(r"(?i)\b(?:support|noreply)@github\.com\b|[\w.+\[\]-]+@users\.noreply\.github\.com\b")
+
+
 def scan(where: str, text: str, env=None) -> list[str]:
-    hits = leak_gate.scan_text(where, text, [], published_decisions())
+    hits = leak_gate.scan_text(where, GITHUB_PUBLIC.sub("github-address", text), [], published_decisions())
     for n, line in enumerate(text.splitlines(), 1):
         for i, rx in enumerate(private_patterns(env), 1):
             if rx.search(line):
