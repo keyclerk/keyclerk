@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: EUPL-1.2
 # The public text check on everything posted here: pull requests (body, commit messages, added lines), issues,
-# comments, reviews and discussions. It runs the base branch's tools/public_text_check.py on the text and on the pull
-# request's commits fetched as data: the proposed code is never checked out or run. A hit labels the item
+# comments, reviews and discussions. It runs the base branch's tools/public_text_check.py on the text, and on the pull
+# request's commit messages and diff fetched through the API as text: the proposed commits never enter the workspace
+# and nothing of theirs runs. A hit labels the item
 # held-for-text-review for a maintainer. Private patterns come from the KEYCLERK_PRIVATE_PATTERNS secret, given only
 # to events of the project's own people: for anyone else a pass or a fail would tell them what the patterns hold.
 name: public text
@@ -42,7 +43,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
       - name: Check the text
         env:
           # Event text arrives through the environment, never interpolated into the script.
@@ -55,13 +55,15 @@ jobs:
       - name: Check the commit messages and added lines
         if: github.event_name == 'pull_request_target'
         env:
+          GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
           KEYCLERK_PRIVATE_PATTERNS: ${{ contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) && secrets.KEYCLERK_PRIVATE_PATTERNS || '' }}
         run: |
-          git fetch --no-tags origin "refs/pull/$PR/head"
-          python3 tools/public_text_check.py --range "$BASE..$HEAD"
+          # As text through the API, never as commits in the workspace of this privileged job.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" --jq '.[].commit.message' > "$RUNNER_TEMP/messages.txt"
+          gh pr diff "$PR" -R "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/pr.diff"
+          python3 tools/public_text_check.py --text "$RUNNER_TEMP/messages.txt"
+          python3 tools/public_text_check.py --diff "$RUNNER_TEMP/pr.diff"
       - name: Label for a maintainer
         if: failure()
         env:

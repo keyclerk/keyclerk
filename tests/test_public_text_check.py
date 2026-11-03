@@ -54,3 +54,12 @@ def test_a_range_checks_messages_and_added_lines(tmp_path, monkeypatch):
     assert any(k.startswith("commit ") and "harmless" in v for k, v in items.items())
     assert items["a.md"] == f"added on the {NAME} ring"
     assert ptc.main(["--range", "HEAD~1..HEAD"]) == 1
+
+
+def test_a_diff_file_is_checked_as_data(tmp_path):
+    diff = (f"diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1,2 @@\n start\n+added on the {NAME} ring\n"
+            "diff --git a/b.md b/b.md\n--- /dev/null\n+++ b/b.md\n@@ -0,0 +1 @@\n+harmless\n")
+    assert ptc.added_lines(diff) == [("a.md", f"added on the {NAME} ring"), ("b.md", "harmless")]
+    f = tmp_path / "pr.diff"
+    f.write_text(diff, encoding="utf-8")
+    assert ptc.main(["--diff", str(f)]) == 1

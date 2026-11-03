@@ -10,6 +10,7 @@ to the project's own people's events), reported by number only.
 
     python tools/public_text_check.py --text body.md                 # before posting a body or comment
     python tools/public_text_check.py --range origin/main..HEAD      # commit messages and added lines
+    python tools/public_text_check.py --diff pr.diff                 # the added lines of a unified diff, as data
 
 Exit 1 with one line per hit. The public text workflow runs it on every event and labels a hit for a maintainer.
 """
@@ -58,7 +59,13 @@ def range_text(rng: str) -> list[tuple[str, str]]:
         out.append((f"commit {sha[:12]}", msg))
     diff = subprocess.run(["git", "diff", "--unified=0", "--no-color", rng], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", check=True).stdout
-    path, added = None, []
+    return out + added_lines(diff)
+
+
+def added_lines(diff: str) -> list[tuple[str, str]]:
+    """(path, text) of the lines a unified diff adds. The public text workflow gets a pull request's diff through the
+    API and checks it here, so the proposed commits never enter the workspace of a privileged job."""
+    out, path, added = [], None, []
     for line in diff.splitlines() + ["+++ end"]:
         if line.startswith("+++ "):
             if path and added:
@@ -74,8 +81,14 @@ def main(argv=None) -> int:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--text", type=Path, help="a file holding the text to post")
     g.add_argument("--range", help="a git revision range, such as origin/main..HEAD")
+    g.add_argument("--diff", type=Path, help="a file holding a unified diff")
     a = ap.parse_args(argv)
-    items = [(a.text.name, a.text.read_text(encoding="utf-8"))] if a.text else range_text(a.range)
+    if a.text:
+        items = [(a.text.name, a.text.read_text(encoding="utf-8"))]
+    elif a.diff:
+        items = added_lines(a.diff.read_text(encoding="utf-8", errors="replace"))
+    else:
+        items = range_text(a.range)
     hits = [h for where, text in items for h in scan(where, text)]
     for h in hits:
         print(h)
