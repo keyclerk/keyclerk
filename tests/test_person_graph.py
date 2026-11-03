@@ -23,7 +23,9 @@ def desk(tmp_path):
     key = tmp_path / "key"
     key.write_text(Ed25519PrivateKey.generate().private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex(),
                    encoding="utf-8")
-    return Desk(Store(tmp_path / "store", key, FIXTURES / "records.yaml"))
+    # a fixed clock inside L-example-0001 (2026-10-06 to 2026-10-27): the fixture's lease ends, the wall clock moves on
+    return Desk(Store(tmp_path / "store", key, FIXTURES / "records.yaml"),
+                clock=lambda: datetime(2026, 10, 20, 12, tzinfo=timezone.utc))
 
 
 def kinds(g):
