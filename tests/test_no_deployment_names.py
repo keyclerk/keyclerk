@@ -15,6 +15,9 @@ SKIP = {".git", "__pycache__", ".pytest_cache", ".hypothesis", ".venv", "build",
 # In those files only, and only the steward's own name; every other word above stays forbidden there too.
 STEWARD_FILES = {"NOTICE", "CLA.md", "REUSE.toml"}
 STEWARD = re.compile(rf"\b{'emoHDV'[::-1]}\b")
+# The maintainer's public account (operator 2026-11-03) is named where maintainers are listed, and only there.
+MAINTAINER_FILES = {"MAINTAINERS.md", "CODEOWNERS"}
+MAINTAINER = re.compile(re.escape("ved-emohdv@"[::-1]) + r"\b")
 
 
 def test_no_file_names_a_deployment():
@@ -32,6 +35,8 @@ def test_no_file_names_a_deployment():
         for n, line in enumerate(text.splitlines(), 1):
             if rel.name in STEWARD_FILES:                  # the repository's and each public release's own files
                 line = STEWARD.sub("", line)
+            if rel.name in MAINTAINER_FILES:
+                line = MAINTAINER.sub("", line)
             if FORBIDDEN.search(line):
                 hits.append(f"{rel}:{n}: {line.strip()[:80]}")
     assert hits == []
@@ -43,3 +48,10 @@ def test_the_steward_exemption_is_narrow():
     assert FORBIDDEN.search(STEWARD.sub("", f"{'emoHDV'[::-1]} and {other}"))
     assert not FORBIDDEN.search(STEWARD.sub("", f"Copyright {'emoHDV'[::-1]}"))
     assert "README.md" not in STEWARD_FILES
+
+
+def test_the_maintainer_exemption_is_narrow():
+    handle = "ved-emohdv@"[::-1]
+    assert MAINTAINER.sub("", f"| Maintainer | {handle} |") == "| Maintainer |  |"
+    assert FORBIDDEN.search(MAINTAINER.sub("", f"{handle} and {_WORDS[1][::-1]}.be"))   # only the handle goes
+    assert FORBIDDEN.search(handle)                                                  # and only in its files
