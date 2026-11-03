@@ -52,12 +52,13 @@ def scan(where: str, text: str, env=None) -> list[str]:
 def range_text(rng: str) -> list[tuple[str, str]]:
     """(where, text) for each commit message and for the lines the range adds."""
     out = []
-    log = subprocess.run(["git", "log", "--format=%H%x00%B%x01", rng], capture_output=True, text=True,
+    # git from PATH with a fixed argument list; the range is the caller's own (a maintainer's pre-push check)
+    log = subprocess.run(["git", "log", "--format=%H%x00%B%x01", rng], capture_output=True, text=True,  # noqa: S603,S607
                          encoding="utf-8", check=True).stdout
     for entry in filter(None, (e.strip("\n") for e in log.split("\x01"))):
         sha, _, msg = entry.partition("\x00")
         out.append((f"commit {sha[:12]}", msg))
-    diff = subprocess.run(["git", "diff", "--unified=0", "--no-color", rng], capture_output=True, text=True,
+    diff = subprocess.run(["git", "diff", "--unified=0", "--no-color", rng], capture_output=True, text=True,  # noqa: S603,S607
                           encoding="utf-8", errors="replace", check=True).stdout
     return out + added_lines(diff)
 

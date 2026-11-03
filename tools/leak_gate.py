@@ -27,7 +27,8 @@ _WORDS = ["hdv", "emohdv", "ralusni", "elsi", "telsi", "ffiks", "moortrahc", "so
 _WHOLE = {"elsi", "telsi", "ffiks", "edcr"}
 DEPLOYMENT = re.compile("|".join(rf"\b{w[::-1]}s?\b" if w in _WHOLE else w[::-1] for w in _WORDS), re.I)
 STEWARD = re.compile(rf"\b{'emoHDV'[::-1]}\b")
-STEWARD_FILES = {"NOTICE", "CLA.md", "REUSE.toml"}   # the copyright line names the steward, as in the engine's own guard
+# the copyright line names the steward, as in the engine's own guard
+STEWARD_FILES = {"NOTICE", "CLA.md", "REUSE.toml"}
 MAINTAINER = re.compile(re.escape("ved-emohdv@"[::-1]) + r"\b")   # the maintainer's public account, only where
 MAINTAINER_FILES = {"MAINTAINERS.md", "CODEOWNERS"}             # maintainers are listed
 _PRIVATE = ["/moc.baltig", "buh-edcr"]          # reversed, so this file names no private host once it is public
@@ -36,7 +37,8 @@ RULES: list[tuple[str, re.Pattern]] = [
     ("internal id", re.compile(r"\b(?:KC|AG|HA|LF|RK|R|W|ADR|KO|KE|AL|C|F|G)-\d+[a-z]?\b|\bRK-E\d+\b")),
     ("internal decision reference", re.compile(r"\b(?:decision|amendment)s? 00\d\d[a-z]?\b", re.I)),
     # built from pieces, so this file does not contain the words it looks for
-    ("internal process wording", re.compile(r"\b(?:" + "red" + r"[- ]" + "team" + r"(?:ed)?|" + "decide" + r"\s" + "loop"
+    ("internal process wording", re.compile(r"\b(?:" + "red" + r"[- ]" + "team" + r"(?:ed)?|"
+                                            + "decide" + r"\s" + "loop"
                                             + r"|" + "work" + r"\s" + "order" + r")\b", re.I)),
     ("private host or namespace", re.compile("|".join(re.escape(w[::-1]) for w in _PRIVATE)
                                              + r"|\b[\w-]+\.(?:internal|lan|local)\b", re.I)),
@@ -107,7 +109,8 @@ def scan_binary(rel: str, data: bytes, names: list[re.Pattern]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="leak_gate", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="leak_gate", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("dir")
     ap.add_argument("--names", help="a file of personal names, one per line, kept outside every repository")
     a = ap.parse_args(argv)
