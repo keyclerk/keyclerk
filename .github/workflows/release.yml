@@ -9,8 +9,31 @@ on:
 permissions:
   contents: read
 jobs:
-  build:
+  sbom:
+    # The SBOM tool and its dependencies install here, in a job that holds no write permission; the build job only
+    # receives the file. CycloneDX JSON of the dependencies a KeyClerk install brings, from the hash-locked requirements.lock.
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The SBOM of the release
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          python3 -m pip install --quiet --user --require-hashes -r requirements-sbom.txt
+          mkdir sbom
+          python3 -m cyclonedx_py requirements --pyproject pyproject.toml --output-reproducible --of JSON -o "sbom/keyclerk-${version}.cdx.json" requirements.lock
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: sbom
+          path: sbom/
+  build:
+    needs: sbom
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
@@ -19,11 +42,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: sbom
+          path: dist/
       - name: Build the wheel and the source distribution
         run: |
           python3 -m pip install --quiet --user --require-hashes -r requirements-build.txt
           python3 -m build --outdir dist .
-          cd dist && sha256sum * > SHA256SUMS
+          cd dist && sha256sum * > SHA256SUMS     # the SBOM is in the sums, so the provenance covers it too
       - name: Take the release notes from CHANGELOG.md
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -35,7 +62,7 @@ jobs:
           fi
           {
             echo
-            echo "Verify: \`sha256sum -c SHA256SUMS\`, then \`gh attestation verify FILE --repo ${GITHUB_REPOSITORY}\`."
+            echo "Verify: \`sha256sum -c SHA256SUMS\`, then \`gh attestation verify FILE --repo ${GITHUB_REPOSITORY}\`. The CycloneDX SBOM is \`keyclerk-${version}.cdx.json\`."
           } >> notes/notes.md
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
@@ -51,6 +78,7 @@ jobs:
   github-release:
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -72,6 +100,7 @@ jobs:
   pypi:
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     environment: pypi
     permissions:
       id-token: write
@@ -81,5 +110,5 @@ jobs:
           name: dist
           path: dist/
       - name: Keep only the distributions
-        run: rm -f dist/SHA256SUMS
+        run: rm -f dist/SHA256SUMS dist/*.cdx.json
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3

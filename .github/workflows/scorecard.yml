@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: EUPL-1.2
-# OpenSSF Scorecard: weekly, on main and by hand, results to code scanning and the public Scorecard API.
+# OpenSSF Scorecard: weekly, on main, on ruleset changes and by hand, results to code scanning and the public Scorecard API.
 name: scorecard
 on:
   workflow_dispatch:
+  branch_protection_rule:          # re-score when a ruleset changes
   schedule:
     - cron: "17 5 * * 1"
   push:
@@ -11,6 +12,7 @@ permissions: read-all
 jobs:
   analysis:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       security-events: write
       id-token: write
