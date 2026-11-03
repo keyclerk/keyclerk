@@ -28,6 +28,8 @@ _WHOLE = {"elsi", "telsi", "ffiks", "edcr"}
 DEPLOYMENT = re.compile("|".join(rf"\b{w[::-1]}s?\b" if w in _WHOLE else w[::-1] for w in _WORDS), re.I)
 STEWARD = re.compile(rf"\b{'emoHDV'[::-1]}\b")
 STEWARD_FILES = {"NOTICE", "CLA.md", "REUSE.toml"}   # the copyright line names the steward, as in the engine's own guard
+MAINTAINER = re.compile(re.escape("ved-emohdv@"[::-1]) + r"\b")   # the maintainer's public account, only where
+MAINTAINER_FILES = {"MAINTAINERS.md", "CODEOWNERS"}             # maintainers are listed
 _PRIVATE = ["/moc.baltig", "buh-edcr"]          # reversed, so this file names no private host once it is public
 RULES: list[tuple[str, re.Pattern]] = [
     # ids with a hyphen: findings, work items, steps (P-256 and SHA-256 are not ids: no P, no SHA here)
@@ -54,6 +56,7 @@ def scan_text(rel: str, text: str, names: list[re.Pattern], published: frozenset
     hits = []
     for n, line in enumerate(text.splitlines(), 1):
         check = STEWARD.sub("", line) if Path(rel).name in STEWARD_FILES else line
+        check = MAINTAINER.sub("", check) if Path(rel).name in MAINTAINER_FILES else check
         if DEPLOYMENT.search(check):
             hits.append(f"{rel}:{n}: deployment or operator name")
         for what, rx in RULES:
