@@ -63,3 +63,10 @@ def test_a_diff_file_is_checked_as_data(tmp_path):
     f = tmp_path / "pr.diff"
     f.write_text(diff, encoding="utf-8")
     assert ptc.main(["--diff", str(f)]) == 1
+
+
+def test_github_public_addresses_pass_and_others_do_not():
+    bot = "Signed-off-by: dependabot[bot] <" + "support" + "@" + "github.com>"
+    noreply = "Co-authored-by: X <49699333+dependabot[bot]" + "@" + "users.noreply.github.com>"
+    assert ptc.scan("commit", f"Bump ruff\n\n{bot}\n{noreply}\n", env={}) == []
+    assert ptc.scan("commit", "write to " + "someone" + "@" + "example.org\n", env={})
