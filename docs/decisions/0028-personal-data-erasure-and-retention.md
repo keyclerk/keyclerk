@@ -1,7 +1,8 @@
 # 0028. Personal data in the log: an internal anchor, erasure that reaches every copy, and retention the deployer sets
 
 - Status: accepted (2026-10-25). Points 1, 5 and 7 are built and offered in 0.26.0 (released 2026-10-25), with the
-  accounts records and the desk's boundary below; points 2 and 6 with backup in 0.27.0;
+  accounts records and the desk's boundary below; points 2 and 6 with backup in 0.27.0 (point 6 built
+  2026-11-03 for erased visits, decision 0029);
   points 3 and 4 in the personal-data release. Amends decision 0022 (point 3 and the restore guard).
 - Context: decision 0022 makes a signed, append-only change log the source of truth. A log that can never change is
   at odds with erasure, unless erasure is designed in. For the deployer, the controller, an access history keyed by a
@@ -32,7 +33,8 @@
    the verified address with a signed request when it sets the credential, and never stores it in its bundle state.
    The bundle no longer carries `email`.
 6. **Backups forget through an erasure journal.** The journal lists the internal anchors erased and when; it holds no
-   personal data. Every restore applies it before the desk serves. A restore without it is refused.
+   personal data. Every restore applies it before the desk serves. A restore without it is refused. Built 2026-11-03
+   for erased visits (decision 0029 point 6); erased anchors join it with point 3.
 7. **The migration strips before the genesis.** Moving from the signed YAML store, the migration re-keys every anchor
    to an internal one and strips names from reason texts. The signer verifies the last signed YAML revision, applies
    the re-keying, and checks that the result equals that revision except for the mapping. The genesis records the

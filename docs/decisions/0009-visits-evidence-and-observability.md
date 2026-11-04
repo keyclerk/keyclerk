@@ -176,6 +176,8 @@ timers, see):
 - GET /visits and GET /visits/{id}?at= (who comes, vehicle, kit, a day strip, the timeline with the steps ahead,
   what the gate says now, what you may record), shown to the host, organiser, the place's front office or steward,
   the guest themselves, a viewer and the root (`see`); every look is logged.
+  Amended 2026-10-27 (operator, review C5): a guest sees their own entry in full and only the names of the other
+  guests, not their vehicles, kit or gate times (0.27.0).
 - Not yet: checked claims and the onboarding package (section 3), last seen (D6).
 
 Badges (0.12.0; D4): records `badges` (visit, party, kind visitor or restricted, the badge number only as a digest

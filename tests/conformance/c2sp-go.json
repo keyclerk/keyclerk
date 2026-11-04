@@ -1,0 +1,695 @@
+{
+  "about": "made by tools/interop/c2sp (golang.org/x/mod/sumdb/note and tlog, filippo.io/torchwood); keyclerk must reproduce every note and proof byte for byte",
+  "checkpoints": [
+    {
+      "size": 1,
+      "root": "Sottm99lwOE21zv/Nv5fr7K3ce4fGjZn44+jxI66JLA=",
+      "note": "keyclerk.example/c2sp-vector\n1\nSottm99lwOE21zv/Nv5fr7K3ce4fGjZn44+jxI66JLA=\n\n— keyclerk.example/c2sp-vector pDf2Zi1wwKvW5a0k0XUPaReFrIQRFZDg8L6jBtIYIHXFXdlmZ209cTgD1wPwidCLCttE9Z15Ck7vXhIkS9Jr+DgzKgE=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+e/nNAcRrpPKNjEFz9KRoyGEYFPL1QHR6iVQBFG7DYRfAcV0nEKMPYCZGPIAQ1EvTsvMvGobFSirX5HkgMVjuJAA==\n",
+      "cosignature_time": 1793798046,
+      "proofs": null
+    },
+    {
+      "size": 2,
+      "root": "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=",
+      "note": "keyclerk.example/c2sp-vector\n2\nCiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=\n\n— keyclerk.example/c2sp-vector pDf2Zh380cEaEV8uxMZ/73LL7fjdlpICquZk1BS3pSyzMiNBVmnJZ1qNWIBnHnAPQpfSgifs0LbFaLHPtrE2I4cw1Ak=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+e+CSUgNedvZcTW/UHLsKvyhZUzpeaDxBgUfxcewZkhVZl8jlv6J97JWyDDRWdre5aEmjJ2JfV54MJlpSa1IyqCw==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 3,
+      "root": "+AaalEOyzXPxxJ8SqFOEQdBe1SoT2uvlkcUvVCG/+Y8=",
+      "note": "keyclerk.example/c2sp-vector\n3\n+AaalEOyzXPxxJ8SqFOEQdBe1SoT2uvlkcUvVCG/+Y8=\n\n— keyclerk.example/c2sp-vector pDf2ZthOd2Go5coTykOV1OWPvwhZ5vMNp03efz38FapqGohS3CSIVxSC5Z2WkR4443OkxB3LcrBYQwr111nTcghXOgI=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+e1htaZ78Kfo9z/hGMzZAqygLYLS252eGuZH1lBLRweAHwjnd9y58BFh6ctsdLLhxXcSUIPGIAosPcD1J8bpNYAQ==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 4,
+      "root": "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+      "note": "keyclerk.example/c2sp-vector\n4\ns1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=\n\n— keyclerk.example/c2sp-vector pDf2ZuH0EyRd1H4z4gBralHkIa+KRYHX26VJiARQosWvLOkytXz9k0l0jAC+0D8GmE/KPniy+WXURjQnUDjBFaLcRQ8=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+eq242oMRwVDletfebC6b3fJqa08rS7+fjGU061BOuLYSmz74sKkKszj92Mh59GQr5HP/XNBzdaBcT5M1V92cWCA==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc="
+          ]
+        },
+        {
+          "from": 3,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A=",
+            "4VpqcF+7dQ4LYxogLxEsJNDrv623dhSt6u+Mznsld0U=",
+            "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 5,
+      "root": "Fjx35+LpyW+GB/AHTNARvMV9HzpjrasIzCeUo6kEqhc=",
+      "note": "keyclerk.example/c2sp-vector\n5\nFjx35+LpyW+GB/AHTNARvMV9HzpjrasIzCeUo6kEqhc=\n\n— keyclerk.example/c2sp-vector pDf2ZkvlIE7VQw9ZfbBDeDSxSaW9N87yWcL0CKhpC4M/RpZCsn/3rmQ/rvwQvCqgz1Zt/Md56YZozliUoeTaiHx6hgo=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+exgWf1w+AekUcidPD9C9wKJ45tpVB3Jd9s+OxAcigBiyW9Bf7z8FQLB1dbaGPfx0VOZrZC2XoC5UYHJv3iJeXBw==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA="
+          ]
+        },
+        {
+          "from": 3,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A=",
+            "4VpqcF+7dQ4LYxogLxEsJNDrv623dhSt6u+Mznsld0U=",
+            "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=",
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA="
+          ]
+        },
+        {
+          "from": 4,
+          "proof": [
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 7,
+      "root": "N3d8uV8R8jSPq/tI91/g2TgJwgla6/QNddF9ys38Aso=",
+      "note": "keyclerk.example/c2sp-vector\n7\nN3d8uV8R8jSPq/tI91/g2TgJwgla6/QNddF9ys38Aso=\n\n— keyclerk.example/c2sp-vector pDf2Zod61XwG9pYzkMrcHXdGfNDwauA0BwcmB56AKk0wwUn52p+mi39mjl6e49KDJwWOB6qXodT0LylrC7U+j9MfvgI=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+e59GLyHjwLQP0cuYx1Xim/KCPHvqCJf4sSnw5EGSDAyvwBaSVgXQofOwMmCIQeyK3e478C9ruZC+nsFTYsM5wAQ==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "j2yGDIAogPGIzSOUqBv1nQtSZe18OqE3/usSBl/zklo="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "j2yGDIAogPGIzSOUqBv1nQtSZe18OqE3/usSBl/zklo="
+          ]
+        },
+        {
+          "from": 3,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A=",
+            "4VpqcF+7dQ4LYxogLxEsJNDrv623dhSt6u+Mznsld0U=",
+            "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=",
+            "j2yGDIAogPGIzSOUqBv1nQtSZe18OqE3/usSBl/zklo="
+          ]
+        },
+        {
+          "from": 4,
+          "proof": [
+            "j2yGDIAogPGIzSOUqBv1nQtSZe18OqE3/usSBl/zklo="
+          ]
+        },
+        {
+          "from": 5,
+          "proof": [
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA=",
+            "CMTh7CGMgpUM5HtYdaMcm0QBe7LQCrd0xTkAusmQiTg=",
+            "ZW458yUVDuJqquY/IkrEeo7Eu0n29/g0iZcsKtEgTAg=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 8,
+      "root": "L5ehVIrNpzkztecxhH4QD0myLHByeTBNpb01zWHkRrs=",
+      "note": "keyclerk.example/c2sp-vector\n8\nL5ehVIrNpzkztecxhH4QD0myLHByeTBNpb01zWHkRrs=\n\n— keyclerk.example/c2sp-vector pDf2Zuc9zOgPD9r1lROESZLA3wj6E6csPH04xsi4J3Rr+BZ49iNDQ08+ZUM4sRZdQ8XLlvkgpqY2y9SXaE7GCFueNAI=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+etvwfZ/n4ydIpzNdSZZpbrlWzEdNoUN3rfJ201w9He329BJvpkSu98w8mt95jTgQbKbizJAPBTeMubliWJsdsDw==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI="
+          ]
+        },
+        {
+          "from": 3,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A=",
+            "4VpqcF+7dQ4LYxogLxEsJNDrv623dhSt6u+Mznsld0U=",
+            "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI="
+          ]
+        },
+        {
+          "from": 4,
+          "proof": [
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI="
+          ]
+        },
+        {
+          "from": 5,
+          "proof": [
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA=",
+            "CMTh7CGMgpUM5HtYdaMcm0QBe7LQCrd0xTkAusmQiTg=",
+            "LYz6E3Tf3CSeeRLHK4BOxraFZ/D9+MCo8cKUtQQ0FOQ=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g="
+          ]
+        },
+        {
+          "from": 7,
+          "proof": [
+            "ZW458yUVDuJqquY/IkrEeo7Eu0n29/g0iZcsKtEgTAg=",
+            "tnqq85Gf5w97xgxSS7lluLkHS6zXdmDGrN+pB5gqJ3o=",
+            "7OujUa8Je4oUQzc9PhbI+4AaJHIEoI2b63nK5k48ANw=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 9,
+      "root": "Sbpc/TejxmicfbajmFekXSpgQQZwg0ja0fgp5NkQlo0=",
+      "note": "keyclerk.example/c2sp-vector\n9\nSbpc/TejxmicfbajmFekXSpgQQZwg0ja0fgp5NkQlo0=\n\n— keyclerk.example/c2sp-vector pDf2ZuhMy3Z4zMbr7au0W9haWst6vpBv+91vj2iaPmDlpsMYqdXBOs8xlvFyWNqdumqL0EwyI1dCf2KfpGyJUtnvDQU=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+eBZDN49xVEkxkVL24FnSpPq1CAzPQKr3FctcDTsU0xTEohiTKcdgOclRIuN6r8bNGTe+MQFWpvuVaHAHYrtCGAA==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY="
+          ]
+        },
+        {
+          "from": 3,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A=",
+            "4VpqcF+7dQ4LYxogLxEsJNDrv623dhSt6u+Mznsld0U=",
+            "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY="
+          ]
+        },
+        {
+          "from": 4,
+          "proof": [
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY="
+          ]
+        },
+        {
+          "from": 5,
+          "proof": [
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA=",
+            "CMTh7CGMgpUM5HtYdaMcm0QBe7LQCrd0xTkAusmQiTg=",
+            "LYz6E3Tf3CSeeRLHK4BOxraFZ/D9+MCo8cKUtQQ0FOQ=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY="
+          ]
+        },
+        {
+          "from": 7,
+          "proof": [
+            "ZW458yUVDuJqquY/IkrEeo7Eu0n29/g0iZcsKtEgTAg=",
+            "tnqq85Gf5w97xgxSS7lluLkHS6zXdmDGrN+pB5gqJ3o=",
+            "7OujUa8Je4oUQzc9PhbI+4AaJHIEoI2b63nK5k48ANw=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY="
+          ]
+        },
+        {
+          "from": 8,
+          "proof": [
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 13,
+      "root": "irh4XspuZP1LgiYsephSPiMzJBRaZrCH9PZjRH7o+aQ=",
+      "note": "keyclerk.example/c2sp-vector\n13\nirh4XspuZP1LgiYsephSPiMzJBRaZrCH9PZjRH7o+aQ=\n\n— keyclerk.example/c2sp-vector pDf2ZhA7tBrLGxb389t4af4IVG7h38cx0tKQBC5RmSRSGcVdctJ0VqKWUDvSyCsrTPDL7UfQbnkoCuID1uc4ydYfzg4=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+ey8aN3/JB6iBRiFuzO70l3rbChYhtjI1ae5nZ9PDwQXuIhOaolGIDVMPn2bes5qiaqJh+4E3Ww+vrLHGdVj89CA==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "NYo6h+vRTtVduAoq9u60/TU+sOiw1lUroH2CNa3nBJE="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "NYo6h+vRTtVduAoq9u60/TU+sOiw1lUroH2CNa3nBJE="
+          ]
+        },
+        {
+          "from": 3,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A=",
+            "4VpqcF+7dQ4LYxogLxEsJNDrv623dhSt6u+Mznsld0U=",
+            "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "NYo6h+vRTtVduAoq9u60/TU+sOiw1lUroH2CNa3nBJE="
+          ]
+        },
+        {
+          "from": 4,
+          "proof": [
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "NYo6h+vRTtVduAoq9u60/TU+sOiw1lUroH2CNa3nBJE="
+          ]
+        },
+        {
+          "from": 5,
+          "proof": [
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA=",
+            "CMTh7CGMgpUM5HtYdaMcm0QBe7LQCrd0xTkAusmQiTg=",
+            "LYz6E3Tf3CSeeRLHK4BOxraFZ/D9+MCo8cKUtQQ0FOQ=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "NYo6h+vRTtVduAoq9u60/TU+sOiw1lUroH2CNa3nBJE="
+          ]
+        },
+        {
+          "from": 7,
+          "proof": [
+            "ZW458yUVDuJqquY/IkrEeo7Eu0n29/g0iZcsKtEgTAg=",
+            "tnqq85Gf5w97xgxSS7lluLkHS6zXdmDGrN+pB5gqJ3o=",
+            "7OujUa8Je4oUQzc9PhbI+4AaJHIEoI2b63nK5k48ANw=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "NYo6h+vRTtVduAoq9u60/TU+sOiw1lUroH2CNa3nBJE="
+          ]
+        },
+        {
+          "from": 8,
+          "proof": [
+            "NYo6h+vRTtVduAoq9u60/TU+sOiw1lUroH2CNa3nBJE="
+          ]
+        },
+        {
+          "from": 9,
+          "proof": [
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY=",
+            "spbEfJwYM+VpNWrbdWxWUqk5JbRw2lP3XiBIIwotW6s=",
+            "JQM6pffbQES2z4MJyZ+AM2beuVe9LCUYP/NgX1gsy88=",
+            "5ieYKZJQnzfbaWrksU+b/0AvJ3sOW4Om/uDpghORQEQ=",
+            "L5ehVIrNpzkztecxhH4QD0myLHByeTBNpb01zWHkRrs="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 16,
+      "root": "SrMVoEDMK/xeKFLSjAvLKjgkdx/r8dotmOxawT3l9RI=",
+      "note": "keyclerk.example/c2sp-vector\n16\nSrMVoEDMK/xeKFLSjAvLKjgkdx/r8dotmOxawT3l9RI=\n\n— keyclerk.example/c2sp-vector pDf2ZvCJQh0BedZp3u5U1CR6UY5JpkfRP4SFCqo9Qmnsi3cQD6RVI8u3y66Uu3rRaQEoBAafDkSkRgHOsrpNkcsQrwA=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+esDWW/j0AC2KPSt2HO/5A0P3lj4ce+Cs2XJYnvOVsZdzm973AGgMm4FdCvowTTANKUQujLSeZXPfe4AppNsDMDQ==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70="
+          ]
+        },
+        {
+          "from": 3,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A=",
+            "4VpqcF+7dQ4LYxogLxEsJNDrv623dhSt6u+Mznsld0U=",
+            "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70="
+          ]
+        },
+        {
+          "from": 4,
+          "proof": [
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70="
+          ]
+        },
+        {
+          "from": 5,
+          "proof": [
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA=",
+            "CMTh7CGMgpUM5HtYdaMcm0QBe7LQCrd0xTkAusmQiTg=",
+            "LYz6E3Tf3CSeeRLHK4BOxraFZ/D9+MCo8cKUtQQ0FOQ=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70="
+          ]
+        },
+        {
+          "from": 7,
+          "proof": [
+            "ZW458yUVDuJqquY/IkrEeo7Eu0n29/g0iZcsKtEgTAg=",
+            "tnqq85Gf5w97xgxSS7lluLkHS6zXdmDGrN+pB5gqJ3o=",
+            "7OujUa8Je4oUQzc9PhbI+4AaJHIEoI2b63nK5k48ANw=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70="
+          ]
+        },
+        {
+          "from": 8,
+          "proof": [
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70="
+          ]
+        },
+        {
+          "from": 9,
+          "proof": [
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY=",
+            "spbEfJwYM+VpNWrbdWxWUqk5JbRw2lP3XiBIIwotW6s=",
+            "JQM6pffbQES2z4MJyZ+AM2beuVe9LCUYP/NgX1gsy88=",
+            "N+T7HMhKfJt51cHAkBvTwfArwx40eYI7DzODMCKJtSE=",
+            "L5ehVIrNpzkztecxhH4QD0myLHByeTBNpb01zWHkRrs="
+          ]
+        },
+        {
+          "from": 13,
+          "proof": [
+            "5ieYKZJQnzfbaWrksU+b/0AvJ3sOW4Om/uDpghORQEQ=",
+            "Fydf/jvgxhup3R7MOgd8+Bpw/8X6SU9jvtWVjkyBRYw=",
+            "FNBt8xQIuCAz1rUkIB0Sle8w8sT5xncXRgPLVO4sBPY=",
+            "uxx/OUl5OS0JQQsJt8eXQhHh8sPPzK7JWzUXmyH2myQ=",
+            "L5ehVIrNpzkztecxhH4QD0myLHByeTBNpb01zWHkRrs="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 17,
+      "root": "FosXBkkT1v6oBrWK0hpfdzwUtdT6fS7a8LaSKi0+OkI=",
+      "note": "keyclerk.example/c2sp-vector\n17\nFosXBkkT1v6oBrWK0hpfdzwUtdT6fS7a8LaSKi0+OkI=\n\n— keyclerk.example/c2sp-vector pDf2ZhcZwG/m7/jjgrMuJRs3B2Ay1Ao+PQEbJbB+BICPkjdf14t+U++TjawaRNbPgxCAY6ZDxzc6Oj+NZaSSN597+Qg=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+eWIzTobwbTVOu3r514Dh9NBXy2CYn0WHXuv7xb7CHWtGp91kkcr91A7e2DWORJ7o3uLbw699R3rmf3TWiS04BBw==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        },
+        {
+          "from": 3,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A=",
+            "4VpqcF+7dQ4LYxogLxEsJNDrv623dhSt6u+Mznsld0U=",
+            "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        },
+        {
+          "from": 4,
+          "proof": [
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        },
+        {
+          "from": 5,
+          "proof": [
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA=",
+            "CMTh7CGMgpUM5HtYdaMcm0QBe7LQCrd0xTkAusmQiTg=",
+            "LYz6E3Tf3CSeeRLHK4BOxraFZ/D9+MCo8cKUtQQ0FOQ=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        },
+        {
+          "from": 7,
+          "proof": [
+            "ZW458yUVDuJqquY/IkrEeo7Eu0n29/g0iZcsKtEgTAg=",
+            "tnqq85Gf5w97xgxSS7lluLkHS6zXdmDGrN+pB5gqJ3o=",
+            "7OujUa8Je4oUQzc9PhbI+4AaJHIEoI2b63nK5k48ANw=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        },
+        {
+          "from": 8,
+          "proof": [
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        },
+        {
+          "from": 9,
+          "proof": [
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY=",
+            "spbEfJwYM+VpNWrbdWxWUqk5JbRw2lP3XiBIIwotW6s=",
+            "JQM6pffbQES2z4MJyZ+AM2beuVe9LCUYP/NgX1gsy88=",
+            "N+T7HMhKfJt51cHAkBvTwfArwx40eYI7DzODMCKJtSE=",
+            "L5ehVIrNpzkztecxhH4QD0myLHByeTBNpb01zWHkRrs=",
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        },
+        {
+          "from": 13,
+          "proof": [
+            "5ieYKZJQnzfbaWrksU+b/0AvJ3sOW4Om/uDpghORQEQ=",
+            "Fydf/jvgxhup3R7MOgd8+Bpw/8X6SU9jvtWVjkyBRYw=",
+            "FNBt8xQIuCAz1rUkIB0Sle8w8sT5xncXRgPLVO4sBPY=",
+            "uxx/OUl5OS0JQQsJt8eXQhHh8sPPzK7JWzUXmyH2myQ=",
+            "L5ehVIrNpzkztecxhH4QD0myLHByeTBNpb01zWHkRrs=",
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        },
+        {
+          "from": 16,
+          "proof": [
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA="
+          ]
+        }
+      ]
+    },
+    {
+      "size": 21,
+      "root": "fTEEFNK4hl7QX9OZqYmarHwLYzyTxgyfw9vWFS83kYU=",
+      "note": "keyclerk.example/c2sp-vector\n21\nfTEEFNK4hl7QX9OZqYmarHwLYzyTxgyfw9vWFS83kYU=\n\n— keyclerk.example/c2sp-vector pDf2ZtEiRhwd7bC5Z/3kZe2BagcHdxxRLuLgtPpbe/5VsrKEaU2abVXdSrj3j5X+VQ7JwI1jqGw1x+B+ypT2zaYr6gA=\n— witness.example/c2sp-vector NhZU5AAAAABq6y+eztlEoW/NQueNT81smb+AJxlvrTtiyLt3qi5ucVOw67WCbVpVXTOn/+nLK9wcz13aycLcGz5JOjgkhnOtPbYbAg==\n",
+      "cosignature_time": 1793798046,
+      "proofs": [
+        {
+          "from": 1,
+          "proof": [
+            "v5gJTwQeg9Hn4rJGBW2dfDGYaOODf+slhhys7HZUK0k=",
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 2,
+          "proof": [
+            "Yng3+97K9h4VqAJuRxelr/EnTnvQSi3HysCBk71sjfc=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 3,
+          "proof": [
+            "IvuyN1Fd66JrNfNj7w5zQxpxB9givftTrGq7WpdlV0A=",
+            "4VpqcF+7dQ4LYxogLxEsJNDrv623dhSt6u+Mznsld0U=",
+            "CiatjOWDpc9FmqqY5bKsAZ5lcSPN6iUbLAjaX4FUxw8=",
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 4,
+          "proof": [
+            "u5E1C1CmpUAAyacMYrYuw/NYGLIYCZYaq4ONWvy6/KI=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 5,
+          "proof": [
+            "ScCbtg1cWpsr/IskwCFh/dIZNjP1uPq3aCwmQCV/RbA=",
+            "CMTh7CGMgpUM5HtYdaMcm0QBe7LQCrd0xTkAusmQiTg=",
+            "LYz6E3Tf3CSeeRLHK4BOxraFZ/D9+MCo8cKUtQQ0FOQ=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 7,
+          "proof": [
+            "ZW458yUVDuJqquY/IkrEeo7Eu0n29/g0iZcsKtEgTAg=",
+            "tnqq85Gf5w97xgxSS7lluLkHS6zXdmDGrN+pB5gqJ3o=",
+            "7OujUa8Je4oUQzc9PhbI+4AaJHIEoI2b63nK5k48ANw=",
+            "s1UxyDIpK6/4BsEVJANAHHOJ0P3xhNQYg7ZIxsYYN3g=",
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 8,
+          "proof": [
+            "gCwhWYE0D9Avd22iUV7tCdTZUiY1K+APPOG/k55HS70=",
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 9,
+          "proof": [
+            "+se7Gyj+SeiNeZo+QqPK/HQDdK7qLDLvvm6P4vS5kBY=",
+            "spbEfJwYM+VpNWrbdWxWUqk5JbRw2lP3XiBIIwotW6s=",
+            "JQM6pffbQES2z4MJyZ+AM2beuVe9LCUYP/NgX1gsy88=",
+            "N+T7HMhKfJt51cHAkBvTwfArwx40eYI7DzODMCKJtSE=",
+            "L5ehVIrNpzkztecxhH4QD0myLHByeTBNpb01zWHkRrs=",
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 13,
+          "proof": [
+            "5ieYKZJQnzfbaWrksU+b/0AvJ3sOW4Om/uDpghORQEQ=",
+            "Fydf/jvgxhup3R7MOgd8+Bpw/8X6SU9jvtWVjkyBRYw=",
+            "FNBt8xQIuCAz1rUkIB0Sle8w8sT5xncXRgPLVO4sBPY=",
+            "uxx/OUl5OS0JQQsJt8eXQhHh8sPPzK7JWzUXmyH2myQ=",
+            "L5ehVIrNpzkztecxhH4QD0myLHByeTBNpb01zWHkRrs=",
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 16,
+          "proof": [
+            "UGCYjfpJS8PbCBhZ47CCNGwcK9aCaJb6YjytwKoe9OU="
+          ]
+        },
+        {
+          "from": 17,
+          "proof": [
+            "HJc1OGsU0oV00j4CYVF5MWqKHP+B0QIf4A4L5oKP+JA=",
+            "9Ra/BL0dUysT7UQX+eiNEKxxDWH4HAPI5x+0qLTuFSY=",
+            "g+0F+9UkK6M/JCBKp5czvyoHQeSxnRQVuyQv1N4pNL4=",
+            "LUnQv2h52ECNyhMZ3Dmmk3zC5AHT53415Zg+NL3ISlA=",
+            "SrMVoEDMK/xeKFLSjAvLKjgkdx/r8dotmOxawT3l9RI="
+          ]
+        }
+      ]
+    }
+  ],
+  "leaves": [
+    "kc-c2sp-vector link 0",
+    "kc-c2sp-vector link 1",
+    "kc-c2sp-vector link 2",
+    "kc-c2sp-vector link 3",
+    "kc-c2sp-vector link 4",
+    "kc-c2sp-vector link 5",
+    "kc-c2sp-vector link 6",
+    "kc-c2sp-vector link 7",
+    "kc-c2sp-vector link 8",
+    "kc-c2sp-vector link 9",
+    "kc-c2sp-vector link 10",
+    "kc-c2sp-vector link 11",
+    "kc-c2sp-vector link 12",
+    "kc-c2sp-vector link 13",
+    "kc-c2sp-vector link 14",
+    "kc-c2sp-vector link 15",
+    "kc-c2sp-vector link 16",
+    "kc-c2sp-vector link 17",
+    "kc-c2sp-vector link 18",
+    "kc-c2sp-vector link 19",
+    "kc-c2sp-vector link 20"
+  ],
+  "log_seed": "UR8eQLyxaOuGGl+21O9NHgJz0F/DNY8q0H+7yHkkXp4=",
+  "log_vkey": "keyclerk.example/c2sp-vector+a437f666+AcrUZ1OJf0VVtqMN/Hnz3WWlWadA2s8HCI+Omz3A8F5B",
+  "origin": "keyclerk.example/c2sp-vector",
+  "witness_seed": "JM2vOoU10ZOELGxnQNxOvdlNtUog/8uNDiGDEB+n7Yo=",
+  "witness_vkey": "witness.example/c2sp-vector+361654e4+BJuyiE0U/1I5vXjfm4V0wBEwDmPjd/fLxN7CbAqmvhGr"
+}

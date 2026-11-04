@@ -27,6 +27,7 @@ class MemoryStore:
         self._side: dict[tuple[str, str], bytes] = {}
         self._checkpoints: dict[int, dict] = {}
         self._parts = 0                                 # k, the migrate links after the genesis
+        self._restore = None                            # (seq, mark) of the newest restore link
         self._migration: str | None = None
         self._frozen = False
         self._lock = threading.Lock()
@@ -66,6 +67,9 @@ class MemoryStore:
     def _apply(self, body: dict, side, check, finish) -> tuple[dict, bytes]:
         k = self._parts if self._links else L.parts(body)
         L.check_migrate(body, k)
+        if "restore" in body["change"]:
+            from keyclerk.store.replay import revision
+            L.check_restore(body, revision(self))
         staged = {}
         for op in body["change"]["ops"]:
             at = (op["kind"], op["key"])
@@ -99,7 +103,30 @@ class MemoryStore:
         self._hashes.append(h)
         self._fence = body["fence"]
         self._frontier = merkle.push(self._frontier, h)
+        if "restore" in body["change"]:
+            self._restore = (body["seq"], body["change"]["restore"]["mark"])
         return sealed, h
+
+    def adopt(self, sealed: dict, links, state) -> None:
+        """Start an empty store from a signed snapshot (keyclerk.store.snapshot): the links up to it checked and kept,
+        their ops not applied, the state loaded after its hash is checked. Refused whole or kept whole."""
+        from keyclerk.store import snapshot as S
+        with self._lock:
+            self._writable()
+            if self._links or self._records:
+                raise StoreRefused("only an empty store adopts a snapshot")
+            body = S.open_snapshot(sealed, self.pinned, self.realm)
+            kept: list[tuple[dict, bytes]] = []
+            frontier = S.chain(links, body, self.pinned, self.realm,
+                               lambda seq, s, h, fence: kept.append(({"bytes": s["bytes"], "signature": s["signature"]}, h)))
+            recs = {(kind, key): E.canonical(rec) for kind, key, rec in S.records(state, body)}
+            self._links, self._hashes = [s for s, _ in kept], [h for _, h in kept]
+            self._fence, self._frontier, self._records = body["fence"], frontier, recs
+            self._parts, self._migration = body["parts"], body["migration"]
+            self._restore = tuple(body["restore"]) if body["restore"] else None
+
+    def restore_point(self) -> tuple[int, int] | None:
+        return self._restore
 
     def add_checkpoint(self, sealed: dict) -> None:
         with self._lock:
@@ -165,6 +192,9 @@ class MemoryStore:
     def links(self, start: int = 0, stop: int | None = None) -> Iterator[dict]:
         for s in self._links[start:stop]:
             yield dict(s)
+
+    def hashes(self, start: int = 0, stop: int | None = None) -> list[bytes]:
+        return list(self._hashes[start:stop])
 
     def get(self, kind: str, key: str) -> dict | None:
         check_kind(kind)

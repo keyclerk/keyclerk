@@ -15,6 +15,8 @@ the proof tokens come from the signer (op tokens). Wiring into the Desk, and the
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from keyclerk.store import replay as RP
 from keyclerk.store.link import StoreRefused
 
@@ -23,8 +25,9 @@ PAGE = 500
 
 
 class Follower:
-    def __init__(self, store, client, fresh):
+    def __init__(self, store, client, fresh, from_snapshot: bool = True):
         self.store, self.client, self.fresh = store, client, fresh
+        self.from_snapshot = from_snapshot          # a resync starts from the signer's newest snapshot when it has one
         self.alarms: list[str] = []
 
     def base(self) -> dict:
@@ -66,14 +69,45 @@ class Follower:
         if store.checkpoint() != cp:
             store.add_checkpoint(cp)
 
+    def _links(self, start: int, stop: int):
+        """The signer's links from start to stop, a page at a time."""
+        while start < stop:
+            got = self.client.links(start, min(PAGE, stop - start))["links"]
+            if not got:
+                raise StoreRefused(f"the signer holds fewer than {stop} links")
+            yield from got
+            start += len(got)
+
     def _alarm(self, why: str) -> None:
         self.alarms.append(why)
         self.resync()
 
-    def resync(self):
+    def fetch_snapshot(self, into: Path):
+        """The signer's newest snapshot, its state file fetched a piece at a time into the directory into: (statement,
+        state file), or None when the signer holds none or does not offer them. Nothing in it is trusted yet: adopt
+        checks the statement's signature, every link before it and the state's hash."""
+        import base64
+        offer = getattr(self.client, "snapshot", None)
+        got = offer() if offer else {"snapshot": None}
+        if not got.get("snapshot"):
+            return None
+        size, path, offset = got["size"], Path(into) / f"{got['size']}.state.jsonl", 0
+        with open(path, "wb") as f:
+            while True:
+                part = self.client.snapshot_state(size, offset, 1 << 20)
+                raw = base64.b64decode(part["chunk"], validate=True)
+                f.write(raw)
+                offset += len(raw)
+                if part["eof"] or offset > (got.get("bytes") or 0) or not raw:
+                    break
+        return got["snapshot"], path
+
+    def resync(self, snapshot=None):
         """A new store built from the signer's links and tokens, verified against the signer's head, swapped in, and
         only when it extends the history this store had verified: a signer restored from an older backup that signed
-        a second history is refused, never followed (it would drop what the newer branch holds, revocations too)."""
+        a second history is refused, never followed (it would drop what the newer branch holds, revocations too).
+        With snapshot = (statement, state file) the new store adopts it (issue 28): the signer's links up to it are
+        checked and kept, not applied; a snapshot that is not the signer's log is refused, as any break is."""
         try:
             kept = self.store.size()
             mine = self.store.link(kept - 1) if kept else None
@@ -94,6 +128,24 @@ class Follower:
             if len(page) < PAGE:
                 break
             after = page[-1][0]
+        scratch = None
+        if snapshot is None and self.from_snapshot:
+            import tempfile
+            scratch = Path(tempfile.mkdtemp(prefix="kc-snapshot-"))
+            try:
+                snapshot = self.fetch_snapshot(scratch)
+            except Exception:   # noqa: BLE001 - no snapshot to be had: the links from the genesis serve as before
+                snapshot = None
+        try:
+            if snapshot is not None:
+                sealed, state = snapshot
+                from keyclerk.store import snapshot as S
+                n = S.open_snapshot(sealed, new.pinned, new.realm)["size"]
+                new.adopt(sealed, self._links(0, n), state)
+        finally:
+            if scratch is not None:
+                import shutil
+                shutil.rmtree(scratch, ignore_errors=True)
         self._pull(new)
         RP.verify(new, new.pinned, new.realm)
         head = self.client.head()

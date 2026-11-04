@@ -25,6 +25,8 @@ class DeskStore(Protocol):
 
     def load(self) -> dict: ...                  # the records, visits joined in, a copy the caller may change
     def revision(self) -> int: ...               # the revision load() returns
+    def records_head(self) -> dict: ...          # {revision, head, size?}: what a bundle carries (edge protocol 1.4)
+    def head_at(self, size: int) -> str | None: ...   # the change log's link hash at size links; None without a log
     def state_key(self) -> str: ...              # changes whenever load() would return something else
     def commit(self, doc: dict, entry: dict, ops: list | None = None, tokens: list | None = None) -> dict: ...
     #                                              a whole new document, signed (or refused) as one change; ops: the

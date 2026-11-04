@@ -73,6 +73,10 @@ def genesis(view: View) -> dict:
 def revision(view: View) -> int | None:
     if view.size() == 0:
         return None
+    point = getattr(view, "restore_point", lambda: None)()
+    if point is not None:                         # a restore link resumed the numbering above its mark (0019)
+        seq, mark = point
+        return mark + 1 + (view.size() - 1 - seq)
     g = genesis(view)
     y = g["change"].get("yaml")
     base, k = (y["revision"], y["parts"]) if y else (1, 0)

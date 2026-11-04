@@ -89,6 +89,13 @@ def _ts(s: str) -> datetime:
     return datetime.strptime(s, ISO).replace(tzinfo=timezone.utc)
 
 
+def ceiling_hours(start: datetime, end: datetime) -> int:
+    """The hours the ceiling policy judges a span by: whole hours rounded up, at least one (edge protocol 1.4). Rounded
+    down, a lease of 8 hours 59 minutes passed a ceiling of 8 hours."""
+    seconds = int((end - start).total_seconds())
+    return max(1, -(-seconds // 3600))
+
+
 def _whole(x, low: int = 0) -> bool:
     """A JSON whole number, never a boolean (isinstance(True, int) holds in Python)."""
     return isinstance(x, int) and not isinstance(x, bool) and x >= low
@@ -464,14 +471,16 @@ def verify_module(raw: bytes, expected_sha256: str) -> list[str]:
 
 def build_bundle(edge_id: str, serial: int, issued: datetime, horizons: dict, leases: list[dict], visit_leases: list[dict],
                  revoked: list[str], ceiling: dict | None, policy: dict, key: Ed25519PrivateKey,
-                 governed_roles: list[str] | None = None) -> dict:
+                 governed_roles: list[str] | None = None, records_head: dict | None = None) -> dict:
     """One sealed bundle. The newest bundle is complete: whatever an edge holds that is not in it has ended.
     leases: [{lease_id, person, username, email, key_id, target, role, class, from, until, max_session_hours}];
     visit_leases: [{lease_id, person, username, ssh_key, targets, role, from, until}];
     ceiling: the officer's sealed ceiling, exactly as the officer sealed it, or None;
     policy: {modules: {name: {sha256}}, release: sealed manifest or None, entrypoints};
     governed_roles (decision 0025): the edge roles KeyClerk governs here, carried as SCIM Group shapes
-    [{displayName}]; None leaves the member out (no catalogue), an empty list is a signed "none governed"."""
+    [{displayName}]; None leaves the member out (no catalogue), an empty list is a signed "none governed";
+    records_head (edge protocol 1.4): {revision, head, size?}, the records the bundle was cut from, which the edge
+    echoes in its report (edges as weak witnesses); None leaves the member out."""
     missing = sorted({x["class"] for x in leases} - set(horizons))
     if missing:                                             # a class without a horizon: refused at build time, never live anyway
         raise ValueError(f"leases of a class without a horizon: {', '.join(missing)}")
@@ -479,7 +488,19 @@ def build_bundle(edge_id: str, serial: int, issued: datetime, horizons: dict, le
             "visit_leases": visit_leases, "revoked": sorted(revoked), "ceiling": ceiling, "policy": policy}
     if governed_roles is not None:
         body["governed_roles"] = [{"displayName": r} for r in sorted(set(governed_roles))]
+    if records_head is not None:
+        body["records_head"] = records_head
     return seal(key, body, BUNDLE_FORMAT)
+
+
+def records_head_errors(h, member: str = "records_head") -> list[str]:
+    """{revision, head, size?}: a whole revision, the head as 64 lower-case hex (the change log's newest link hash, or
+    the signed records' sha256 on a desk without the log), and on the change log its size (edge protocol 1.4)."""
+    if (not isinstance(h, dict) or not {"revision", "head"} <= set(h) <= {"revision", "head", "size"}
+            or not _whole(h["revision"]) or not isinstance(h["head"], str) or not HEX64.fullmatch(h["head"])
+            or ("size" in h and not _whole(h["size"], 1))):
+        return [f"{member}: {{revision, head, size?}}, a whole revision and size and the head as 64 lower-case hex"]
+    return []
 
 
 def verify_bundle(sealed: dict, pins: dict, state: dict, now: datetime, ceiling_check=None,
@@ -548,6 +569,8 @@ def _bundle_shape(b: dict) -> list[str]:
             errs.append("governed_roles: a list of {displayName, externalId?}, both strings")
         elif len(set(names)) != len(names):
             errs.append("governed_roles: each role once")
+    if "records_head" in b:                             # edge protocol 1.4; null is refused, never read as absent
+        errs += records_head_errors(b["records_head"])
     return errs
 
 
@@ -604,7 +627,7 @@ def _verify_bundle(b: dict, pins: dict, state: dict, now: datetime, ceiling_chec
     for x in b["leases"]:
         if ceiling_check is not None:
             d = ceiling_check(doc, {"kind": "lease", "person": x["person"], "roles": x.get("roles", []), "targets": [x["target"]],
-                                    "class": x["class"], "hours": max(1, int((_ts(x["until"]) - _ts(x["from"])).total_seconds() // 3600))})
+                                    "class": x["class"], "hours": ceiling_hours(_ts(x["from"]), _ts(x["until"]))})
             if not d["allow"]:
                 refused.append(x["lease_id"])
                 continue
@@ -616,7 +639,7 @@ def _verify_bundle(b: dict, pins: dict, state: dict, now: datetime, ceiling_chec
     for x in b["visit_leases"]:
         if ceiling_check is not None:                   # the officer's ceiling holds for visits too, not only at the desk
             d = ceiling_check(doc, {"kind": "visit", "person": x["person"], "targets": list(x["targets"]),
-                                    "hours": int((_ts(x["until"]) - _ts(x["from"])).total_seconds() // 3600),
+                                    "hours": ceiling_hours(_ts(x["from"]), _ts(x["until"])),
                                     "attested_profile": attested_profile})
             if not d["allow"]:
                 refused.append(x["lease_id"])
@@ -625,6 +648,7 @@ def _verify_bundle(b: dict, pins: dict, state: dict, now: datetime, ceiling_chec
             visits.append(x)
     return [], {"leases": live, "visit_leases": visits, "revoked": b["revoked"], "refused_by_ceiling": refused,
                 "governed_roles": [x["displayName"] for x in b["governed_roles"]] if "governed_roles" in b else None,
+                "records_head": b.get("records_head"),
                 "state": {"serial": b["serial"], "newest": max(issued, newest or issued).strftime(ISO),   # signed times only
                           "ceiling_serial": int(doc["serial"]) if doc else floor}}
 

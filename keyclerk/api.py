@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import secrets
 import sys
 import threading
 import time
@@ -35,6 +36,7 @@ from keyclerk.httpserve import BUSY_WAIT_SECONDS, SOCKET_SECONDS, Server
 from keyclerk.console import COOKIE, FLOW_COOKIE, parse_cookies
 from keyclerk.signer import SignerRefused
 from keyclerk.desk import Desk, Refusal, Throttled
+from keyclerk.restore import RestoreMode
 
 UI = Path(__file__).resolve().parent / "ui"
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
@@ -144,8 +146,55 @@ class ApiError(Exception):
         self.status, self.code, self.message, self.next = status, code, message, next_steps or []
 
 
+def _ip(text: str):
+    """One address from a forwarding header (bare, `[v6]:port` or `v4:port`), or None when it is not one."""
+    import ipaddress
+    t = text.strip().strip('"')
+    if t.startswith("["):
+        t = t[1:t.find("]")] if "]" in t else ""
+    elif t.count(":") == 1:
+        t = t.split(":")[0]
+    try:
+        a = ipaddress.ip_address(t)
+    except ValueError:
+        return None
+    return getattr(a, "ipv4_mapped", None) or a
+
+
+def _hops(headers, header: str) -> list[str]:
+    """The addresses a forwarding header lists, nearest the client first, over every copy of the header."""
+    hops = []
+    for line in headers.get_all(header) or []:
+        for element in line.split(","):
+            if header == "x-forwarded-for":
+                hops.append(element)
+                continue
+            for pair in element.split(";"):
+                k, _, v = pair.partition("=")
+                if k.strip().lower() == "for":
+                    hops.append(v)
+    return hops
+
+
+def client_ip(peer: str, headers, proxies: tuple = (), header: str = "x-forwarded-for") -> str:
+    """The address a request comes from (decision 0029 point 7). Behind a listed proxy, the rightmost address in the
+    forwarding header that is not a listed proxy; a proxy appends the address it saw, so what is left of that is the
+    client's own word. Without listed proxies, or from any other peer, the peer itself."""
+    here = _ip(peer)
+    if here is None or not any(here in n for n in proxies):
+        return peer
+    for hop in reversed(_hops(headers, header)):
+        a = _ip(hop)
+        if a is None:                       # unreadable: what is left of it cannot be trusted, keep the last proxy
+            break
+        here = a
+        if not any(a in n for n in proxies):
+            break
+    return str(here)
+
+
 def handler(desk: Desk, auth, allowed_hosts: set[str], api_clients: tuple[str, ...], secure_cookie: bool,
-            dpop_clients: tuple[str, ...] = (), readiness=None):
+            dpop_clients: tuple[str, ...] = (), readiness=None, proxies: tuple = (), forwarded: str = "x-forwarded-for"):
     gate = threading.BoundedSemaphore(MAX_CONCURRENT)
     inflight: dict[str, int] = {}
     inflight_lock = threading.Lock()
@@ -314,6 +363,9 @@ def handler(desk: Desk, auth, allowed_hosts: set[str], api_clients: tuple[str, .
                                                                      "do": "Wait a few minutes, then try again.", "who": []}]))
             except Refusal as e:
                 self._error(ApiError(422, "refused", str(e), getattr(e, "next", [])))
+            except RestoreMode as e:                          # an outage, never an ending: edges keep their bundle
+                self._error(ApiError(503, "restoring", str(e), [{"why": "The desk is being restored from a backup.",
+                                                                 "do": "Try again later; nothing was changed.", "who": []}]))
             except SignerRefused as e:                        # the checking signer said no (decision 0015)
                 self._error(ApiError(422, "refused", f"the signer refused to sign it: {e}",
                                      [{"why": "The records signer checks every change again before it is signed.",
@@ -486,7 +538,7 @@ def handler(desk: Desk, auth, allowed_hosts: set[str], api_clients: tuple[str, .
             from keyclerk import visits as V
             if u.path == "/api/v1/qr-key":
                 return self._json(200, desk.qr_key())
-            ip, now = self.client_address[0], time.monotonic()
+            ip, now = client_ip(self.client_address[0], self.headers, proxies, forwarded), time.monotonic()
             per = int(V.rules().get("scan_per_minute", 30))
             with scan_lock:
                 if ip not in scans and len(scans) >= 10000:     # full: forget addresses quiet for a minute first
@@ -553,6 +605,10 @@ def _visit_timers(desk: Desk) -> None:
             desk.tick()
         except Exception as e:  # noqa: BLE001 - a failed tick is logged and retried; it never stops the desk
             print(f"visit timers: {guard.safe_for_log(e, 300)}", flush=True)
+        try:
+            desk.note_console_grants()                 # the reconciler's console-grant findings, noted once each
+        except Exception as e:  # noqa: BLE001 - retried at the next tick
+            print(f"console grants: {guard.safe_for_log(e, 300)}", flush=True)
 
 
 FOLLOW_SECONDS = 15
@@ -607,8 +663,8 @@ def main(argv: list[str]) -> int:
     policy = config.current().get("approvals") or {}
     proofs = BrokerProofs({auth.public_issuer, auth.internal_issuer}, {auth.client_id, *a.api_client},
                           policy.get("max_age_seconds", 300), f"{auth.internal_issuer}/protocol/openid-connect/certs",
-                          Path(a.store) / "broker-keys.json", acr=policy.get("acr"))
-    auth.approval_acr = policy.get("acr")
+                          Path(a.store) / "broker-keys.json", acr=config.approval_acr())
+    auth.approval_acr = config.approval_acr()
     base = "/".join(a.oidc_redirect.split("/", 3)[:3])
     if not (a.signer or a.signing_key):
         ap.error("--signer (a checking signer) or --signing-key (the key in this process)")
@@ -633,6 +689,11 @@ def main(argv: list[str]) -> int:
     print(f"KeyClerk desk and API on {a.host}:{a.port}", flush=True)
     for c in a.dpop_client:
         guard.name(c, "dpop client")
+    finding = config.acr_finding()
+    if finding:                                     # at every start, on record (decision 0030 point 5)
+        print(f"KeyClerk finding: {finding}", flush=True)
+        desk.store.note({"change_id": "C-" + secrets.token_hex(6), "action": "config_finding", "actor": None,
+                         "outcome": "finding", "records": {}, "reasons": [], "summary": finding})
     threading.Thread(target=_visit_timers, args=(desk,), name="visit-timers", daemon=True).start()
     if hasattr(store, "refresh"):
         threading.Thread(target=_follow, args=(store,), name="follow-signer", daemon=True).start()
@@ -640,11 +701,22 @@ def main(argv: list[str]) -> int:
     readiness = health.Readiness(desk, signer)
     health.register_gauges(desk, readiness)
     if a.mgmt_port is not None:
-        mgmt = health.management_server((a.mgmt_host, a.mgmt_port), readiness, health.read_token(a.mgmt_token_file))
+        siem_cfg, audit = config.current().get("siem") or {}, None
+        if siem_cfg.get("reader_token_file"):           # the SIEM pull API (issue 29): off unless configured
+            from keyclerk import siem
+            audit = (siem.Feed(desk.store.path, siem_cfg.get("site", "keyclerk")),
+                     health.read_token(siem_cfg["reader_token_file"]))
+        mgmt = health.management_server((a.mgmt_host, a.mgmt_port), readiness, health.read_token(a.mgmt_token_file),
+                                        audit)
         threading.Thread(target=mgmt.serve_forever, name="management", daemon=True).start()
-        print(f"KeyClerk management (metrics, readiness) on {a.mgmt_host}:{a.mgmt_port}", flush=True)
+        print(f"KeyClerk management (metrics, readiness{', audit events' if audit else ''}) on "
+              f"{a.mgmt_host}:{a.mgmt_port}", flush=True)
+    import ipaddress
+    front = config.current().get("api") or {}
     Server((a.host, a.port), handler(desk, auth, hosts, tuple(a.api_client), a.oidc_redirect.startswith("https://"),
-                                     tuple(a.dpop_client), readiness)).serve_forever()
+                                     tuple(a.dpop_client), readiness,
+                                     tuple(ipaddress.ip_network(n) for n in front.get("trusted_proxies", [])),
+                                     front.get("forwarded_header", "x-forwarded-for"))).serve_forever()
     return 0
 
 

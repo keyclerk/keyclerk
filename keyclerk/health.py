@@ -44,7 +44,13 @@ class Readiness:
         return int((config.current().get("reconcile") or {}).get("ready_max_age_seconds", DEFAULT_RECONCILE_MAX_AGE))
 
     def _checks(self) -> dict:
+        from keyclerk import restore
         out = {}
+        path = getattr(self.desk.store, "path", None)
+        if path is not None:                             # a store kept in a folder can be in restore mode (0019)
+            restoring = restore.marker(path) is not None
+            out["restore"] = (not restoring, "in restore mode: no writes, edges wait (python -m keyclerk.restore status)"
+                              if restoring else "serving")
         try:
             self.desk.store.load()
             breaks = self.desk.store.verify_log()
@@ -76,6 +82,13 @@ class Readiness:
                           f"the desk cannot follow the checking signer: {failure}" if failure
                           else f"signing is frozen, the desk is read-only: {frozen}" if frozen
                           else "the desk follows the checking signer")
+        w = getattr(store, "witness", None)
+        if w:                                         # the signer's witnesses (decision 0022 point 5)
+            errors = "; ".join(f"{n}: {c['error']}" for n, c in sorted(w["cosigners"].items()) if c.get("error"))
+            out["witness"] = (not w["incident"],
+                              f"the change log is unwitnessed since {w['unwitnessed_since']}"
+                              + (", and signing is blocked" if w["blocking"] else "") + (f" ({errors})" if errors else "")
+                              if w["incident"] else f"the witnesses hold {w['size']} links")
         age = reconcile_age(self.desk)
         if age is not None:
             bound = self._bound()
@@ -122,6 +135,27 @@ def reconcile_age(desk) -> float | None:
     return max(0.0, (datetime.now(timezone.utc) - at).total_seconds())
 
 
+def _backup_gauges() -> None:
+    """Backup state as gauges when the configuration names where the manifests and the drill report are (0019)."""
+    from keyclerk import backup, config
+    b = (config.current() or {}).get("backup") or {}
+    if b.get("manifests"):
+        metrics.gauge_fn("keyclerk_backup_age_seconds",
+                         lambda: backup.newest_age(Path(b["manifests"]), b.get("manifest_keys") or []))
+    if b.get("manifests"):
+        pins = b.get("manifest_keys") or []
+
+        def due(kind):
+            return float(sum(1 for f in backup.hygiene(Path(b["manifests"]), pins)["findings"] if f["kind"] == kind))
+        metrics.gauge_fn("keyclerk_backup_escrow_unproven", lambda: due("escrow_unproven"))
+        metrics.gauge_fn("keyclerk_backup_recipients_due_rotation", lambda: due("rotate"))
+    if b.get("drill_report"):
+        metrics.gauge_fn("keyclerk_backup_drill_failed",
+                         lambda: 0.0 if backup.last_drill(Path(b["drill_report"]))["ok"] else 1.0)
+        metrics.gauge_fn("keyclerk_backup_recovery_seconds",
+                         lambda: float(backup.last_drill(Path(b["drill_report"]))["recovery_seconds"]))
+
+
 def register_gauges(desk, readiness: Readiness) -> None:
     """The scrape-time gauges of one desk (keyclerk.metrics.SPEC)."""
     from keyclerk import __version__
@@ -130,6 +164,16 @@ def register_gauges(desk, readiness: Readiness) -> None:
     metrics.gauge_fn("keyclerk_log_breaks", lambda: len(desk.store.verify_log())
                      + (desk.store.follow_breaks() if hasattr(desk.store, "follow_breaks") else 0))
     metrics.gauge_fn("keyclerk_signing_frozen", lambda: 1.0 if getattr(desk.store, "frozen", None) else 0.0)
+
+    def unwitnessed():
+        w = getattr(desk.store, "witness", None)
+        if not w:
+            raise LookupError("no witness configured")
+        if not w["unwitnessed_since"]:
+            return 0.0
+        since = datetime.strptime(w["unwitnessed_since"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - since).total_seconds())
+    metrics.gauge_fn("keyclerk_unwitnessed_seconds", unwitnessed)
     metrics.gauge_fn("keyclerk_ready", lambda: 1.0 if readiness.ready() else 0.0)
 
     def age():
@@ -138,6 +182,7 @@ def register_gauges(desk, readiness: Readiness) -> None:
             raise LookupError("no reconciler state")
         return a
     metrics.gauge_fn("keyclerk_reconcile_age_seconds", age)
+    _backup_gauges()
 
     def drift():
         r = _last_run(desk)
@@ -159,10 +204,14 @@ def register_gauges(desk, readiness: Readiness) -> None:
     metrics.gauge_fn("keyclerk_edges_silent", silent)
 
 
-def management_server(address: tuple[str, int], readiness: Readiness, token: str) -> ThreadingHTTPServer:
-    """The operator's listener: every path behind the bearer token, GET only, no other state than the metrics."""
-    if len(token) < 32:
-        raise ValueError("the management token must be at least 32 characters")
+def management_server(address: tuple[str, int], readiness: Readiness, token: str, audit=None) -> ThreadingHTTPServer:
+    """The operator's listener: every path behind the bearer token, GET only, no other state than the metrics.
+    audit: (keyclerk.siem.Feed, the SIEM reader's token) serves GET /audit/events behind that token alone (issue 29):
+    the reader sees the audit events and nothing else, and the management token does not read them."""
+    if len(token) < 32 or (audit and len(audit[1]) < 32):
+        raise ValueError("the management and SIEM reader tokens must be at least 32 characters")
+    if audit and hmac.compare_digest(audit[1].encode(), token.encode()):
+        raise ValueError("the SIEM reader's token is its own, never the management token")
 
     class H(BaseHTTPRequestHandler):
         server_version = "keyclerk"
@@ -182,9 +231,15 @@ def management_server(address: tuple[str, int], readiness: Readiness, token: str
 
         def do_GET(self):
             authz = self.headers.get("Authorization") or ""
-            if not (authz.startswith("Bearer ") and hmac.compare_digest(authz[7:].strip().encode(), token.encode())):
+            given = authz[7:].strip().encode() if authz.startswith("Bearer ") else b""
+            path, _, query = self.path.partition("?")
+            if path == "/audit/events":
+                if not (audit and given and hmac.compare_digest(given, audit[1].encode())):
+                    return self._send(401, b"unauthenticated\n")
+                status, body = audit[0].answer(query)
+                return self._send(status, json.dumps(body, sort_keys=True).encode(), "application/json")
+            if not (given and hmac.compare_digest(given, token.encode())):
                 return self._send(401, b"unauthenticated\n")
-            path = self.path.split("?", 1)[0]
             if path == "/metrics":
                 return self._send(200, metrics.render().encode(), "text/plain; version=0.0.4; charset=utf-8")
             if path == "/readyz":

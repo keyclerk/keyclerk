@@ -17,7 +17,7 @@ import hashlib
 
 from keyclerk import edge as E
 
-FAMILIES = ("statements", "ceilings", "ended", "unlock", "module_bytes", "requests", "email")
+FAMILIES = ("statements", "ceilings", "ended", "unlock", "module_bytes", "requests", "email", "ceiling_hours", "reports")
 
 
 def verdict(family: str, c: dict) -> dict:
@@ -57,6 +57,18 @@ def verdict(family: str, c: dict) -> dict:
         errs, m = E.verify_email(c["sealed"], c["pins"], c["lease_id"], c["nonce"])
         email = m.get("email") if not errs else None     # by its digest: no address in a published file
         return {"ok": not errs, "email_sha256": hashlib.sha256(email.encode()).hexdigest() if email else None}
+    if family == "reports":                      # what the desk accepts of a report (edge protocol 1.4)
+        from keyclerk import desk, guard
+        body = c["body"]
+        try:
+            if not isinstance(body, dict) or not set(body) <= desk.REPORT_FIELDS:
+                raise guard.InputRejected("an unknown report member")
+            _, _, bastion = desk._report_14(body, E._ts(c["now"]))
+            return {"ok": True, "bastion": bastion}
+        except guard.InputRejected:
+            return {"ok": False, "bastion": None}
+    if family == "ceiling_hours":
+        return {"hours": E.ceiling_hours(E._ts(c["from"]), E._ts(c["until"]))}
     if family == "module_bytes":
         return {"ok": not E.verify_module(base64.b64decode(c["wasm"]), c["sha256"])}
     raise ValueError(f"no conformance family {family}")

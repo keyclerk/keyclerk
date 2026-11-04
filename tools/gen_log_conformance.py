@@ -145,6 +145,19 @@ def main() -> int:
             put("groups", {"group_id": "a"}, "b")], CHANGES[2][2])))),
     ]
     links += [{"name": n, **c, "sealed": s} for n, c, s in bad]
+    end = {"pinned": PINNED, "realm": REALM, "size": store.size(), "head": store.head().hex(), "fence": 1}
+    two = [{"by": "idp:0001", "proof": "1" * 64}, {"by": "idp:0002", "proof": "2" * 64}]
+    restore = {"mark": 9, "confirmations": two}
+    rb = body(end["size"], end["head"], [], {"change_id": "C-a0b1c2", "action": "restore"})
+    links += [{"name": n, **end, "sealed": s} for n, s in [
+        ("a restore link: no ops, a mark, two confirmations", L.seal_link(KEY, REALM, end["size"], end["head"], 1, AT, [],
+                                                                         {"change_id": "C-a0b1c2", "action": "restore"},
+                                                                         restore=restore)),
+        ("a restore link that carries ops", signed_raw(KEY, L.LINK_FORMAT, E.canonical({**rb, "change": {
+            **rb["change"], "ops": [put("groups", {"group_id": "a"})], "restore": restore}}))),
+        ("a restore link with one confirmation", signed_raw(KEY, L.LINK_FORMAT, E.canonical({**rb, "change": {
+            **rb["change"], "restore": {"mark": 9, "confirmations": two[:1]}}}))),
+    ]]
     for c in links:
         c["expected"] = log_conformance.verdict("links", c)
 

@@ -415,6 +415,54 @@
      "signature": "801e5e3ffe7ffc563bae1092cb665434f189cc62608db6d38212446227da3c94367e3aedc4a82542e07c13b2e3676b5cd4fe0fb3758d8d88990c0a8a0c88a802"
     },
     "size": 2
+   },
+   {
+    "expected": {
+     "hash": "63f47cfdba2207d268e1798a22fb097418188cd495d9fec70a4187d7bc0a6fdd",
+     "ok": true
+    },
+    "fence": 1,
+    "head": "adbbe7f0bd3d8ca3a86809036b4557ba3f35a339f47adbb486fe6c9e81badb24",
+    "name": "a restore link: no ops, a mark, two confirmations",
+    "pinned": "119d4088eaa1de818bc140efb396751ed77fc13b643c132e705235d30d91cf43",
+    "realm": "example",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTAtMjRUMTI6MDA6MDBaIiwiY2hhbmdlIjp7ImVudHJ5Ijp7ImFjdGlvbiI6InJlc3RvcmUiLCJjaGFuZ2VfaWQiOiJDLWEwYjFjMiJ9LCJvcHMiOltdLCJyZXN0b3JlIjp7ImNvbmZpcm1hdGlvbnMiOlt7ImJ5IjoiaWRwOjAwMDEiLCJwcm9vZiI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEifSx7ImJ5IjoiaWRwOjAwMDIiLCJwcm9vZiI6IjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIifV0sIm1hcmsiOjl9fSwiZmVuY2UiOjEsImZvcm1hdCI6ImtjLWNoYW5nZS1saW5rLXYxIiwicHJldiI6ImFkYmJlN2YwYmQzZDhjYTNhODY4MDkwMzZiNDU1N2JhM2YzNWEzMzlmNDdhZGJiNDg2ZmU2YzllODFiYWRiMjQiLCJyZWFsbSI6ImV4YW1wbGUiLCJzZXEiOjR9",
+     "signature": "5c8e5fa84f159b5da4426f51d80d165f695a4408e09f9e42ed4f427b3d2959c14fed4edd6c0e77a3cdff777e4e7d76b65d675d529c5cd21ec90379345f5e310a"
+    },
+    "size": 4
+   },
+   {
+    "expected": {
+     "hash": null,
+     "ok": false
+    },
+    "fence": 1,
+    "head": "adbbe7f0bd3d8ca3a86809036b4557ba3f35a339f47adbb486fe6c9e81badb24",
+    "name": "a restore link that carries ops",
+    "pinned": "119d4088eaa1de818bc140efb396751ed77fc13b643c132e705235d30d91cf43",
+    "realm": "example",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTAtMjRUMTI6MDA6MDBaIiwiY2hhbmdlIjp7ImVudHJ5Ijp7ImFjdGlvbiI6InJlc3RvcmUiLCJjaGFuZ2VfaWQiOiJDLWEwYjFjMiJ9LCJvcHMiOlt7ImtleSI6ImEiLCJraW5kIjoiZ3JvdXBzIiwib3AiOiJwdXQiLCJyZWNvcmQiOnsiZ3JvdXBfaWQiOiJhIn19XSwicmVzdG9yZSI6eyJjb25maXJtYXRpb25zIjpbeyJieSI6ImlkcDowMDAxIiwicHJvb2YiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIn0seyJieSI6ImlkcDowMDAyIiwicHJvb2YiOiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIn1dLCJtYXJrIjo5fX0sImZlbmNlIjoxLCJmb3JtYXQiOiJrYy1jaGFuZ2UtbGluay12MSIsInByZXYiOiJhZGJiZTdmMGJkM2Q4Y2EzYTg2ODA5MDM2YjQ1NTdiYTNmMzVhMzM5ZjQ3YWRiYjQ4NmZlNmM5ZTgxYmFkYjI0IiwicmVhbG0iOiJleGFtcGxlIiwic2VxIjo0fQ==",
+     "signature": "9cbb94f467565d405ac27ce982157aee391a8ad99dae74da330ef2310dca5e2e513f1268ca7fb9d0b78a8ae9490aa4e8cf88605a01ece7696da7740497f2f402"
+    },
+    "size": 4
+   },
+   {
+    "expected": {
+     "hash": null,
+     "ok": false
+    },
+    "fence": 1,
+    "head": "adbbe7f0bd3d8ca3a86809036b4557ba3f35a339f47adbb486fe6c9e81badb24",
+    "name": "a restore link with one confirmation",
+    "pinned": "119d4088eaa1de818bc140efb396751ed77fc13b643c132e705235d30d91cf43",
+    "realm": "example",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTAtMjRUMTI6MDA6MDBaIiwiY2hhbmdlIjp7ImVudHJ5Ijp7ImFjdGlvbiI6InJlc3RvcmUiLCJjaGFuZ2VfaWQiOiJDLWEwYjFjMiJ9LCJvcHMiOltdLCJyZXN0b3JlIjp7ImNvbmZpcm1hdGlvbnMiOlt7ImJ5IjoiaWRwOjAwMDEiLCJwcm9vZiI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEifV0sIm1hcmsiOjl9fSwiZmVuY2UiOjEsImZvcm1hdCI6ImtjLWNoYW5nZS1saW5rLXYxIiwicHJldiI6ImFkYmJlN2YwYmQzZDhjYTNhODY4MDkwMzZiNDU1N2JhM2YzNWEzMzlmNDdhZGJiNDg2ZmU2YzllODFiYWRiMjQiLCJyZWFsbSI6ImV4YW1wbGUiLCJzZXEiOjR9",
+     "signature": "6934a62be6add32df1b4a2d659ebf301e71696c3b475b1c1f2345d3dbe448eb60062739c91e9645785484b6757fc729769e8b43a792a791bbb85f9bd33983b0f"
+    },
+    "size": 4
    }
   ]
  },

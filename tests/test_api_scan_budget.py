@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: EUPL-1.2
 """The public scan budget forgets quiet addresses: a full table never refuses everyone for good."""
+import email.message
 import threading
 from http.server import ThreadingHTTPServer
 
@@ -40,6 +41,7 @@ def test_old_addresses_are_forgotten(tmp_path, monkeypatch):
     H = api.handler(desk, Auth(), {"desk.test"}, ("other-front-end",), False)
     h = H.__new__(H)
     h._json = lambda status, obj: status
+    h.headers = email.message.Message()
     clock = [1000.0]
     monkeypatch.setattr(api.time, "monotonic", lambda: clock[0])
     u = urlparse("/api/v1/scan/not-a-code")

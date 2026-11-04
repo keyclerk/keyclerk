@@ -25,15 +25,18 @@ mode carry grant groups into a dedicated OU.
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from keyclerk import guard
 from keyclerk.connectors.contract import Capabilities, MembershipTarget
 
 MAX_PAGES = 1000
+MAX_CHILD_DEPTH = 8                     # child groups under a managed group, read this deep (E5)
 
 
 def display_name(path: str) -> str:
@@ -211,6 +214,8 @@ class KeycloakTarget(ScimTarget):
     state_group: str = "keyclerk-state"             # holds the high-water mark: the newest revision applied
     logout_on_removal: bool = True                   # needs a credential that may manage users (decision 0003)
     max_attributions: int = 20                       # admin-event lookups per run
+    privileged_roles: tuple = ()                     # beside every realm-management role: "realm:NAME" or "CLIENT:NAME"
+    max_console_events: int = 200                    # role-mapping admin events read per type per run
     name: str = "keycloak-target"
 
     def __post_init__(self):
@@ -233,6 +238,8 @@ class KeycloakTarget(ScimTarget):
 
     def group(self, path: str, create: bool = False) -> dict | None:
         """A managed group; one KeyClerk creates gets its marker at once, so it is recognised as ours later."""
+        if path in self._children:                       # a child group the read found: removals only, never created
+            return None if create else {"id": self._children[path]}
         g = super().group(path, create=False)
         if g:
             gid = guard.uuid(g.get("id"), "group id")
@@ -253,7 +260,8 @@ class KeycloakTarget(ScimTarget):
     def read_full(self) -> set:
         """Memberships of the managed groups, through the admin API (Keycloak's SCIM does not report them)."""
         out, first = set(), 0
-        self._ids, self._anchors = {}, {}                   # (group, user id) -> group id; (group, anchor) -> user id
+        self._ids, self._anchors, self._children = {}, {}, {}   # (group, user id) -> group id; (group, anchor) -> user
+        #   id; child group path -> id
         self.attributions_left = self.max_attributions
         for _ in range(MAX_PAGES):
             page = self._admin("/groups", {"first": first, "max": self.page, "briefRepresentation": "false"}) or []
@@ -268,40 +276,75 @@ class KeycloakTarget(ScimTarget):
                 roles = self._admin(f"/groups/{gid}/role-mappings") or {}
                 if roles.get("realmMappings") or roles.get("clientMappings"):
                     self.findings.append({"group": path, "why": "a managed group carries role mappings: KeyClerk groups carry none"})
-                holders: dict[str, list[str]] = {}
-                for mpage in range(MAX_PAGES + 1):
-                    if mpage == MAX_PAGES:
-                        raise guard.InputRejected(f"more than {MAX_PAGES} member pages")
-                    members = self._admin(f"/groups/{gid}/members", {"first": mpage * self.page, "max": self.page,
-                                                                     "briefRepresentation": "false"}) or []
-                    for u in members:
-                        uid = guard.uuid(u.get("id"), "user id")
-                        self._ids[(path, uid)] = gid
-                        anchor = _valid_anchor(u.get("username") if self.anchor_attribute == "userName" else
-                                               ((u.get("attributes") or {}).get(self.anchor_profile_attribute) or [None])[0])
-                        if anchor:
-                            holders.setdefault(anchor, []).append(uid)
-                            if u.get("username"):            # the name Warpgate and the facade know (decision 0014b)
-                                self.usernames[anchor] = guard.text(str(u["username"]), "username", 255)
-                            if u.get("email") and u.get("emailVerified") is True:   # SSO matches it, so only a verified one
-                                self.emails[anchor] = guard.text(str(u["email"]), "email", 320)
-                        else:   # a member without a valid anchor is never left in a managed group
-                            self.findings.append({"group": path, "member": uid, "why": "member without an anchor: removed"})
-                            out.add((path, f"uid:{uid}"))
-                    if len(members) < self.page:
-                        break
-                for anchor, uids in holders.items():
-                    self._anchors.update({(path, anchor): uids[0]} if len(uids) == 1 else {})
-                    if len(uids) == 1:
-                        out.add((path, anchor))
-                    else:   # one anchor on several people: none of them keeps the membership
-                        self.findings.append({"group": path, "anchor": anchor,
-                                              "why": f"anchor on {len(uids)} people: all removed, a security incident"})
-                        out |= {(path, f"uid:{u}") for u in uids}
+                self._read_members(path, gid, out, own=True)
+                self._read_children(path, gid, out, 1)
             if len(page) < self.page:
                 return out
             first += self.page
         raise guard.InputRejected(f"more than {MAX_PAGES} pages of groups")
+
+    def _read_members(self, path: str, gid: str, out: set, own: bool) -> None:
+        """The members of one group into out as (path, anchor), or (path, uid:<id>) for one that cannot stay."""
+        holders: dict[str, list[str]] = {}
+        for mpage in range(MAX_PAGES + 1):
+            if mpage == MAX_PAGES:
+                raise guard.InputRejected(f"more than {MAX_PAGES} member pages")
+            members = self._admin(f"/groups/{gid}/members", {"first": mpage * self.page, "max": self.page,
+                                                             "briefRepresentation": "false"}) or []
+            for u in members:
+                uid = guard.uuid(u.get("id"), "user id")
+                self._ids[(path, uid)] = gid
+                anchor = _valid_anchor(u.get("username") if self.anchor_attribute == "userName" else
+                                       ((u.get("attributes") or {}).get(self.anchor_profile_attribute) or [None])[0])
+                if anchor:
+                    holders.setdefault(anchor, []).append(uid)
+                    if own and u.get("username"):        # the name Warpgate and the facade know (decision 0014b)
+                        self.usernames[anchor] = guard.text(str(u["username"]), "username", 255)
+                    if own and u.get("email") and u.get("emailVerified") is True:   # SSO matches it: a verified one only
+                        self.emails[anchor] = guard.text(str(u["email"]), "email", 320)
+                else:   # a member without a valid anchor is never left in a managed group
+                    self.findings.append({"group": path, "member": uid, "why": "member without an anchor: removed"})
+                    out.add((path, f"uid:{uid}"))
+            if len(members) < self.page:
+                break
+        for anchor, uids in holders.items():
+            self._anchors.update({(path, anchor): uids[0]} if len(uids) == 1 else {})
+            if len(uids) == 1:
+                out.add((path, anchor))
+            else:   # one anchor on several people: none of them keeps the membership
+                self.findings.append({"group": path, "anchor": anchor,
+                                      "why": f"anchor on {len(uids)} people: all removed, a security incident"})
+                out |= {(path, f"uid:{u}") for u in uids}
+
+    def _read_children(self, path: str, gid: str, out: set, depth: int) -> None:
+        """Groups under a managed group (E5, measured on Keycloak 26.8.1): a member of one is under the managed group
+        in every token, yet not its member. KeyClerk creates none, so the records never require such a membership:
+        each member is read as an intruder and removed from the child group; the child group itself stays."""
+        for cpage in range(MAX_PAGES + 1):
+            if cpage == MAX_PAGES:
+                raise guard.InputRejected(f"more than {MAX_PAGES} pages of child groups")
+            kids = self._admin(f"/groups/{gid}/children", {"first": cpage * self.page, "max": self.page,
+                                                           "briefRepresentation": "true"}) or []
+            for c in kids:
+                cid = guard.uuid(c.get("id"), "group id")
+                child = f"{path}/{guard.safe_for_log(c.get('name'), 64).replace('/', '_')}"
+                if depth > MAX_CHILD_DEPTH:
+                    raise guard.InputRejected(f"{child}: child groups deeper than {MAX_CHILD_DEPTH} under a managed group")
+                self._children[child] = cid
+                self.findings.append({"group": child, "why": "a child group under a managed group: its members are under "
+                                      "the managed group in tokens, so they are removed from it"})
+                self._read_members(child, cid, out, own=False)
+                self._read_children(child, cid, out, depth + 1)
+            if len(kids) < self.page:
+                return
+
+    def _members(self, gid: str, op: str, uid: str) -> None:
+        if gid in self._children.values():               # not a KeyClerk group: only ever a removal, by the admin API
+            if op != "remove":
+                raise PermissionError("KeyClerk never adds a member to a child group")
+            self._admin(f"/users/{guard.uuid(uid)}/groups/{guard.uuid(gid)}", method="DELETE", write=True)
+            return
+        super()._members(gid, op, uid)
 
     def _state(self) -> dict | None:
         hits = [g for g in (self._admin("/groups", {"search": self.state_group, "exact": "true",
@@ -314,17 +357,14 @@ class KeycloakTarget(ScimTarget):
             raise PermissionError(f"{self.state_group}: the broker group is not one KeyClerk created")
         return rep_
 
-    def high_water(self) -> int | None:
-        """The newest records revision applied to this realm, kept in the broker so a lost state folder forgets
-        nothing; None before the first."""
+    def high_water(self) -> str | None:
+        """The newest records revision applied to this realm, as the reconciler signed it (kc-mark-v1), kept in the
+        broker so a lost state folder forgets nothing; None before the first. The reconciler verifies it."""
         rep_ = self._state()
         vals = ((rep_ or {}).get("attributes") or {}).get("keyclerk.revision") or []
-        try:
-            return int(vals[0]) if vals else None
-        except (TypeError, ValueError):
-            raise guard.InputRejected("the broker's high-water mark does not read") from None
+        return str(vals[0])[:300] if vals else None
 
-    def set_high_water(self, revision: int) -> None:
+    def set_high_water(self, revision: str) -> None:
         rep_ = self._state()
         if rep_ is None:
             self._admin("/groups", method="POST", write=True,
@@ -335,6 +375,7 @@ class KeycloakTarget(ScimTarget):
 
     _anchors: dict = field(default_factory=dict)
     _ids: dict = field(default_factory=dict)
+    _children: dict = field(default_factory=dict)    # child group path -> id, from the last read
 
     def who_added(self, path: str, anchor: str) -> dict | None:
         """Who put this membership in the broker by hand, from the realm's admin events (best effort: events may be
@@ -356,15 +397,100 @@ class KeycloakTarget(ScimTarget):
             return None
         if not evs:
             return None
-        auth = evs[0].get("authDetails") or {}
+        return self._by(evs[0])
+
+    def _by(self, ev: dict) -> dict:
+        """Who made an admin event, as the event says: user, client, address, and the user's name when they are a
+        person of this realm."""
+        auth = ev.get("authDetails") or {}
         by = {"by_user": guard.safe_for_log(auth.get("userId"), 64), "by_client": guard.safe_for_log(auth.get("clientId"), 64),
-              "from": guard.safe_for_log(auth.get("ipAddress"), 64), "at_ms": evs[0].get("time")}
+              "from": guard.safe_for_log(auth.get("ipAddress"), 64), "at_ms": ev.get("time")}
         try:
             u = self._admin(f"/users/{guard.uuid(auth.get('userId'))}") or {}
             by["by_name"] = guard.safe_for_log(u.get("username"), 64)
         except Exception:   # noqa: BLE001 - not a person of this realm: a server administrator, say so
             by["by_name"] = "an administrator outside this realm"
         return by
+
+    def _role_labels(self, ev: dict, clients: dict) -> tuple[list[str], bool]:
+        """The roles an admin event granted, as realm:NAME or CLIENT:NAME: from the event's representation when the
+        realm records it, else what the subject holds there now (False: read after the fact)."""
+        roles, exact = None, True
+        try:
+            rep_ = json.loads(ev.get("representation") or "null")
+            roles = rep_ if isinstance(rep_, list) else None
+        except ValueError:
+            roles = None
+        if roles is None:
+            path = str(ev.get("resourcePath") or "")
+            if not re.fullmatch(r"(users|groups)/[0-9a-f-]{36}/role-mappings/(realm|clients/[0-9a-f-]{36})", path):
+                return [], False
+            roles, exact = self._admin("/" + path) or [], False
+        out = []
+        for r in roles if isinstance(roles, list) else []:
+            if not isinstance(r, dict) or not isinstance(r.get("name"), str):
+                continue
+            if r.get("clientRole"):
+                cid = str(r.get("containerId") or "")
+                if cid not in clients:
+                    try:
+                        clients[cid] = str((self._admin(f"/clients/{guard.uuid(cid)}") or {}).get("clientId") or cid)
+                    except Exception:   # noqa: BLE001 - an unknown client keeps its id
+                        clients[cid] = cid
+                out.append(f"{clients[cid]}:{r['name']}")
+            else:
+                out.append(f"realm:{r['name']}")
+        return out, exact
+
+    def console_grants(self, since_ms: int) -> tuple[list[dict], int, str | None]:
+        """Privileged roles granted in the broker outside KeyClerk since since_ms (decision 0030 point 3), from the
+        realm's admin events: every realm-management role and the roles the deployment names high-risk, granted to a
+        user or a group directly. KeyClerk grants roles through no such mapping, so each is a finding, with who made
+        it. Report-only: nothing is removed. Returns (findings, the newest event time read, why none could be read)."""
+        newest, out, clients, why = since_ms, [], {}, None
+        day = datetime.fromtimestamp(max(since_ms, 0) / 1000, timezone.utc).strftime("%Y-%m-%d")
+        high = set(self.privileged_roles)
+        for kind in ("REALM_ROLE_MAPPING", "CLIENT_ROLE_MAPPING"):
+            try:
+                evs = self._admin("/admin-events", {"resourceTypes": kind, "operationTypes": "CREATE", "dateFrom": day,
+                                                    "max": self.max_console_events}) or []
+            except Exception as e:   # noqa: BLE001 - events off or not readable: the run says so, nothing is seen
+                why = f"the realm's admin events do not read ({type(e).__name__}): console grants are not seen; " \
+                      "turn admin events on and give the reader view-events"
+                continue
+            for ev in evs if isinstance(evs, list) else []:
+                t = ev.get("time") if isinstance(ev, dict) else None
+                if not isinstance(t, int) or t <= since_ms:
+                    continue
+                newest = max(newest, t)
+                labels, exact = self._role_labels(ev, clients)
+                hit = sorted(x for x in labels if x.startswith("realm-management:") or x in high)
+                if not hit:
+                    continue
+                path = str(ev.get("resourcePath") or "")
+                kind_, _, sid = path.partition("/")
+                sid = sid.split("/", 1)[0]
+                f = {"why": "a privileged role granted outside KeyClerk", "roles": hit, "exact": exact,
+                     "subject_kind": "group" if kind_ == "groups" else "user", "subject": guard.safe_for_log(sid, 64),
+                     "event": guard.safe_for_log(ev.get("id"), 64) if ev.get("id") else   # Keycloak 26 names it
+                     f"{t}:{guard.safe_for_log(path, 200)}", **self._by(ev)}
+                cid = str(f.get("by_client") or "")
+                if re.fullmatch(r"[0-9a-f-]{36}", cid):        # the event names the client by its id: say which
+                    if cid not in clients:
+                        try:
+                            clients[cid] = str((self._admin(f"/clients/{guard.uuid(cid)}") or {}).get("clientId") or cid)
+                        except Exception:   # noqa: BLE001 - a client of another realm (master's admin-cli) keeps its id
+                            clients[cid] = cid
+                    f["by_client"] = guard.safe_for_log(clients[cid], 64)
+                try:
+                    if kind_ == "users":
+                        f["subject_name"] = guard.safe_for_log((self._admin(f"/users/{guard.uuid(sid)}") or {}).get("username"), 64)
+                    elif kind_ == "groups":
+                        f["subject_name"] = guard.safe_for_log((self._admin(f"/groups/{guard.uuid(sid)}") or {}).get("path"), 200)
+                except Exception:   # noqa: BLE001 - the subject may be gone already: the finding stands
+                    f["subject_name"] = None
+                out.append(f)
+        return out, newest, why
 
     def on_removed(self, user: dict) -> None:
         if not self.logout_on_removal:

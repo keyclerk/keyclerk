@@ -296,7 +296,8 @@ def main(argv: list[str] | None = None) -> int:
                 f.write_bytes(raw)
         state_f.write_text(json.dumps(applied["state"], sort_keys=True), encoding="utf-8")
         report = json.dumps({"applied_serial": applied["state"]["serial"], "attestation": {"profile": pins.get("profile", "basic")},
-                             "drift": []}).encode()
+                             "drift": [], **({"records_head": applied["records_head"]}       # 1.4: the head echoed
+                                             if applied.get("records_head") else {})}).encode()
         _http(a.desk, "POST", "/api/v1/edge/report", a.edge, key, report, host=a.host)
         _out({"serial": applied["state"]["serial"],
               "assign": [{"user": x.get("username") or x["person"], "role": x["role"], "target": x["target"], "until": x["until"],

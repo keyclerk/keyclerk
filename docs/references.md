@@ -48,6 +48,12 @@ contract an edge implements, has its own list: github.com/keyclerk/edge-protocol
   AES-256-GCM. <https://doi.org/10.6028/NIST.SP.800-38D>
 - [RFC6962] B. Laurie, A. Langley, E. Kasper, *Certificate Transparency*: the Merkle tree hashing of the signed change
   log (section 2.1). <https://www.rfc-editor.org/rfc/rfc6962>
+- [RFC9162] B. Laurie, E. Messeri, R. Stradling, *Certificate Transparency Version 2.0*: the consistency proofs a
+  witness checks (section 2.1.4). <https://www.rfc-editor.org/rfc/rfc9162>
+- [C2SP] C2SP, *signed-note*, *tlog-checkpoint*, *tlog-cosignature* and *tlog-witness*, version 1.1.0: the change
+  log's checkpoint as a note and the witness protocol (`keyclerk.store.note`, `keyclerk.witness`). <https://c2sp.org>
+- [TORCHWOOD] F. Valsorda, *filippo.io/torchwood*, and Go's *golang.org/x/mod/sumdb/note* and *tlog*: the independent
+  implementations the C2SP vectors come from (`tools/interop/c2sp`). <https://pkg.go.dev/filippo.io/torchwood>
 - [TPM2] Trusted Computing Group, *TPM 2.0 Library*: the attestation an edge proves itself with.
   <https://trustedcomputinggroup.org/resource/tpm-library-specification/>
 
@@ -61,6 +67,8 @@ contract an edge implements, has its own list: github.com/keyclerk/edge-protocol
 - [RFC3339] G. Klyne, C. Newman, *Date and Time on the Internet: Timestamps*. <https://www.rfc-editor.org/rfc/rfc3339>
 - [RFC4648] S. Josefsson, *The Base16, Base32, and Base64 Data Encodings*. <https://www.rfc-editor.org/rfc/rfc4648>
 - [RFC9110] R. Fielding, M. Nottingham, J. Reschke, *HTTP Semantics*. <https://www.rfc-editor.org/rfc/rfc9110>
+- [RFC7239] A. Petersson, M. Nilsson, *Forwarded HTTP Extension*: the client address behind a listed proxy
+  (`api.forwarded_header`). <https://www.rfc-editor.org/rfc/rfc7239>
 - [OPENAPI] OpenAPI Initiative, *OpenAPI Specification 3.1.0*: the API contract (`keyclerk/schema/api.openapi.json`).
   <https://spec.openapis.org/oas/v3.1.0>
 - [PROMETHEUS] Prometheus, *Exposition formats*: the metrics. <https://prometheus.io/docs/instrumenting/exposition_formats/>
@@ -74,8 +82,13 @@ contract an edge implements, has its own list: github.com/keyclerk/edge-protocol
 - [OSDP] Security Industry Association, *Open Supervised Device Protocol*: the door-controller connector.
   <https://www.securityindustry.org/industry-standards/open-supervised-device-protocol/>
 - [RFC5424] R. Gerhards, *The Syslog Protocol*, and [RFC5425] F. Miao, Y. Ma, J. Salowey, *Transport Layer Security
-  (TLS) Transport Mapping for Syslog*: the planned SIEM export. <https://www.rfc-editor.org/rfc/rfc5424>,
+  (TLS) Transport Mapping for Syslog*: the SIEM export (`keyclerk.siem`). <https://www.rfc-editor.org/rfc/rfc5424>,
   <https://www.rfc-editor.org/rfc/rfc5425>
+- [STDWEBHOOKS] Standard Webhooks, *Specification*: how SOAR webhooks are signed (`keyclerk.soar`).
+  <https://www.standardwebhooks.com/>
+- [CLOUDEVENTS] CNCF, *CloudEvents 1.0*: the envelope of every event a webhook carries. <https://cloudevents.io/>
+- [OCSF] Open Cybersecurity Schema Framework, version 1.3.0: the classes of the audit events a SIEM reads.
+  <https://schema.ocsf.io/1.3.0/>
 
 ## Conventions and guidance KeyClerk follows
 - [EUPL] European Union Public Licence, version 1.2: KeyClerk's licence.

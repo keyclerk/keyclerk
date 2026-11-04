@@ -115,6 +115,8 @@ def _count_entry(entry: dict) -> None:
     """Decision 0018 H2: every logged change by outcome, every refusal reason by who can resolve it."""
     from keyclerk import metrics
     outcome = str(entry.get("outcome") or "other")
+    if outcome == "preview":
+        return
     metrics.inc("keyclerk_changes_total", outcome=outcome)
     if outcome in ("refused", "pending"):
         for r in (entry.get("reasons") or [])[:20]:
@@ -144,20 +146,37 @@ class DeskFiles:
     writer, the activity log (log.jsonl, each line chained to the one before and signed by the records key or the
     checking signer), the pending changes and the view log. A store sets path, _signer, _key, _pub, _wlock, _head,
     _verified and _commit_sig, and gives revision()."""
-    VIEW_LOG_MAX = 5_000_000      # bytes; the oldest half is dropped beyond it
+    VIEW_LOG_MAX = 5_000_000      # bytes; beyond it the log rotates to a kept archive
+    VIEW_LOG_KEEP_DAYS = 400      # default retention of the archives (about 13 months, decision 0009 D6)
 
     def log_view(self, entry: dict) -> None:
-        """Append who looked at whose graph (decision 0009: every look is logged); bounded, never the content."""
+        """Append who looked at whose graph (decision 0009: every look is logged); never the content. A full log
+        rotates to views-<UTC time>.log, so reads cannot push earlier looks out of the record; archives are deleted
+        after store.view_log_keep_days."""
         p = self.path / "views.log"
         line = json.dumps(entry, default=str, sort_keys=True) + "\n"
         try:
             if p.exists() and p.stat().st_size > self.VIEW_LOG_MAX:
-                keep = p.read_bytes()[-(self.VIEW_LOG_MAX // 2):]
-                p.write_bytes(keep[keep.find(b"\n") + 1:])
+                self._rotate_views(p)
             with open(p, "a", encoding="utf-8") as f:
                 f.write(line)
         except OSError:
             pass
+
+    def _rotate_views(self, p: Path) -> None:
+        from keyclerk import clock, config
+        now = clock.now()
+        stamp = now.strftime("%Y%m%dT%H%M%SZ")
+        archive, n = self.path / f"views-{stamp}.log", 1
+        while archive.exists():
+            n += 1
+            archive = self.path / f"views-{stamp}-{n}.log"
+        os.replace(p, archive)
+        keep = int(((config.current() or {}).get("store") or {}).get("view_log_keep_days", self.VIEW_LOG_KEEP_DAYS))
+        cutoff = (now - timedelta(days=keep)).strftime("%Y%m%dT%H%M%SZ")
+        for old in self.path.glob("views-*.log"):
+            if old.name[6:22] < cutoff:                # the time it was closed: every look in it is older
+                old.unlink(missing_ok=True)
 
     def _hold(self) -> None:
         self._lockf = open(self.path / "desk.lock", "a+b")   # noqa: SIM115 - held for the life of the store
@@ -304,6 +323,69 @@ class DeskFiles:
     def save_pending(self, p: dict) -> None:
         with self._wlock:
             _atomic(self.path / "pending.json", json.dumps(p, sort_keys=True).encode("utf-8"))
+
+
+REPORT_FIELDS = {"applied_serial", "attestation", "drift", "records_head", "removals", "bastion"}
+EVIDENCE_FIELDS = {"seq", "prev", "sha256", "size", "session", "at"}
+# What a bastion enforces by itself, so it still holds while the edge's agent is down (edge protocol 1.4, decision 0030
+# point 7); what every adapter does through the bastion's API is the conformance profile, never a token.
+BASTION_CAPABILITIES = ("expires_grants", "time_windows", "ends_sessions_on_revoke", "caps_session_hours",
+                        "records_sessions", "injects_credentials", "matches_subject", "second_key")
+ADAPTER_ABILITIES = ("reads_hardening",)          # what the edge's adapter does beyond the profile
+MAX_REMOVALS = 500
+
+
+def _zoned(v, what: str) -> datetime:
+    try:
+        at = datetime.fromisoformat(v.replace("Z", "+00:00")) if isinstance(v, str) else None
+    except ValueError:
+        at = None
+    if at is None or at.tzinfo is None:
+        raise guard.InputRejected(f"{what}: a time with its zone, such as 2026-11-04T09:30:00Z")
+    return at.astimezone(timezone.utc)
+
+
+def _report_14(body: dict, now: datetime) -> tuple[dict | None, list[dict], dict | None]:
+    """The report members of edge protocol 1.4, each checked: the records head the edge applied, the removals its
+    adapter confirmed, and its bastion's declared capabilities (tokens this desk does not know are kept apart and
+    ignored, so a newer agent never breaks an older desk). Absent members are None or empty: a missing declaration
+    means unknown, never a bastion without capabilities."""
+    from keyclerk import edge as E
+    head = None
+    if "records_head" in body:
+        errs = E.records_head_errors(body["records_head"])
+        if errs:
+            raise guard.InputRejected(errs[0])
+        head = dict(body["records_head"])
+    removals = []
+    if "removals" in body:
+        r = body["removals"]
+        if not isinstance(r, list) or len(r) > MAX_REMOVALS:
+            raise guard.InputRejected(f"removals: a list of at most {MAX_REMOVALS} {{lease_id, system, at}}")
+        for x in r:
+            if not isinstance(x, dict) or set(x) != {"lease_id", "system", "at"}:
+                raise guard.InputRejected("a removal is {lease_id, system, at}: the lease, the bastion and when its "
+                                          "assignment was removed")
+            at = _zoned(x["at"], "removals.at")
+            if at > now + timedelta(minutes=5):
+                raise guard.InputRejected("removals.at is in the future")
+            removals.append({"lease_id": guard.ident(x["lease_id"], "lease_id"),
+                             "system": guard.text(x["system"], "system", 80), "at": _iso(at)})
+    bastion = None
+    if "bastion" in body:
+        b = body["bastion"]
+        if (not isinstance(b, dict) or not {"product", "version", "capabilities"} <= set(b)
+                <= {"product", "version", "capabilities", "adapter"}
+                or not isinstance(b["capabilities"], list) or not isinstance(b.get("adapter", []), list)
+                or len(b["capabilities"]) > 32 or len(b.get("adapter", [])) > 16
+                or not all(isinstance(t, str) and len(t) <= 64 for t in b["capabilities"] + b.get("adapter", []))):
+            raise guard.InputRejected("bastion: {product, version, capabilities [token], adapter? [token]}")
+        tokens = set(b["capabilities"]) | set(b.get("adapter", []))
+        bastion = {"product": guard.text(b["product"], "product", 64), "version": guard.text(b["version"], "version", 64),
+                   "capabilities": sorted(set(b["capabilities"]) & set(BASTION_CAPABILITIES)),
+                   "adapter": sorted(set(b.get("adapter", [])) & set(ADAPTER_ABILITIES)),
+                   "unknown": sorted(tokens - set(BASTION_CAPABILITIES) - set(ADAPTER_ABILITIES))}
+    return head, removals, bastion
 
 
 class YamlStore(DeskFiles):
@@ -490,6 +572,14 @@ class YamlStore(DeskFiles):
     def revision(self) -> int:
         return self._rev
 
+    def records_head(self) -> dict:
+        """The revision and the signed records' sha256: what an edge echoes (edge protocol 1.4)."""
+        return {"revision": self._rev, "head": self._sha or "0" * 64}
+
+    def head_at(self, size: int) -> str | None:
+        """Not on this store: it keeps no change log."""
+        return None
+
     def _publish(self, raw: bytes, sig: bytes | None = None) -> None:
         if sig is None:
             if self._key is None:
@@ -510,9 +600,26 @@ class YamlStore(DeskFiles):
                       "reasons": [f"{why}: revision {self._rev} published again"]})
         return raw
 
+    def resume_above(self, mark: int, entry: dict) -> dict:
+        """After a restore (decision 0019 point 5): the records again, signed as revision mark + 1, so no number a lost
+        revision had is ever signed again. Only keyclerk.restore calls it, with the mark confirmed."""
+        with self._wlock:
+            before, self._resuming = self._rev, True
+            self._rev = mark
+            try:
+                return self.commit(self.load(), entry)
+            except Exception:
+                self._rev = before
+                raise
+            finally:
+                self._resuming = False
+
     def commit(self, doc: dict, entry: dict, ops: list | None = None, tokens: list | None = None) -> dict:
         """Write a change ahead (a new revision when the records change, the visit files that change), then the log
         line that vouches for all of it, then publish. A store that still keeps visits in its records goes on doing so."""
+        from keyclerk import restore
+        if restore.marker(self.path) is not None and not getattr(self, "_resuming", False):
+            raise restore.RestoreMode("the desk is being restored: nothing is written until it resumes")
         with self._wlock:
             changed: dict[str, str | None] = {}
             if self._rev and self.legacy_visits():
@@ -1081,9 +1188,16 @@ class Desk:
                 if (m := pat.fullmatch(str(x.get(field, ""))))]
         return f"{prefix}-{realm}-{max(used, default=0) + 1:04d}"
 
+    def _sees_all(self, doc: dict, actor: str, now: datetime) -> bool:
+        """The root and the security officer see every record, so "there is no such id" tells them nothing new; to
+        anyone else a write about something missing gets the same refusal as one about something not theirs."""
+        return D.same(doc, actor, D.root_at(doc, now)) or D.same(doc, actor, (doc.get("root") or {}).get("officer"))
+
     def _under(self, doc: dict, actor: str, gid: str, power: str, now: datetime) -> str:
         if gid not in D._groups(doc):
-            raise Refusal(f"there is no group {gid}")
+            if self._sees_all(doc, actor, now):
+                raise Refusal(f"there is no group {gid}")
+            raise Refusal(f"you hold no delegation that gives the power '{power}' over {gid} now")   # missing = not yours
         under = D.authority(doc, actor, gid, power, now)
         if under is None:
             raise Refusal(f"you hold no delegation that gives the power '{power}' over {gid} now")
@@ -1316,7 +1430,9 @@ class Desk:
 
     def edge_bundle(self, edge_id: str, serial: str | None = None, quote: str | None = None,
                     request: tuple | None = None, after: str | None = None, wait: str | None = None) -> dict:
-        from keyclerk import metrics
+        from keyclerk import metrics, restore
+        if restore.marker(self.store.path) is not None:
+            raise restore.RestoreMode("the desk is being restored: keep the current bundle and pull again later")
         try:
             if wait is not None:
                 out = self._long_poll(edge_id, after, wait, quote, request, serial)
@@ -1393,6 +1509,7 @@ class Desk:
                 return last
             raise LookupError("no bundle by that serial: pull without one")
         with self.edge_store.lock:
+            head = self.store.records_head()            # before load(): the bundle is cut from this head or a newer one
             doc, now = self.store.load(), self.clock()
             e = self._edge(doc, edge_id, now)
             settings = policy_wasm.edge("settings", {})
@@ -1423,7 +1540,7 @@ class Desk:
                 self.edge_store.update_state(edge_id, lease_first_seen={x["lease_id"]: seen[x["lease_id"]]
                                                                         for x in current if x["lease_id"] in seen})
                 for lease in current:
-                    hours = max(1, int((D._ts(lease["until"]) - now).total_seconds() // 3600))
+                    hours = E.ceiling_hours(now, D._ts(lease["until"]))
                     d = policy_wasm.ceiling({"ceiling": ceiling, "entry": {"kind": "lease", "person": lease["person"], "roles": lease["roles"],
                                                                            "targets": [lease["target"]], "class": lease["class"], "hours": hours}})
                     if d["allow"]:
@@ -1441,7 +1558,7 @@ class Desk:
                     if not any(D.same(doc, k["anchor"], v["person"]) and k.get("ssh_key") == v["ssh_key"] for k in keys):
                         dropped.append({"lease_id": v["lease_id"], "why": ["the person's hardware key was ended"]})
                         continue                       # a lost hardware key ends its visit leases
-                    hours = int((D._ts(v["until"]) - D._ts(v["from"])).total_seconds() // 3600)
+                    hours = E.ceiling_hours(D._ts(v["from"]), D._ts(v["until"]))
                     d = policy_wasm.ceiling({"ceiling": ceiling, "entry": {"kind": "visit", "person": v["person"], "targets": v["targets"],
                                                                            "hours": hours, "attested_profile": attested}})
                     if d["allow"]:
@@ -1468,7 +1585,8 @@ class Desk:
                 leases.remove(lease)
                 dropped.append({"lease_id": lease["lease_id"], "why": [f"class {lease['class']} has no horizon in edge.rego"]})
             out = E.build_bundle(edge_id, serial, now, horizons, leases, visits, revoked, sealed_ceiling, policy, key,
-                                 governed_roles=[t["role"] for t in e["targets"]])   # 0025: the roles its targets map to
+                                 governed_roles=[t["role"] for t in e["targets"]],   # 0025: the roles its targets map to
+                                 records_head=head)
             holders = sorted({x["person"] for x in leases + visits})
             digests = dict(list((state.get("digests") or {}).items())[-15:])   # 0026: what recent serials said
             digests[str(serial)] = E.bundle_digest(out)
@@ -1531,21 +1649,66 @@ class Desk:
 
     def edge_report(self, edge_id: str, body: dict) -> dict:
         """What the edge applied, its attestation (the hardware profile as policy input) and any drift it saw."""
-        if not isinstance(body, dict) or not set(body) <= {"applied_serial", "attestation", "drift"}:
-            raise guard.InputRejected("a report is {applied_serial, attestation, drift}")
+        if not isinstance(body, dict) or not set(body) <= REPORT_FIELDS:
+            raise guard.InputRejected("a report is {applied_serial, attestation, drift} and, from edge protocol 1.4, "
+                                      "records_head, removals and bastion")
+        from keyclerk import restore
+        if restore.marker(self.store.path) is not None:      # the serial it applied sets its floor on resume
+            n = body.get("applied_serial") or 0
+            if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n < 2 ** 53:
+                raise guard.InputRejected("applied_serial: a whole number")
+            head = _report_14(body, self.clock())[0]      # 1.4: the head it applied, a source of the mark
+            restore.observe(self.store.path, edge_id, n, head)
+            raise restore.RestoreMode("the desk is being restored: keep the current bundle and report again later")
         att = body.get("attestation") or {}
         if not isinstance(att, dict) or att.get("profile") not in (None, "assured", "basic"):
             raise guard.InputRejected("attestation.profile: assured or basic")
         drift = [guard.text(x, "drift", 300) for x in (body.get("drift") or [])][:50]
+        head, removals, bastion = _report_14(body, self.clock())
         report = {"applied_serial": int(body.get("applied_serial") or 0), "attestation": {k: guard.text(v, k, 200) for k, v in att.items()},
                   "drift": drift, "at": _iso(self.clock()), "attestation_verified": False}   # claimed until quotes are verified
         before = ((self.edge_store.state(edge_id).get("report") or {}).get("attestation") or {}).get("profile")
         if before and before != att.get("profile"):
             self.edge_store.incident(edge_id, {"kind": "attestation_changed", "detail": f"claimed profile {before} became {att.get('profile')}"})
+        if head is not None:
+            report["records_head"] = head
+            self._echoed_head(edge_id, head)
+        if bastion is not None:
+            report["bastion"] = bastion
+            was = (self.edge_store.state(edge_id).get("report") or {}).get("bastion")
+            if was and was != bastion:
+                self.edge_store.incident(edge_id, {"kind": "bastion_changed", "detail": (
+                    f"declared {was['product']} {was['version']} {sorted(was['capabilities'])} became "
+                    f"{bastion['product']} {bastion['version']} {sorted(bastion['capabilities'])}")[:900]})
+        if removals:
+            self.edge_store.removals_add(edge_id, removals, report["at"])
         self.edge_store.update_state(edge_id, report=report, last_report=report["at"])
         if drift:
             self.edge_store.incident(edge_id, {"kind": "drift", "detail": "; ".join(drift)[:900]})
         return {"ok": True}
+
+    def _echoed_head(self, edge_id: str, head: dict) -> None:
+        """An edge echoes the records head of the bundle it applied: a weak witness of the records (edge protocol
+        1.4). Ahead of this desk's own, the desk was rolled back; at a size this log holds but another hash, the edge
+        applied another history. Each is an incident once per echoed head; neither changes what the desk serves."""
+        own = self.store.records_head()
+        st = self.edge_store.state(edge_id)
+        if st.get("head_reported") == head:
+            return
+        why = None
+        if head["revision"] > own["revision"]:
+            why = ("records_head_ahead", f"the edge applied records at revision {head['revision']}, but this desk holds "
+                   f"{own['revision']}: a desk restored from an older backup, or another desk signing for this edge")
+        elif "size" in head and "size" in own and head["size"] <= own["size"]:
+            at = self.store.head_at(head["size"])
+            if at is not None and at != head["head"]:
+                why = ("records_head_unknown", f"the edge applied a change log of {head['size']} links whose head this "
+                       "desk's log does not hold: another history")
+        elif head["revision"] == own["revision"] and "size" not in head and head["head"] != own["head"]:
+            why = ("records_head_unknown", f"the edge applied revision {head['revision']} with another records hash")
+        if why:
+            self.edge_store.incident(edge_id, {"kind": why[0], "detail": why[1][:900]}, core=True)
+            self.edge_store.update_state(edge_id, head_reported=head)
 
     def _person_key(self, doc: dict, key_id: str, now: datetime) -> dict:
         k = next((x for x in doc.get("person_keys", []) if x["key_id"] == key_id), None)
@@ -1613,9 +1776,13 @@ class Desk:
 
     def edge_incident(self, edge_id: str, body: dict) -> dict:
         from keyclerk.edge_store import INCIDENT_KINDS
-        if not isinstance(body, dict) or not set(body) <= {"kind", "system", "at", "detail", "log_sha256"} or body.get("kind") not in INCIDENT_KINDS:
-            raise guard.InputRejected(f"an incident is {{kind, system, at, detail, log_sha256}}; kind one of {', '.join(INCIDENT_KINDS)}")
+        if not isinstance(body, dict) or not set(body) <= {"kind", "system", "at", "detail", "log_sha256", "lease_id"} or body.get("kind") not in INCIDENT_KINDS:
+            raise guard.InputRejected(f"an incident is {{kind, system, at, detail, log_sha256, lease_id}}; kind one of {', '.join(INCIDENT_KINDS)}")
+        if ("lease_id" in body) != (body["kind"] == "lease_ended_early"):
+            raise guard.InputRejected("lease_id names the lease of a lease_ended_early incident, and only of one")
         rec = {k: guard.text(v, k, 900) for k, v in body.items()}
+        if rec["kind"] == "lease_ended_early":
+            rec.update(self._ended_early(edge_id, rec))
         try:
             out = self.edge_store.incident(edge_id, rec)
         except ValueError as e:
@@ -1625,6 +1792,25 @@ class Desk:
                             "records": {}, "outcome": "applied", "reasons": []})
         return {"incident_id": out["incident_id"]}
 
+    def _ended_early(self, edge_id: str, rec: dict) -> dict:
+        """A bastion took away a lease's assignment before the lease expired (decision 0029 point 8). Only a lease of the
+        edge's last bundle, ended before its expiry: a lease the desk no longer lists was ended by the desk."""
+        if not rec.get("system") or not rec.get("at"):
+            raise guard.InputRejected("a lease_ended_early incident names the bastion (system) and when the assignment ended (at)")
+        try:
+            at = datetime.fromisoformat(rec["at"].replace("Z", "+00:00"))
+        except ValueError:
+            raise guard.InputRejected("at: a time such as 2026-11-04T09:30:00Z") from None
+        if at.tzinfo is None:
+            raise guard.InputRejected("at: a time with its zone, such as 2026-11-04T09:30:00Z")
+        until = dict(self.edge_store.state(edge_id).get("lease_ids", [])).get(rec["lease_id"])
+        if until is None:
+            raise Refusal(f"lease {rec['lease_id']} is not in this edge's last bundle: the desk ended it, so its end is no "
+                          "incident. Pull the bundle and report only leases it still carries")
+        if at >= datetime.fromisoformat(until.replace("Z", "+00:00")):
+            raise Refusal(f"lease {rec['lease_id']} expired at {until}: an assignment that ends then ended on time")
+        return {"until": until}
+
     def edge_evidence(self, edge_id: str, body: dict) -> dict:
         """Recordings as a hash chain; acknowledged signed up to a sequence (decision 0014 point 10)."""
         from keyclerk import edge as E
@@ -1633,8 +1819,11 @@ class Desk:
             raise guard.InputRejected("evidence is {entries: [...]}")
         entries = body["entries"][:EVIDENCE_BATCH]
         for x in entries:
-            if not isinstance(x, dict) or set(x) != {"seq", "prev", "sha256", "size", "session", "at"}:
-                raise guard.InputRejected("an entry is {seq, prev, sha256, size, session, at}")
+            if not isinstance(x, dict) or not EVIDENCE_FIELDS <= set(x) <= EVIDENCE_FIELDS | {"lease_id"}:
+                raise guard.InputRejected("an entry is {seq, prev, sha256, size, session, at} and, from edge protocol "
+                                          "1.4, the lease_id the session ran under")
+            if "lease_id" in x:
+                guard.ident(x["lease_id"], "lease_id")
         try:
             seq, head = self.edge_store.evidence_add(edge_id, entries)
         except ValueError as e:
@@ -1809,7 +1998,7 @@ class Desk:
         if edge_records.officer_errors(doc, e, now):          # decided now, not by what the last cut found
             raise Refusal("this edge's officer is not independent of the core: it gets no leases, and no addresses")
         ceiling, _ = self._current_ceiling(doc, e, edge_id, now)
-        hours = max(1, int((D._ts(live["until"]) - now).total_seconds() // 3600))
+        hours = E.ceiling_hours(now, D._ts(live["until"]))
         if not ceiling or not policy_wasm.ceiling({"ceiling": ceiling, "entry": {
                 "kind": "lease", "person": live["person"], "roles": live["roles"], "targets": [live["target"]],
                 "class": live["class"], "hours": hours}})["allow"]:
@@ -2044,7 +2233,9 @@ class Desk:
         kinds = {r[k]: (kind, r) for kind, k in (("edges", "edge_id"), ("person_keys", "key_id"), ("edge_visit_leases", "lease_id"))
                  for r in doc.get(kind, [])}
         if rid not in kinds:
-            raise Refusal(f"there is no edge, person key or visit lease {rid}")
+            if self._sees_all(doc, actor, now):
+                raise Refusal(f"there is no edge, person key or visit lease {rid}")
+            raise Refusal("the root, the security officer, or its owner ends it")      # missing = not yours
         kind, r = kinds[rid]
         root, officer = D.root_at(doc, now), (doc.get("root") or {}).get("officer")
         mine = kind == "person_keys" and D.same(doc, actor, r["anchor"]) or kind == "edge_visit_leases" and D.same(doc, actor, r["by"])
@@ -2092,11 +2283,13 @@ class Desk:
         if action == "end_membership":
             mid = guard.ident(body.get("membership_id"), "membership")
             m = next((x for x in doc.get("memberships", []) if x["membership_id"] == mid), None)
-            if m is None:
-                raise Refusal(f"there is no membership {mid}")
+            power = {"anchor": "members", "group": "includes", "rule": "rules"}[D._kind(m)] if m else None
+            if m is None or D.authority(doc, actor, m["group"], power, now) is None:
+                if m is None and self._sees_all(doc, actor, now):
+                    raise Refusal(f"there is no membership {mid}")
+                raise Refusal(f"you may end no membership {mid}: none under a group you manage has that id")
             if D.membership_status(doc, m, now) not in ("active", "pending", "standby", "invalid"):
                 raise Refusal(f"{mid} has already ended")
-            power = {"anchor": "members", "group": "includes", "rule": "rules"}[D._kind(m)]
             self._under(doc, actor, m["group"], power, now)
             rec = {"id": mid, "at": now, "by": actor, "mode": "retire", "reason": self._reason(body)}
             return {"admin_revocations": [rec]}, f"end {mid} in {m['group']}"
@@ -2160,19 +2353,20 @@ class Desk:
             return {"approvers": [rec]}, f"appoint {self._name(doc, anchor)} as a named approver"
         if action == "end_approver":
             aid = guard.ident(body.get("approver_id"), "appointment")
+            if not self._sees_all(doc, actor, now):
+                raise Refusal("only the root trust owner or the security officer ends an appointment")
             a = next((x for x in doc.get("approvers", []) if x["approver_id"] == aid), None)
             if a is None:
                 raise Refusal(f"there is no appointment {aid}")
-            officer = (doc.get("root") or {}).get("officer")
-            if not (D.same(doc, actor, D.root_at(doc, now)) or D.same(doc, actor, officer)):
-                raise Refusal("only the root trust owner or the security officer ends an appointment")
             rec = {"id": aid, "at": now, "by": actor, "mode": "retire", "reason": self._reason(body)}
             return {"admin_revocations": [rec]}, f"end {aid} ({self._name(doc, a['anchor'])} as a named approver)"
         # end_delegation
         did = guard.ident(body.get("delegation_id"), "delegation")
         d = D._delegations(doc).get(did)
         if d is None:
-            raise Refusal(f"there is no delegation {did}")
+            if self._sees_all(doc, actor, now):
+                raise Refusal(f"there is no delegation {did}")
+            raise Refusal("only the root, someone above in its chain, or the deputy (to retire) may end a delegation")
         mode = body.get("mode", "retire")
         if mode not in ("retire", "revoke"):
             raise Refusal("mode: retire (orderly) or revoke (for cause)")
@@ -2190,6 +2384,8 @@ class Desk:
     def propose(self, who: dict, body: dict) -> dict:
         if not isinstance(body, dict):
             raise Refusal("the request body is a JSON object")
+        if self._soar(who):                               # a SOAR never reaches the general path
+            return self.soar_propose(who, body)
         with self.lock:
             doc, now = self.store.load(), self.clock()
             actor = self._actor(doc, who)
@@ -2226,6 +2422,129 @@ class Desk:
             return {"change_id": cid, "outcome": outcome, "summary": what, "reasons": reasons,
                     "records": _jsonable(add), "revision": self.store.revision(),
                     "next": [] if outcome == "applied" else self._next(doc, actor, reasons, add)}
+
+    # --- a SOAR's protective proposals (decision 0018 H5, issue 30) ------------------------------------------------
+
+    PROTECTIVE = ("suspend_person", "end_membership", "raise_situation")
+
+    @staticmethod
+    def _soar_cfg() -> dict:
+        from keyclerk import config
+        return ((config.current() or {}).get("soar") or {}).get("protective") or {}
+
+    def _soar(self, who: dict) -> bool:
+        cfg = self._soar_cfg()
+        return bool(cfg.get("client")) and who.get("azp") == cfg["client"] and not who.get("csrf")
+
+    def _confirmers(self, doc: dict, now: datetime) -> list[str]:
+        """Who confirms what a SOAR's policy held back: the security officer, the root and the people on call."""
+        root = doc.get("root") or {}
+        return [a for a in dict.fromkeys([root.get("officer"), D.root_at(doc, now), *(root.get("on_call") or [])]) if a]
+
+    def _protective(self, doc: dict, actor: str, body: dict, now: datetime, cfg: dict) -> tuple[dict, str, str | None]:
+        """The records of one protective change, the summary, and the person it touches (for the spare rule)."""
+        from keyclerk import situation
+        from keyclerk.access_state import suspended
+        action = body.get("action")
+        if action not in self.PROTECTIVE:
+            raise Refusal(f"a SOAR proposes only protective changes ({', '.join(self.PROTECTIVE)}), never a grant")
+        reason = self._reason(body)
+        if action == "suspend_person":
+            anchor = self.store.inward(guard.anchor(body.get("anchor"), "anchor"))
+            if self._person(doc, anchor) is None:
+                raise Refusal("there is no such person to suspend")
+            if suspended(doc, anchor, now):
+                raise Refusal("that person is suspended already")
+            rec = {"suspension_id": "S-" + secrets.token_hex(6), "anchor": anchor, "at": now, "by": actor,
+                   "reason": reason}
+            return {"suspensions": [rec]}, f"suspend {anchor}", anchor
+        if action == "end_membership":
+            mid = guard.ident(body.get("membership_id"), "membership")
+            m = next((x for x in doc.get("memberships", []) if x["membership_id"] == mid), None)
+            if m is None or D.membership_status(doc, m, now) not in ("active", "pending", "standby", "invalid"):
+                raise Refusal(f"there is no live membership {mid}")
+            rec = {"id": mid, "at": now, "by": actor, "mode": "retire", "reason": reason}
+            return {"admin_revocations": [rec]}, f"end {mid} in {m['group']}", (m.get("member") or {}).get("anchor")
+        if action == "raise_situation":
+            feed = cfg.get("feed")
+            if not feed or not any(f.get("feed") == feed for f in doc.get("situation_feeds", [])):
+                raise Refusal("a SOAR raises a situation through its feed: register it in situation_feeds and name it "
+                              "in soar.protective.feed")
+            level, scope = body.get("level"), body.get("scope") or {"kind": "tenant"}
+            if level not in situation.LEVELS or not isinstance(scope, dict) or scope.get("kind") not in ("tenant", "place"):
+                raise Refusal(f"level is one of {', '.join(situation.LEVELS)}; scope is the tenant or a place")
+            scope = {"kind": scope["kind"], **({"id": guard.text(scope.get("id"), "place", 200)}
+                                               if scope["kind"] == "place" else {})}
+            now_level = situation.levels(doc, scope.get("id"), now)["restriction"]
+            if situation.rank(level) <= situation.rank(now_level):
+                raise Refusal(f"the level is {now_level} already: a SOAR only raises it (lowering takes people)")
+            cid = "S-" + secrets.token_hex(6)
+            rec = {"situation_id": cid, "level": level, "scope": scope, "source": f"feed:{feed}", "by": f"feed:{feed}",
+                   "at": now, "issued_at": now, "nonce": cid, "reason": reason}
+            after = situation.levels({**doc, "situations": [*doc.get("situations", []), rec]}, scope.get("id"), now)
+            if after["restriction"] == now_level:        # capped (one step above what people announced) or bursting
+                raise Refusal(f"the feed's announcement would leave the level at {now_level}: a feed raises at most one "
+                              "step above what people announced, and not again within its minimum interval")
+            return {"situations": [rec]}, f"raise the level of {scope.get('id', 'the tenant')} to {level}", None
+
+    def soar_propose(self, who: dict, body: dict) -> dict:
+        """A protective change proposed by a SOAR (decision 0018 H5): suspend a person, end a membership, or raise a
+        situation level through its registered feed; never a grant. It is checked by the engine like any change and
+        signed when it applies, with the SOAR's workload as its author. It waits for the security officer, the root or
+        a person on call when the policy says so (soar.protective.apply_at_once), when it touches a person on call, or
+        when the SOAR has used its hourly ceiling (soar.protective.max_per_hour), which also raises an incident. Its
+        effects reach the broker only through the reconciler; lifting a suspension still takes two people."""
+        cfg = self._soar_cfg()
+        with self.lock:
+            doc, now = self.store.load(), self.clock()
+            actor = self.store.inward(cfg.get("workload") or "")
+            p = self._person(doc, actor) if actor else None
+            if p is None or p.get("kind") != "workload":
+                raise Refusal("soar.protective.workload names no workload in the records: the SOAR acts as one")
+            self._throttle(who)
+            try:
+                add, what, touches = self._protective(doc, actor, body, now, cfg)
+            except (Refusal, guard.InputRejected) as e:
+                self.store.note({"change_id": "C-" + secrets.token_hex(6), "action": str(body.get("action"))[:40],
+                                 "summary": "a SOAR proposal refused before the checks", "actor": actor, "records": {},
+                                 "outcome": "refused", "reasons": [guard.safe_for_log(e, 300)]})
+                raise
+            outcome, reasons, cand = self._evaluate(doc, add)
+            hold = []
+            if body["action"] not in cfg.get("apply_at_once", self.PROTECTIVE):
+                hold.append("the SOAR policy has a person confirm this action")
+            if touches and any(D.same(doc, touches, x) for x in (doc.get("root") or {}).get("on_call") or []):
+                hold.append("the person is on call: a person confirms before a SOAR acts on them")
+            since = now - timedelta(hours=1)
+            used = sum(1 for e in self.store.log(LOG_PAGE) if e.get("actor") == actor and e.get("action") in self.PROTECTIVE
+                       and e.get("outcome") in ("applied", "pending") and guard.timestamp(e["at"]) >= since)
+            if used >= cfg.get("max_per_hour", 10):
+                hold.append(f"the SOAR used its ceiling of {cfg.get('max_per_hour', 10)} changes this hour: a person decides")
+                if not any(e.get("action") == "soar_ceiling" and guard.timestamp(e["at"]) >= since
+                           for e in self.store.log(LOG_PAGE)):
+                    self.store.note({"change_id": "C-" + secrets.token_hex(6), "action": "soar_ceiling", "actor": actor,
+                                     "outcome": "finding", "records": {}, "reasons": [],
+                                     "summary": f"a SOAR reached its hourly ceiling of {cfg.get('max_per_hour', 10)}"})
+            if outcome == "applied" and hold:
+                outcome, reasons = "pending", hold
+            cid = "C-" + secrets.token_hex(6)
+            entry = {"change_id": cid, "action": body["action"], "summary": what, "actor": actor,
+                     "records": _jsonable(add), "outcome": outcome, "reasons": reasons}
+            if outcome == "applied":
+                self._commit(cand, entry)
+            elif outcome == "refused":
+                self.store.note(entry)
+            else:
+                pend = self._live_pending(now)
+                if len(pend) >= MAX_PENDING:
+                    raise Refusal(f"{MAX_PENDING} changes already wait for approval: settle some first")
+                pend[cid] = {**entry, "at": _iso(now), "approvals": [], "held": hold,
+                             "waiting_for": self._confirmers(doc, now) if hold else self._approvers(doc, add, [], actor),
+                             "waiting_rev": self.store.revision()}
+                self.store.save_pending(pend)
+                self.store.note({**entry, "outcome": "pending"})
+            return {"change_id": cid, "outcome": outcome, "summary": what, "reasons": reasons,
+                    "records": _jsonable(add), "revision": self.store.revision()}
 
     @staticmethod
     def proofs_required() -> bool:
@@ -2339,8 +2658,9 @@ class Desk:
             hmac.compare_digest(self._link_sig(cid, anchor, e), str(sig))
 
     def preview(self, who: dict, body: dict) -> dict:
-        """What propose would answer now, without doing anything: nothing is applied, held or logged. It counts against
-        the same per-person limit as a change, so it cannot be used to probe without bound."""
+        """What propose would answer now, without doing anything: nothing is applied or held, but the preview is logged
+        (review 2026-10-26: a preview that left no trace was a free probe). It counts against the same per-person
+        limit as a change."""
         if not isinstance(body, dict):
             raise Refusal("the request body is a JSON object")
         with self.lock:
@@ -2349,14 +2669,20 @@ class Desk:
             self._throttle(who)
             try:
                 add, what = self.build(doc, actor, body, now)
-            except Refusal as e:
-                if not e.next:
+            except (Refusal, guard.InputRejected) as e:
+                if isinstance(e, Refusal) and not e.next:
                     e.next = self._next(doc, actor, [str(e)], gid=body.get("group") if isinstance(body.get("group"), str) else None,
                                         sc=self._scope(doc, who, now))
+                self.store.note({"change_id": "C-" + secrets.token_hex(6), "action": str(body.get("action"))[:40],
+                                 "summary": "preview refused before the checks", "actor": actor, "records": {},
+                                 "outcome": "preview", "answer": "refused", "reasons": [guard.safe_for_log(e, 300)]})
                 raise
             outcome, reasons, _ = self._evaluate(doc, add)
             if outcome in ("applied", "pending") and self._needs_proposer(doc, add):   # as propose would answer
                 outcome, reasons = "pending", [*reasons, SIGN_OWN]
+            self.store.note({"change_id": "C-" + secrets.token_hex(6), "action": body["action"], "summary": what,
+                             "actor": actor, "records": {}, "outcome": "preview", "answer": outcome,
+                             "reasons": [guard.safe_for_log(r, 300) for r in reasons[:20]]})
             return {"outcome": outcome, "summary": what, "reasons": reasons, "records": _jsonable(add),
                     "revision": self.store.revision(),
                     "next": [] if outcome == "applied" else self._next(doc, actor, reasons, add)}
@@ -2375,6 +2701,8 @@ class Desk:
             raise
 
     def _approve(self, who: dict, cid: str, proof: str | None = None) -> dict:
+        if self._soar(who):
+            raise PermissionError("a SOAR proposes protective changes; it approves nothing")
         with self.lock:
             doc, now = self.store.load(), self.clock()
             actor = self._actor(doc, who)
@@ -2383,6 +2711,8 @@ class Desk:
             p = pend.get(guard.ident(cid, "change"))
             if p is None:
                 raise Refusal("no such change waits for approval")
+            if p.get("held") and not any(D.same(doc, actor, x) for x in self._confirmers(doc, now)):
+                raise Refusal("a SOAR's held change is confirmed by the security officer, the root or a person on call")
             if guard.timestamp(p["at"]) < now - timedelta(days=PENDING_DAYS):
                 raise Refusal("this change waited too long and has expired: propose it again")
             if D.same(doc, actor, p["actor"]) and p.get("needs_proposer"):
@@ -2605,7 +2935,11 @@ class Desk:
         return {"anchor": anchor, "person": p["person"], "kind": p["kind"], "groups": groups,
                 "entitlements": [{"entitlement": k, "via": sorted(set(v))} for k, v in sorted(ents.items())],
                 "delegations": [self._delegation_view(doc, d, now, who.get("anchor")) for d in doc.get("delegations", [])
-                                if D.same(doc, d["delegate"], anchor)]}
+                                if D.same(doc, d["delegate"], anchor)],
+                "suspensions": [{"suspension_id": x["suspension_id"], "at": _iso(guard.timestamp(x["at"])), "by": x["by"],
+                                 "by_name": self._name(doc, x["by"]), "reason": x.get("reason"),
+                                 "lifted": _iso(guard.timestamp(x["lifted"]["at"])) if x.get("lifted") else None}
+                                for x in doc.get("suspensions", []) if D.same(doc, x["anchor"], anchor)]}
 
     def person_graph(self, who: dict, anchor: str, at: str | None = None) -> dict:
         """One person's graph at a moment (decision 0009): what view.rego lets this viewer see. Every look is logged."""
@@ -2694,12 +3028,25 @@ class Desk:
                 "is_party": bool(anchor) and any(D.same(doc, anchor, p.get("anchor")) for p in people),
                 "is_escort": bool(anchor) and any(D.same(doc, anchor, x) for x in V.escorts_of(v) + [p.get("escort") for p in people] if x)}
 
+    STRANGER = "you take no part in that visit"
+
+    def _stranger(self, doc: dict, actor: str, now: datetime) -> Refusal:
+        """The refusal for a visit that does not exist and for one the actor has no part in: the same words and the
+        same next step, without the names of its host, organiser or front office."""
+        if self._sees_all(doc, actor, now):
+            return Refusal("there is no such visit")
+        return Refusal(self.STRANGER, [{"why": "the host, the organiser, an escort or the place's front office records this",
+                                        "do": "ask whoever invited you or the front office of the place", "who": []}])
+
     def _may_act_on_visit(self, doc: dict, action: str, v: dict, actor: str) -> None:
         from keyclerk import policy_wasm
         host = self._person(doc, v["host"]) or {}
-        dec = policy_wasm.visits("act", {"action": action, "actor": self._visit_actor(doc, v, actor),
-                                         "visit": {"host_kind": host.get("kind")}})
+        rel = self._visit_actor(doc, v, actor)
+        dec = policy_wasm.visits("act", {"action": action, "actor": rel, "visit": {"host_kind": host.get("kind")}})
         if not dec["allow"]:
+            part = any(rel[k] for k in ("is_host", "is_organiser", "front_office", "steward", "is_party", "is_escort"))
+            if not part and action != "register_visit":
+                raise self._stranger(doc, actor, self.clock())
             staff = action in ("record_entry", "record_departure", "issue_badge", "return_badge", "register_on_site")
             byid = {x["place_id"]: x for x in doc.get("places", [])}
             fo = [a for pid in [v["place"], (byid.get(v["place"]) or {}).get("within")] for a in (byid.get(pid) or {}).get("front_office") or []]
@@ -2708,11 +3055,12 @@ class Desk:
                  else "the host, the organiser or an escort of the visit does this",
                  "do": "ask them to record it on this desk", "who": self._who(doc, fo if staff else [v["host"], v["organiser"]])}])
 
-    def _visit_of(self, doc: dict, body: dict) -> tuple[dict, dict]:
+    def _visit_of(self, doc: dict, body: dict, action: str, actor: str) -> tuple[dict, dict]:
         from keyclerk import visits as V
         v = V.visit(doc, guard.ident(body.get("visit_id"), "visit"))
         if v is None:
-            raise Refusal("there is no such visit")
+            raise self._stranger(doc, actor, self.clock())
+        self._may_act_on_visit(doc, action, v, actor)            # before anything about its attendees
         p = V.party(doc, v, guard.ident(body.get("party"), "party"))
         if p is None:
             raise Refusal(f"{v['visit_id']} has no attendee {body.get('party')}")
@@ -2836,7 +3184,9 @@ class Desk:
             bid = guard.ident(body.get("badge_id"), "badge")
             b = next((x for x in doc.get("badges", []) if x["badge_id"] == bid), None)
             if b is None:
-                raise Refusal("there is no such badge")
+                if self._sees_all(doc, actor, now):
+                    raise Refusal("there is no such badge")
+                raise self._stranger(doc, actor, now)
             v = V.visit(doc, b["visit_id"])
             self._may_act_on_visit(doc, action, v, actor)
             if V.returned(doc, b) is not None:
@@ -2846,7 +3196,7 @@ class Desk:
         if action == "add_attendee":
             v = V.visit(doc, guard.ident(body.get("visit_id"), "visit"))
             if v is None:
-                raise Refusal("there is no such visit")
+                raise self._stranger(doc, actor, now)
             self._may_act_on_visit(doc, action, v, actor)
             if V.ended(v, now):
                 raise Refusal("the visit has closed")
@@ -2868,8 +3218,7 @@ class Desk:
                 raise Refusal("this is not a KeyClerk visit code")
             body = {**body, "visit_id": pl["v"], "party": pl["p"], "presented": body.get("presented") or "qr"}
             code = str(body["token"])
-        v, p = self._visit_of(doc, body)
-        self._may_act_on_visit(doc, action, v, actor)
+        v, p = self._visit_of(doc, body, action, actor)
         st = V.state(doc, v, p["party"], now)
         who = self._party_name(doc, p)
         if action == "register_on_site":
@@ -3058,7 +3407,57 @@ class Desk:
             self.edge_silence()
         except Exception as e:   # noqa: BLE001 - the visit timers still run
             sys.stderr.write(f"keyclerk.desk: edge silence check: {type(e).__name__}\n")
+        try:
+            self.remind_pending()
+        except Exception as e:   # noqa: BLE001 - retried at the next tick; the visit timers still run
+            sys.stderr.write(f"keyclerk.desk: approval reminders: {type(e).__name__}\n")
         return self._tick_visits()
+
+    REMINDERS = (("waiting", "approval_waiting"), ("expiring", "change_expiring"), ("escalated", "approval_escalated"))
+
+    def remind_pending(self) -> list[dict]:
+        """Approvers are reminded, never handed an action (decision 0030 point 2): for each pending change the desk
+        writes, once each, an approval_waiting line when it first sees the change, change_expiring when it has less than
+        approvals.remind.expiring_hours left, and approval_escalated when it has waited approvals.remind.
+        escalate_after_hours (then the root and the security officer are named too). Each line names the change and
+        the approvers it waits for, and carries no link, button or code that approves: the approver acts in the desk
+        after signing in. The deployment routes the lines (SOAR webhooks, keyclerk.soar) to mail or chat; KeyClerk
+        holds no mail credential. Returns the lines written."""
+        from keyclerk import config
+        cfg = ((config.current() or {}).get("approvals") or {}).get("remind") or {}
+        expiring, escalate = cfg.get("expiring_hours", 24), cfg.get("escalate_after_hours", 72)
+        out = []
+        with self.lock:
+            doc, now = self.store.load(), self.clock()
+            pend, rev, changed = self.store.pending(), self.store.revision(), False
+            for cid, p in sorted(pend.items(), key=lambda kv: kv[1]["at"])[:MAX_PENDING]:
+                at = guard.timestamp(p["at"])
+                ends = at + timedelta(days=PENDING_DAYS)
+                if now >= ends:
+                    continue                                  # expired: nothing left to remind of
+                done = p.setdefault("reminded", [])
+                due = [k for k, _ in self.REMINDERS if k not in done and (
+                    k == "waiting" or (k == "expiring" and now >= ends - timedelta(hours=expiring))
+                    or (k == "escalated" and now >= at + timedelta(hours=escalate)))]
+                if not due:
+                    continue
+                if p.get("waiting_rev") != rev or p.get("waiting_for") is None:
+                    p["waiting_for"] = self._approvers(doc, p["records"], p.get("approvals", []), p["actor"])
+                    p["waiting_rev"] = rev
+                for k in due:
+                    who = list(p["waiting_for"])
+                    if k == "escalated":
+                        who = list(dict.fromkeys(who + [x for x in (D.root_at(doc, now),
+                                                                     (doc.get("root") or {}).get("officer")) if x]))
+                    out.append(self.store.note({"change_id": cid, "action": dict(self.REMINDERS)[k], "actor": None,
+                                                "outcome": "reminder", "records": {}, "reasons": [],
+                                                "summary": f"{dict(self.REMINDERS)[k].replace('_', ' ')}: {cid}",
+                                                "approvers": who, "waiting_since": p["at"], "ends": _iso(ends)}))
+                    done.append(k)
+                    changed = True
+            if changed:
+                self.store.save_pending(pend)
+        return out
 
     def _tick_visits(self) -> list[dict]:
         """The visit timers: the steps visits.rego finds due now (a reminder, then a suspension that is flagged for the
@@ -3105,7 +3504,19 @@ class Desk:
         facts = {**self._visit_actor(doc, v, a), "all": sees_all}
         return bool(policy_wasm.visits("see", {"viewer": facts}))
 
-    def _visit_summary(self, doc: dict, v: dict, now: datetime, me: str | None) -> dict:
+    def _guest_only(self, doc: dict, v: dict, me: str | None, sees_all: bool) -> set[str] | None:
+        """The parties that are the viewer's own when the viewer takes part only as a guest (decision 0009, amended for
+        review C5): such a viewer sees the other guests' names and nothing else about them. None for everyone with a
+        wider part in the visit, who see it whole."""
+        from keyclerk import visits as V
+        if sees_all or not me:
+            return None
+        rel = self._visit_actor(doc, v, me)
+        if not rel["is_party"] or any(rel[k] for k in ("is_host", "is_organiser", "front_office", "steward", "is_escort")):
+            return None
+        return {p["party"] for p in V.attendees(doc, v) if D.same(doc, me, p.get("anchor"))}
+
+    def _visit_summary(self, doc: dict, v: dict, now: datetime, me: str | None, own: set[str] | None = None) -> dict:
         from keyclerk import visits as V
         people = V.attendees(doc, v, now)
         states = {p["party"]: V.state(doc, v, p["party"], now) for p in people}
@@ -3123,15 +3534,15 @@ class Desk:
                 "arrived": sum(1 for s in states.values() if s["arrived"]),
                 "delegation": (v.get("delegation") or {}).get("name"),
                 "vehicles": [f"{k.get('colour', '')} {k.get('make', '')} {k.get('model', '')} ...{k['plate_tail']}".strip()
-                             for k in v.get("vehicles") or []],
+                             for k in v.get("vehicles") or [] if own is None or k.get("driver") in own],
                 "suspended": sum(1 for s in states.values() if s["suspended"]), "waiting_for_me": len(todo)}
 
     def visits(self, who: dict) -> list[dict]:
         doc, now = self.store.load(), self.clock()
         self._may_read(doc, who)
         sees_all = bool(self._scope(doc, who, now)["all"])          # once per request, not once per visit
-        out = [self._visit_summary(doc, v, now, who.get("anchor")) for v in doc.get("visits", [])
-               if self._sees_visit(doc, who, v, now, sees_all)]
+        out = [self._visit_summary(doc, v, now, who.get("anchor"), self._guest_only(doc, v, who.get("anchor"), sees_all))
+               for v in doc.get("visits", []) if self._sees_visit(doc, who, v, now, sees_all)]
         return sorted(out, key=lambda x: x["start"], reverse=True)
 
     def _erase_expired(self, doc: dict, now: datetime) -> list[str]:
@@ -3162,9 +3573,13 @@ class Desk:
             raise PermissionError("you may see visits you host or organise, visits to a place whose front office or "
                                   "steward you are, and your own; a viewer or the root sees all")
         a = who.get("anchor")
+        own = self._guest_only(doc, v, a, bool(self._scope(doc, who, now)["all"]))
         kit = {k["class"]: k["name"] for k in V.rules()["kit_classes"]}
         parties = []
         for p in V.attendees(doc, v, t):
+            if own is not None and p["party"] not in own:                # another guest: the name only
+                parties.append({"party": p["party"], "name": self._party_name(doc, p)})
+                continue
             st = V.state(doc, v, p["party"], t)
             shown = [e["presented"] for e in V.events(doc, v["visit_id"], t) if e.get("party") == p["party"] and e.get("presented")]
             serial = V.qr_serial(doc, v, p["party"], t)               # the preview assumes the guest's current code
@@ -3200,6 +3615,8 @@ class Desk:
                                                            "visit": {}})["allow"]})
         line = []
         for x in V.timeline(doc, v, t):
+            if own is not None and x.get("party") and x["party"] not in own:   # another guest's gate times
+                continue
             item = {k: (_iso(V._ts(val)) if k == "at" else val) for k, val in x.items()
                     if k in ("at", "kind", "party", "text", "by", "checkpoint", "zone", "presented", "vehicle", "notify",
                              "vehicle_id", "vehicle_tail")}
@@ -3208,14 +3625,14 @@ class Desk:
             line.append(item)
         self.store.log_view({"at": now, "viewer": a or "viewer-role", "subject": v["visit_id"], "moment": t,
                              "nodes": len(parties)})
-        return {**self._visit_summary(doc, v, t, a), "at": _iso(t), "zones": v.get("zones") or [],
+        return {**self._visit_summary(doc, v, t, a, own), "at": _iso(t), "zones": v.get("zones") or [],
                 "escorts": [self._name(doc, x) or x for x in V.escorts_of(v)], "delegation_detail": v.get("delegation"),
                 "may_add": t == now and bool(a) and self._person(doc, a) is not None
                 and policy_wasm.visits("act", {"action": "add_attendee", "actor": self._visit_actor(doc, v, a), "visit": {}})["allow"],
                 "parties": parties, "vehicles_detail": [{**{k: x.get(k) for k in ("vehicle", "make", "model", "colour", "plate_tail")},
                                                          "driver": next((q["name"] for q in parties if q["party"] == x.get("driver")), None)}
-                                                        for x in V.vehicles(v)],
-                "kit": [{**i, "with": q["name"]} for q in parties for i in q["kit"]],
+                                                        for x in V.vehicles(v) if own is None or x.get("driver") in own],
+                "kit": [{**i, "with": q["name"]} for q in parties for i in q.get("kit") or []],   # others' kit is not shown to a guest
                 "timeline": line,
                 "badges": [{"badge_id": b["badge_id"], "party": b["party"],
                             "holder": next((q["name"] for q in parties if q["party"] == b["party"]), b["party"]),
@@ -3226,7 +3643,7 @@ class Desk:
                             "may_return": t == now and V.returned(doc, b, t) is None and bool(a)
                             and policy_wasm.visits("act", {"action": "return_badge", "actor": self._visit_actor(doc, v, a),
                                                            "visit": {}})["allow"]}
-                           for b in V.badges_of(doc, v["visit_id"])]}
+                           for b in V.badges_of(doc, v["visit_id"]) if own is None or b["party"] in own]}
 
     def changes(self, who: dict) -> dict:
         doc, now = self.store.load(), self.clock()
@@ -3282,6 +3699,40 @@ class Desk:
         before = _bare(self._evaluate(doc, self._with_approvals(p["records"], given))[1])
         return outcome == "pending" and bool(before - _bare(reasons))
 
+    def note_console_grants(self) -> int:
+        """Privileged roles granted in the broker outside KeyClerk, as the reconciler found them (decision 0030 point
+        3): each noted once in the activity log, so it reaches the security officer and the SIEM signed in the chain.
+        Report-only: KeyClerk never touches what it did not create. Returns how many were new."""
+        f = (self.broker_state / "runs.jsonl") if self.broker_state else None
+        if not f or not f.exists():
+            return 0
+        seen_f = self.store.path / "console-grants-noted.json"
+        try:
+            seen = json.loads(seen_f.read_text(encoding="utf-8")) if seen_f.exists() else []
+        except ValueError:
+            seen = []
+        new = 0
+        for line in guard.read_bounded(f).splitlines()[-50:]:
+            try:
+                r = guard.load_json_bytes(line.encode(), "run")
+            except guard.InputRejected:
+                continue
+            for x in (r.get("console_grants") or []) if isinstance(r, dict) else []:
+                if not isinstance(x, dict) or not isinstance(x.get("event"), str) or x["event"] in seen:
+                    continue
+                roles = [str(v)[:120] for v in (x.get("roles") or [])][:20]
+                self.store.note({"change_id": "C-" + secrets.token_hex(6), "action": "console_grant", "actor": None,
+                                 "outcome": "finding", "records": {}, "reasons": [],
+                                 "summary": f"privileged roles granted outside KeyClerk: {', '.join(roles)}"[:300],
+                                 "console_grant": {k: str(x.get(k))[:200] for k in (
+                                     "subject_kind", "subject", "subject_name", "by_user", "by_name", "by_client", "from",
+                                     "at_ms", "exact") if x.get(k) is not None} | {"roles": roles}})
+                seen.append(x["event"])
+                new += 1
+        if new:
+            _atomic(seen_f, json.dumps(seen[-5000:]).encode("utf-8"))
+        return new
+
     def broker(self, who: dict) -> dict:
         doc = self.store.load()
         self._may_read(doc, who)
@@ -3310,8 +3761,11 @@ class Desk:
                     runs.append({k: (len(v) if isinstance(v, list) else v) for k, v in r.items()
                                  if k in ("at", "applied", "desired", "observed_before", "add", "remove", "findings",
                                           "failed", "refused", "error", "alert", "seconds", "intrusions_removed")})
+        grants = [{"at": e.get("at"), **(e.get("console_grant") or {})} for e in self.store.log(200)
+                  if e.get("action") == "console_grant"] if sc["all"] else []    # the security officer, a viewer, the root
         return {"revision": self.store.revision(), "observed": len(self._observed()), "runs": list(reversed(runs)),
-                "log_intact": not self.store.verify_log(), "manual_changes": list(reversed(manual))[:50]}
+                "log_intact": not self.store.verify_log(), "manual_changes": list(reversed(manual))[:50],
+                "console_grants": list(reversed(grants))[:50]}
 
 
 for _name, _fn in list(vars(Desk).items()):          # every public method a person calls: who, then the rest

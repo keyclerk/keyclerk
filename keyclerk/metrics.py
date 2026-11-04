@@ -44,9 +44,23 @@ SPEC: dict[str, tuple[str, str, tuple[str, ...]]] = {
                             "follow the checking signer. Alert: any.", ()),
     "keyclerk_signing_frozen": ("gauge", "1 while the checking signer has frozen signing: the desk is read-only. "
                                 "Alert: 1.", ()),
+    "keyclerk_witness_total": ("counter", "The signer's witness checks by result: cosigned, error, rolled_back, forked "
+                               "(decision 0022 point 5). Alert: rolled_back or forked, any; error, repeatedly.",
+                               ("witness",)),
+    "keyclerk_backup_escrow_unproven": ("gauge", "Backup recipients (custodian or drill keys) whose holder has not "
+                                        "shown the key within backup.escrow_check_days. Alert: any.", ()),
+    "keyclerk_backup_recipients_due_rotation": ("gauge", "Configured backup recipients in use past "
+                                                "backup.rotate_after_days. Alert: any, as a ticket.", ()),
+    "keyclerk_unwitnessed_seconds": ("gauge", "Seconds since the first link no quorum of witnesses has countersigned; 0 "
+                                     "when witnessed. Alert: above witness.incident_after_minutes.", ()),
     "keyclerk_timer_refused_total": ("counter", "Visit timer steps (a reminder, a suspension) the engine refused: the "
                                      "step did not happen. Alert: any.", ()),
     "keyclerk_ready": ("gauge", "1 when /readyz answers ready.", ()),
+    "keyclerk_backup_age_seconds": ("gauge", "Seconds since the newest good backup was taken (its manifest signed by a "
+                                    "trusted key, decision 0019). Alert: above backup.max_age_hours.", ()),
+    "keyclerk_backup_drill_failed": ("gauge", "1 when the last restore drill failed: an incident (decision 0019). "
+                                     "Alert: 1.", ()),
+    "keyclerk_backup_recovery_seconds": ("gauge", "The recovery time the last restore drill measured.", ()),
 }
 # label values that may appear; anything else is counted as "other" (a fixed list keeps cardinality bounded)
 VALUES: dict[str, tuple[str, ...]] = {
@@ -55,8 +69,9 @@ VALUES: dict[str, tuple[str, ...]] = {
     "reason": ("head", "places", "situations", "sod", "catalogue", "group_tree", "schema", "root", "bound", "unknown",
                "forced", "config", "other"),
     "op": ("public_key", "sign_line", "commit", "ping", "migrate", "head", "propose", "links", "tokens", "checkpoint",
-           "anchors", "start", "link_subject", "other"),
+           "anchors", "start", "link_subject", "snapshot", "snapshot_state", "other"),
     "result": ("served", "refused"),
+    "witness": ("cosigned", "error", "rolled_back", "forked"),
     "kind": ("attestation_failed", "edge_silent", "drift", "report", "incomplete", "time_born", "needs_migration",
              "other"),
 }

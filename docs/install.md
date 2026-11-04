@@ -93,6 +93,15 @@ When approval proofs are required (`approvals.proofs: required`), a seed's high-
 proof, as every high-risk change does: the root signs the seed at the identity provider with a fresh sign-in, through
 the desk's approval flow, before the first revision applies.
 
+### The sign-in level of an approval
+From 0.27.0 the configuration names the sign-in level every approval proof must carry, `approvals.acr` (the broker's
+`acr` claim); a configuration without it is refused. Let init propose it from the realm:
+`python -m keyclerk.init acr --keycloak URL --realm REALM --config keyclerk.yaml --write`. It reads the levels the
+realm publishes, proposes the strongest, and writes only the value you confirm. Keycloak publishes `0` and `1` until
+the realm has a level-of-authentication flow; bind the level you require to a passkey there (Authentication, a flow
+with Condition - Level of Authentication) so that an approval needs one. `acr: none` is accepted when written, and the
+desk and the signer report it as a finding at every start: a password-only sign-in then approves as well as a passkey.
+
 ## Where the desk keeps the records
 The desk keeps the records in the folder `--store` names. The configuration's `store` section chooses how: `kind:
 yaml`, the signed YAML store and the default when the section is left out, or `kind: sqlite`, the signed change log
@@ -102,6 +111,230 @@ only one that links a person to their sign-in account.
 docs/migrate-to-change-log.md moves a running deployment over; a new deployment on the change log starts the signer
 empty and seeds it from `--seed`, its first change judged whole. The YAML store suits up to a few thousand people; the
 change log is built for organisations of tens of thousands.
+
+## Sending audit events to a SIEM
+The desk's activity log (every change, refusal, approval and edge event, each line chained and signed) is offered to a
+SIEM as OCSF JSON, in two ways, each off until configured:
+
+```yaml
+siem:
+  reader_token_file: /etc/keyclerk/siem-reader.token   # 32 characters or more, not the management token
+  syslog:                                              # for python -m keyclerk.siem forward
+    host: siem.example.org
+    port: 6514
+    ca_file: /etc/keyclerk/siem-ca.pem                 # the only CA trusted for the receiver
+```
+
+- **Pull.** With `reader_token_file`, the management listener answers `GET /audit/events?after=SEQ&limit=N` (at most
+  500) to that token only: `{events, next, head}`. Keep `next` and ask after it: a restart of the desk loses nothing and
+  repeats nothing, because the cursor is the log's own line number.
+- **Syslog over TLS.** Run `python -m keyclerk.siem forward --store DIR --config FILE` as its own service, as the desk's
+  user. It sends RFC 5424 messages over TLS (RFC 5425), trusting only `ca_file`, and keeps its place in
+  `siem-syslog.cursor` in the store's directory (or `cursor_file`), which moves only after each message is written.
+  After an outage it resumes there; a crash between a write and the cursor can send one event twice, so a SIEM
+  removes duplicates by `metadata.uid`.
+
+Each event carries the line's `seq`, `prev`, `sha256`, signature and records revision under `unmapped.keyclerk`, so the
+SIEM's copy can be checked against the desk's signed log. People appear as pseudonyms (`person-pseudonym:SITE/...`,
+keyed by `siem-pseudonym.key` in the store's directory, made on first use; keep it with the store's backups, since a
+new key gives new pseudonyms), and a refusal carries the classes of its reasons, not their text; the `change_id` leads
+back to the desk.
+
+## Connecting a SOAR
+Both directions are off until configured.
+
+**Webhooks out.** `python -m keyclerk.soar forward --store DIR --config FILE`, as its own service, sends the event types
+each endpoint chose: changes (`keyclerk.change.applied.v1` and the other outcomes), findings
+(`keyclerk.edge.incident.v1`, `keyclerk.console.grant.v1`) and the approvers' reminders (`keyclerk.approval.waiting.v1`,
+`keyclerk.change.expiring.v1`, `keyclerk.approval.escalated.v1`). Each is a CloudEvents envelope holding the SIEM's
+OCSF event, signed per Standard Webhooks with the endpoint's secret; check it with any Standard Webhooks library.
+Delivery is at least once and in order per endpoint. A reminder names the next approvers as pseudonyms, or as their
+broker ids on an endpoint with `identities: anchors` that routes reminders to mail or chat. It never carries a link or
+code that approves: the approver signs in to the desk.
+
+```yaml
+soar:
+  webhooks:
+    - url: https://soar.example.org/keyclerk
+      secret_file: /etc/keyclerk/soar.secret
+      events: [keyclerk.approval.waiting.v1, keyclerk.change.applied.v1]
+  protective:
+    client: soar-client          # its API client: list it in --api-client too
+    workload: "wl:soar"          # a workload in the records (kind workload, with an owner): the author of its changes
+    feed: soar                   # registered in the records' situation_feeds, with its max_level
+    max_per_hour: 10
+```
+
+**Protective proposals in.** With `protective`, the SOAR's access token may propose three changes through the change
+API and nothing else: `suspend_person` (`anchor`, `reason`), `end_membership` (`membership_id`, `reason`) and
+`raise_situation` (`level`, `scope`, `reason`, through its feed, so at most one step above what people announced). Each
+is checked like any change and signed when it applies, with the workload as its author; a suspension shows on the
+person's view. A proposal waits for the security officer, the root or a person on call when `apply_at_once` leaves its
+action out, when it touches a person on call, or when the SOAR has made `max_per_hour` changes in the last hour, which
+also records a `soar_ceiling` finding. A SOAR never grants or approves, and lifting a suspension still takes two people.
+Break-glass at an edge is reported as an incident that names no person, so it does not spare anyone yet.
+
+## Behind a reverse proxy
+
+The phone scan and the QR key need no sign-in, so the desk keeps a small budget of scans per client address. Behind a
+reverse proxy every request comes from the proxy, and one busy phone spends the budget for everyone. List the proxies
+in the configuration:
+
+```yaml
+api:
+  trusted_proxies: [10.0.0.0/24]
+  forwarded_header: x-forwarded-for     # or forwarded (RFC 7239): the one header your proxy sets
+```
+
+Only from a listed address does the desk read that header, and it takes the rightmost address that is not a listed
+proxy: the address the proxy saw. Make the proxy append to the header, never pass a client's copy on alone. The list
+is empty by default, so a desk without a proxy ignores the header.
+
+## Taking backups and drilling the restore
+`python -m keyclerk.backup` takes a backup only KeyClerk can make (decision 0019); your backup tool ships it.
+
+1. Once per host: `python -m keyclerk.backup key --out backup.key` writes the manifest key and prints its public key.
+   Put it under `backup.manifest_keys` in the configuration. Each custodian makes an age key pair with `age-keygen`
+   and keeps the identity in their password manager. Make one more for the drill, kept on the drill host. List the
+   custodians' recipients and the drill's under `backup.recipients`: a backup is encrypted to those and to no other,
+   so changing the schedule's command line cannot add a reader (decision 0029).
+2. On a schedule, while the desk and the signer run: `python -m keyclerk.backup take --desk DIR --signer-state DIR
+   --records-key HEX --key backup.key --out OUTBOX`. Each store is copied through SQLite's online backup into a
+   private staging directory and verified there: each chain is checked against the records key, the full check runs
+   on the signer's copy, and the signer's audit chain is checked. The copy is then encrypted with age to every
+   recipient. Only the encrypted file ever lands in `OUTBOX`, and memory stays small whatever the store's size. It
+   leaves out every `*.key` file and names it in the manifest; a file that looks like a key under another name refuses
+   the backup. It also leaves out replicas an earlier resync replaced. Escrow the keys apart.
+3. Ship `OUTBOX` off-site to object storage with object lock. Retention and pruning are the shipper's
+   (`backup.retention_days` states the target; the configuration is refused when it is longer than
+   `store.view_log_keep_days`, so a backup never keeps a look the desk has deleted). Once a copy is off-site, the shipper records it: `python -m
+   keyclerk.backup shipped --manifest FILE.manifest.json --where BUCKET/OBJECT --key backup.key` writes a signed
+   `FILE.shipped.json` beside the manifest. Keep a copy of the manifests and shipped records where the desk can read
+   them (`backup.manifests`): `keyclerk_backup_age_seconds` is the age of the newest shipped backup. Alert above
+   `backup.max_age_hours`.
+4. On a schedule, on a host that is not the desk: fetch the newest copy and run `python -m keyclerk.backup drill
+   --from DIR --pin HEX --records-key HEX --identity DRILL_IDENTITY --report drills.jsonl`. It restores into a
+   scratch directory, verifies everything again and reports the measured recovery time. Point `backup.drill_report`
+   at the report: `keyclerk_backup_drill_failed` is 1 after a failed drill, which is an incident.
+
+A custodian can decrypt a backup without KeyClerk: `age -d -i IDENTITY FILE.tar.age | tar x`.
+
+### Proving the escrowed keys, and rotating them
+A backup is only as good as the keys that open it. Every quarter (`backup.escrow_check_days`, 90 by default), prove that
+each recipient's key is still held: `python -m keyclerk.backup escrow challenge --manifests DIR --pin HEX --key FILE`
+writes one encrypted file per recipient in `DIR/escrow`, for the configured recipients and for every retired one a kept
+backup still needs. Each custodian opens theirs with the standard tool (`age -d -i their-key.txt FILE`) and tells the
+operator the value, who records it with `escrow answer --recipient AGE1... --answer VALUE`; the drill's test key
+answers with `--identity`. `python -m keyclerk.backup hygiene --manifests DIR --pin HEX` reports a recipient whose
+key was not shown in that window, and a configured recipient in use past `backup.rotate_after_days` (365 by default). To
+rotate, add the custodian's new key to `backup.recipients`, and remove the old one once the backups encrypted to it
+have aged out of `backup.retention_days`; until then hygiene keeps asking for its proof. The gauges
+`keyclerk_backup_escrow_unproven` and `keyclerk_backup_recipients_due_rotation` count both.
+
+## Restoring a desk from a backup
+To restore from a backup taken as above, run `python -m keyclerk.backup restore --archive FILE.tar.age --manifest
+FILE.manifest.json --pin HEX --records-key HEX --identity CUSTODIAN_IDENTITY --to EMPTY_DIR --erasures
+NEWEST.erasures.json`. It checks the manifest before anything else (a trusted signature, then the archive's size and
+hash) and refuses a copy that does not match, saying why. It checks every file, verifies the copy again, writes
+`EMPTY_DIR/desk` and `EMPTY_DIR/signer`, and puts both in restore mode. Bring the keys it lists back from escrow, then
+continue below.
+
+A restored desk must never sign a revision number, or an edge bundle serial, that was already signed before the loss.
+On the signed YAML store:
+
+1. Put the store folder back from the backup (`keyclerk.backup restore` does this) and run `python -m keyclerk.restore start --store DIR`.
+2. Start the desk as usual. It is in restore mode: it writes nothing, readiness says not ready, and edges get 503,
+   which they treat as an outage: they keep their current bundle and run on their horizons. Each edge that reports
+   leaves the bundle serial it applied (`python -m keyclerk.restore status --store DIR` shows them).
+3. Find the newest revision anyone saw: `python -m keyclerk.restore status --store DIR` proposes one from the heads
+   edges echoed while the desk was in restore mode, and with `--witness URL --witness-key VKEY --origin ORIGIN
+   --records-key HEX --signer-state DIR` from the witness's countersigned checkpoint; weigh it against the reconciler's
+   high-water mark and the last report you have. The
+   security officer and a root trust owner each sign in at the broker with the nonce from
+   `python -m keyclerk.restore nonce --store DIR --realm R --mark N --by ANCHOR` and save the ID token.
+4. Stop the desk and run `python -m keyclerk.restore resume --store DIR --key KEY --realm R --mark N --proof
+   OFFICER=FILE --proof ROOT=FILE --approval-issuer ... --approval-audience ... --keycloak ...`. It signs the records
+   again as revision N + 1, raises each edge's bundle serial above what it applied, runs the full check and leaves
+   restore mode. Revisions lost since the backup are logged as an incident: people propose them again.
+5. Start the desk.
+
+On the change log a revision number is a position in the signed chain, so a signer restored from an older backup
+must not sign at the positions it lost (that would fork the chain). With the signer stopped, take the lost links back
+from a follower: `python -m keyclerk.restore recover-log --signer-state DIR --from REPLICA_DB --records-key HEX`, where
+`REPLICA_DB` is the reconciler's (or a desk's) `replica.db`. It verifies both chains, refuses a follower that forked,
+appends each lost link with its signature checked, adds the proof tokens and anchor rows the follower holds, and
+reports rows that differ for you to read. The signer seals a fresh checkpoint when it starts. When no follower holds the lost links, the signer appends a restore link instead: the security officer and a root
+trust owner each sign in at the broker with the nonce from `python -m keyclerk.restore log-nonce --signer-state DIR
+--key KEY --config FILE --mark N --by BROKER_ID`, then, with the signer stopped, `python -m keyclerk.restore link
+--signer-state DIR --key KEY --config FILE --mark N --proof OFFICER=FILE --proof ROOT=FILE --approval-issuer ...
+--approval-audience ... --keycloak ...` signs one link with no ops that resumes the numbering at N + 1. Followers
+replay it like any link. A signer restored with `keyclerk.backup restore` refuses every change until one of the two
+has run. Then start the signer and the desk, and take the desk out of restore mode: `python -m keyclerk.restore leave
+--store DIR --config FILE --signer ADDR`. It checks that the desk follows its signer without a break, applies the
+erasure journal, raises each edge's bundle serial above what it applied, and ends restore mode.
+
+Backups forget what was erased (decision 0028 point 6). `keyclerk.backup take` writes an erasure journal
+(`*.erasures.json`, the erased visits' ids only) beside each manifest. Refresh it after an erasure with `python -m
+keyclerk.backup erasures --desk DIR --key backup.key --out FILE`, and ship it apart from the backups. A desk is restored
+only with `--erasures FILE`, a journal signed by a trusted manifest key and at least as new as the backup. `resume`
+(YAML store) and `leave` (change log) erase again what it lists before the desk serves.
+
+## A witness for the change log
+The signer's mark of what it signed lives in its own state, so a signer restored from an older backup brings back an
+older mark too. A witness, run on another machine by another owner, keeps the newest checkpoint of the log it
+countersigned and countersigns only checkpoints that extend it (c2sp.org/tlog-witness). From 0.27.0 the signer sends
+each new checkpoint to the witnesses you configure, and stops signing when one proves, by a checkpoint it
+countersigned, that the signer is behind it or holds another history. The signer never stops on the witness's word
+alone, so an answer forged on the network cannot halt signing.
+
+1. On the witness host, make a key (`python -c "import os; print(os.urandom(32).hex())" > witness.key`, readable only by
+   the witness's user) and print the log's vkey from the records public key: `python -m keyclerk.witness vkey --type
+   log --name ORIGIN --pub RECORDS_PUBLIC_HEX`. The origin names the realm's log, as a schema-less URL such as
+   `keyclerk.example.org/realm`.
+2. Run `python -m keyclerk.witness serve --key witness.key --name witness.example.org/kc1 --state DIR --log LOG_VKEY
+   --listen 127.0.0.1:8098`, with TLS in front when it leaves the host. Print its own vkey with `python -m
+   keyclerk.witness vkey --type cosigner --name witness.example.org/kc1 --key witness.key`.
+3. In the configuration:
+
+   ```yaml
+   witness:
+     origin: keyclerk.example.org/realm
+     cosigners:
+       - url: https://witness.example.org/kc1
+         vkey: witness.example.org/kc1+...      # step 2's vkey
+     incident_after_minutes: 30                 # readiness says unwitnessed after this
+     # block_after_minutes: 240                 # unset by default: a cut-off site keeps signing
+   ```
+
+Any C2SP witness serves as well, and `quorum` asks that several hold a checkpoint before it counts. The signer checks at
+start, after each signed link and every `every_seconds` (300 by default). `head` and the desk's readiness say how far the
+log is witnessed and why a witness failed; `keyclerk_unwitnessed_seconds` measures it. After a restore the realm's
+officers confirmed (above), the witness still holds the newer history and the signer refuses to sign. The witness's
+owner then resets the log there, with the witness stopped: `python -m keyclerk.witness reset --state DIR --origin
+ORIGIN --by NAME --reason TEXT`. The reset is kept in the witness's `evidence.jsonl` with the checkpoint it forgot, as
+is every checkpoint the records key signed that the witness refused.
+
+## The reconciler's high-water mark
+The reconciler keeps the newest records revision it applied in the identity broker (the `keyclerk-state` group), so a
+lost state folder cannot let older signed records replay. From 0.27.0 the reconciler signs that mark with its own key:
+give it `--mark-key`, a file holding an Ed25519 private key as 64 hex digits that only the reconciler reads (for
+example `python -c "import os; print(os.urandom(32).hex())" > mark.key`, then restrict the file to the reconciler's
+user). A mark that does not verify, or records older than the mark, refuse the revision; memberships the records never
+required are still removed, and the run reports an incident. Upgrading from 0.26.x, run the reconciler once with
+`--adopt-mark`: it signs the existing unsigned mark when that mark is not ahead of the records.
+
+## Privileged roles granted in the broker by hand
+KeyClerk grants access through the groups it manages, never through a role mapping. A privileged role mapped to a user
+or a group directly, in the admin console or through the admin API, went around it. The reconciler reads the realm's
+admin events at each run and reports every such grant: every `realm-management` role, and the roles you name in
+`reconcile.privileged_roles` (`realm:NAME` for a realm role, `CLIENT_ID:NAME` for a client role). Each finding names
+the roles, the user or group, and who made it (user, client, address). The desk notes each one once in its signed
+activity log, so it shows in the broker view for the security officer and reaches the SIEM. It is report-only:
+KeyClerk removes nothing it did not create.
+
+For this, turn admin events on in the realm (Realm settings, Events, Admin events), with "Include representation" so the
+finding names exactly the roles granted (without it, the reconciler reads what the user or group holds now), and give
+the reconciler's reader client `view-events`. A run that cannot read the events says so in `console_grants_unread`.
 
 ## Admin accounts for privileged groups
 On a privileged top group, init writes each first administrator's anchor with the persona purpose `admin`, so the

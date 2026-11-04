@@ -437,6 +437,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--desk", type=int, default=0, metavar="N",
                     help="also time N desk proposals on the change log (a manager adding a member), judged on the "
                          "reach, and two judged in full (decision 0022 S5 T9); then stop")
+    ap.add_argument("--keep", metavar="DIR", help="build into DIR and keep it (the signer's state and records.pub, for a "
+                                                  "backup and restore drill, decision 0029 point 9); then stop")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--json")
     a = ap.parse_args(argv)
@@ -445,7 +447,9 @@ def main(argv: list[str]) -> int:
     rnd = random.Random(a.seed)
     org = Org(a, rnd)
     key = Ed25519PrivateKey.generate()
-    tmp = Path(tempfile.mkdtemp(prefix="bench-org-"))
+    tmp = Path(a.keep) if a.keep else Path(tempfile.mkdtemp(prefix="bench-org-"))
+    if a.keep:
+        tmp.mkdir(parents=True, exist_ok=False)                # never into an organisation already there
     result: dict = {"organisation": {k: getattr(a, k) for k in ("employees", "groups", "agents", "workloads",
                                                                   "contractors", "named", "history_days")}}
     try:
@@ -465,6 +469,10 @@ def main(argv: list[str]) -> int:
             new = [e for e in _errors(RP.records(s.replica), AT) if e not in known]
             result["new_errors"] = {"count": len(new), "first": new[:5]}
             print(json.dumps(result["new_errors"]), flush=True)
+        if a.keep:
+            (tmp / "records.pub").write_text(s.public_key() + "\n", encoding="utf-8")
+            s.close()
+            return 0
         if a.desk:
             result["desk"] = desk_costs(org, s, tmp, a.desk)
             print(json.dumps(result["desk"]), flush=True)
@@ -530,7 +538,8 @@ def main(argv: list[str]) -> int:
             print(json.dumps(result["full_check"]), flush=True)
         s.close()
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        if not a.keep:
+            shutil.rmtree(tmp, ignore_errors=True)
     if a.json:
         Path(a.json).write_text(json.dumps(result, indent=1), encoding="utf-8")
     return 0

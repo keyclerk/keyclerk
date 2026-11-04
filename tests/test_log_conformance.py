@@ -46,6 +46,8 @@ def test_each_refusal_is_refused_for_its_own_reason():
         "a proof that carries its token": "never the token",
         "ops out of order": "sorted by kind and key",
         "a key that is not the record's own": "not the record's own",
+        "a restore link that carries ops": "carries no ops",
+        "a restore link with one confirmation": "two confirmations",
     }
     refused = [c for c in SET["links"]["cases"] if not c["expected"]["ok"]]
     assert {c["name"] for c in refused} == set(why)

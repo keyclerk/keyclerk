@@ -50,8 +50,17 @@ never signs on top of a newer history, 0019).
     {"op": "anchors", "after", "limit" <= 500}          {anchors}: the mapping rows (decision 0028), for a desk that
                                                         migrates or lost its store; audited like tokens
     {"op": "checkpoint", "size"}                        {checkpoint}: the newest, or the one at a size
+    {"op": "snapshot"}                                  {snapshot, size, bytes}: the newest signed snapshot (issue 28),
+                                                        or {snapshot: null}
+    {"op": "snapshot_state", "size", "offset", "limit" <= 1 MiB}
+                                                        {chunk (base64), eof}: that snapshot's state file, a piece at a
+                                                        time; a desk adopts it with every link before it checked
     {"op": "link_subject", "anchor", "sub"}             {linked}: the reconciler records the broker subject of an
                                                         account, once (decision 0028 phase 2); audited
+With a witness section in the configuration, head also says {witness: {size, unwitnessed_since, incident, blocking,
+cosigners}}: the signer sends its newest checkpoint to each witness at start, after each signed link and every
+every_seconds (keyclerk.witness), and stops signing when a witness proves, by a checkpoint it countersigned, that the
+replica is behind what the records key signed or another history (decision 0022 point 5).
 Once migrated, commit is refused: changes are proposed. sign_line goes on for the lines that vouch for no change.
 
 The replica's token table (its side table) is not in the log and erasable, like the desk's: an erasure of personal
@@ -96,6 +105,8 @@ class Signer:
 
     def __init__(self, key: Ed25519PrivateKey, state: Path, proofs=None, full_check: bool = False):
         self.key, self.state, self.proofs = key, Path(state), proofs
+        self.witness: dict | None = None          # the witness section and its cosigners (configure_witness)
+        self._witness_due = threading.Event()
         self.full_check = full_check              # every change judged by the full check (the reference path, 0022 S4)
         self.state.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
@@ -233,10 +244,43 @@ class Signer:
                     from keyclerk import metrics
                     metrics.inc("keyclerk_check_alarms_total", kind="incomplete")
                     sys.stderr.write(f"keyclerk.signer: background full check incomplete: {e}\n")
+                try:
+                    self.take_snapshot()
+                except Exception as e:   # noqa: BLE001 - a missed snapshot costs a longer start, never signing
+                    sys.stderr.write(f"keyclerk.signer: snapshot not taken: {e}\n")
                 _t.sleep(every_seconds)
         t = threading.Thread(target=loop, name="keyclerk-full-check", daemon=True)
         t.start()
         return t
+
+    SNAPSHOTS_KEPT = 2
+
+    def take_snapshot(self) -> Path | None:
+        """A signed snapshot of the replica (issue 28) in state/snapshots, named by its size, when the log has grown
+        past the newest one and the last full check passed; the newest two are kept. A follower or a restored store
+        starts from one instead of applying every link (keyclerk.store.snapshot). Returns the statement's path."""
+        from keyclerk.store import link as L
+        from keyclerk.store import snapshot as S
+        if self.replica is None or self.broken or self.last_check is None or not self.last_check.ok:
+            return None
+        d = self.state / "snapshots"
+        d.mkdir(exist_ok=True)
+        done = sorted(int(p.name.split(".")[0]) for p in d.glob("*.snapshot.json"))
+        snap = self.replica.snapshot()
+        try:
+            size = snap.size()
+            k = L.parts(L.open_link(snap.link(0), snap.pinned)[0]) if size else 0
+            if size <= k or (done and done[-1] >= size):
+                return None
+            sealed = S.take(snap, self.key, d / f"{size}.state.jsonl", _now())
+        finally:
+            snap.close()
+        out = d / f"{size}.snapshot.json"
+        S.write_sealed(sealed, out)
+        for old in done[:max(0, len(done) + 1 - self.SNAPSHOTS_KEPT)]:
+            for f in (d / f"{old}.snapshot.json", d / f"{old}.state.jsonl"):
+                f.unlink(missing_ok=True)
+        return out
 
     def verify_audit(self) -> str | None:
         """Why the signer's audit log does not verify (every line signed by this key, each naming the one before), or
@@ -251,19 +295,9 @@ class Signer:
             with f.open("r+b") as h:
                 h.truncate(keep)
             data = data[:keep]
-        prev, pub = "0" * 64, self.key.public_key()
-        for n, line in enumerate(data.splitlines(), 1):
-            try:
-                e = json.loads(line)
-                body = {k: v for k, v in e.items() if k not in ("sha256", "signature")}
-                sha = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
-                if e["prev"] != prev or e["sha256"] != sha:
-                    raise ValueError("it does not follow the line before")
-                pub.verify(bytes.fromhex(e["signature"]), sha.encode())
-            except Exception as ex:   # noqa: BLE001 - unreadable, unlinked or unsigned: the chain is broken here
-                return (f"the signer's audit log does not verify at line {n} ({type(ex).__name__}): restore the signer's "
-                        "state from a backup as a whole (decision 0019)")
-            prev = sha
+        why, prev, _ = audit_chain(data.splitlines(), self.key.public_key())
+        if why:
+            return why
         self._audit_prev = prev
         return None
 
@@ -276,6 +310,7 @@ class Signer:
     def _write_mark(self) -> None:
         from keyclerk.store import replay
         r = self.replica
+        self._witness_due.set()                   # a new head: the witnesses see it soon
         tmp = self.state / "log-mark.json.tmp"
         tmp.write_text(json.dumps({"realm": r.realm, "size": r.size(), "head": r.head().hex() if r.head() else None,
                                    "revision": replay.revision(r)}), encoding="utf-8", newline="\n")
@@ -349,6 +384,10 @@ class Signer:
             raise SignerRefused(self.broken)
         if self.replica is None:
             raise SignerRefused("this signer keeps no change log yet: migrate its last signed revision first (op migrate)")
+        if self.witness is not None and self.witness["block"] is not None and self.witness_state()["blocking"]:
+            raise SignerRefused(f"the change log has not been witnessed for {self.witness['block']} minutes and the "
+                                "configuration blocks signing then (witness.block_after_minutes): reach a witness "
+                                "(head says why each failed), or lift the setting")
         return self.replica
 
     def public_key(self) -> str:
@@ -567,7 +606,144 @@ class Signer:
         if self.replica is None:
             return {"size": 0, "migrated": False}
         with self.lock:
-            return {**self._head(), **({"frozen": frozen} if frozen else {})}
+            return {**self._head(), **({"frozen": frozen} if frozen else {}),
+                    **({"witness": self.witness_state()} if self.witness is not None else {})}
+
+    # --- the witness (decision 0022 point 5, decision 0020 G10) ---------------------------------------------------
+
+    def configure_witness(self, cfg: dict, cosigners: list) -> None:
+        """The configuration's witness section, with a keyclerk.witness.Cosigner per witness."""
+        self.witness = {"origin": cfg["origin"], "quorum": cfg.get("quorum", 1), "every": cfg.get("every_seconds", 300),
+                        "incident": cfg.get("incident_after_minutes", 30), "block": cfg.get("block_after_minutes"),
+                        "cosigners": cosigners}
+
+    def _witnessed(self) -> dict:
+        f = self.state / "witness.json"
+        return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+
+    def witness_state(self) -> dict:
+        """How far the witnesses have countersigned the log: the size a quorum of them holds, since when a link is
+        unwitnessed (the time of the first link past it), and each witness's last answer."""
+        from datetime import datetime, timezone
+
+        from keyclerk.store import link as L
+        seen, size = self._witnessed(), self.replica.size() if self.replica is not None else 0
+        names = [c.name for c in self.witness["cosigners"]]
+        sizes = sorted((seen.get(n, {}).get("size", 0) for n in names), reverse=True)
+        q = self.witness["quorum"]
+        witnessed = sizes[q - 1] if len(sizes) >= q else 0
+        since, minutes = None, 0.0
+        if witnessed < size:
+            since = L.open_link(self.replica.link(witnessed), self.public_key())[0]["at"]
+            minutes = (datetime.now(timezone.utc) - datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc)).total_seconds() / 60
+        block = self.witness["block"]
+        return {"size": witnessed, "unwitnessed_since": since,
+                "incident": since is not None and minutes >= self.witness["incident"],
+                "blocking": since is not None and block is not None and minutes >= block,
+                "cosigners": {n: {k: v for k, v in seen.get(n, {}).items() if k in ("size", "time", "error")}
+                              for n in names}}
+
+    def witness_check(self) -> dict | None:
+        """The newest checkpoint, as a C2SP note signed by the records key, sent to each witness with a proof from
+        what it last countersigned. Signing stops when a witness proves, by its own countersigned checkpoint, that the
+        replica is behind what the records key signed or another history. Returns {witness: outcome}."""
+        from keyclerk import metrics
+        from keyclerk.store import note as N
+        if self.witness is None or self.replica is None or self.broken:
+            return None
+        origin = self.witness["origin"]
+        snap = self.replica.snapshot()
+        try:
+            size = snap.size()
+            if not size:
+                return None
+            text = N.checkpoint_text(origin, size, snap.root())
+            signed = text + "\n" + N.sign(text, origin, self.key)
+            cache: list = []
+
+            def hashes():
+                if not cache:
+                    cache.append(snap.hashes(0, size))
+                return cache[0]
+            seen = self._witnessed()
+            log_key = (origin, N.LOG, N.raw_public(self.key))
+            out = {c.name: c.submit(origin, log_key, signed, hashes, seen.get(c.name, {}).get("old", 0))
+                   for c in self.witness["cosigners"]}
+        finally:
+            snap.close()
+        with self.lock:
+            seen = self._witnessed()
+            for name, o in out.items():
+                metrics.inc("keyclerk_witness_total", witness=o["result"])
+                was = seen.get(name, {})
+                seen[name] = ({"old": o["size"], "size": o["size"], "time": o["time"]} if o["result"] == "cosigned"
+                              else {**was, "old": min(o["size"], size), "error": o["why"]})
+            tmp = self.state / "witness.json.tmp"
+            tmp.write_text(json.dumps(seen, sort_keys=True), encoding="utf-8", newline="\n")
+            os.replace(tmp, self.state / "witness.json")
+            proven = [(n, o) for n, o in out.items() if o["result"] in ("rolled_back", "forked")]
+            if proven and not self.broken:
+                name, o = proven[0]
+                self.broken = (o["why"] + ". A signer restored from an older backup, or another signer holding the "
+                               "records key, signed it; this one will not sign on. Restore the newest backup of the "
+                               "signer's state, or follow the restore procedure (decision 0019 point 5), after which "
+                               "the witness's owner resets this log there (python -m keyclerk.witness reset)")
+                self._audit({"op": "witness_stop", "result": o["result"], "witness": name, "size": o["size"]})
+        return out
+
+    def start_witness(self) -> threading.Thread:
+        """The witness check after each signed link and at least every every_seconds, in a thread of its own."""
+        def loop():
+            while True:
+                self._witness_due.wait(self.witness["every"])
+                self._witness_due.clear()
+                try:
+                    self.witness_check()
+                except Exception as e:   # noqa: BLE001 - unwitnessed for now: head says so, the next run retries
+                    sys.stderr.write(f"keyclerk.signer: witness check incomplete: {e}\n")
+        t = threading.Thread(target=loop, name="keyclerk-witness", daemon=True)
+        t.start()
+        return t
+
+    def restore_link(self, mark: int, confirmations: list[tuple[str, str]], verify) -> dict:
+        """After a restore whose lost links no follower holds (decision 0019 point 5, operator 2026-11-03): one link
+        with no ops that resumes the numbering above `mark`, the newest revision anyone saw, signed only once the
+        security officer and a root trust owner each proved the restore statement for this realm, mark and head.
+        Never over the socket: run offline with the signer stopped (python -m keyclerk.restore link)."""
+        import secrets
+        from datetime import datetime, timezone
+
+        from keyclerk import restore as R
+        from keyclerk.store import link as L
+        from keyclerk.store import replay
+        with self.lock:
+            store = self._ready()
+            if self.not_ready:
+                raise SignerRefused(self.not_ready)
+            size, head = store.size(), store.head()
+            hexhead = head.hex() if head is not None else L.ZERO
+            problems = R.check_confirmations(replay.records(store), store.realm, mark, hexhead, dict(confirmations),
+                                             verify, datetime.now(timezone.utc))
+            if problems:
+                raise SignerRefused("the high-water mark is not confirmed: " + "; ".join(problems))
+            ordered = sorted(confirmations)
+            proofs = [{"by": by, "proof": hashlib.sha256(token.encode()).hexdigest()} for by, token in ordered]
+            entry = {"change_id": "C-" + secrets.token_hex(6), "action": "restore", "outcome": "applied", "actor": None,
+                     "records": {}}
+            try:
+                body = L.link_body(store.realm, size, hexhead, self.FENCE, _now(), [], entry,
+                                   restore={"mark": int(mark), "confirmations": proofs})
+                side = [("proof_tokens", p["proof"], {"token": token}) for p, (_, token) in zip(proofs, ordered, strict=False)]
+                sealed, h = store.append_checked(body, lambda b: L.seal_body(self.key, b), side=side)
+            except L.StoreRefused as e:
+                raise SignerRefused(str(e)) from None
+            cp = L.seal_checkpoint(self.key, store.realm, store.size(), store.root(), h, self.FENCE, _now())
+            store.add_checkpoint(cp)
+            self._write_mark()
+            self._audit({"op": "restore_link", "mark": int(mark), "by": [p["by"] for p in proofs]})
+            (self.state / "restore.json").unlink(missing_ok=True)   # the numbering resumed above the mark
+            return {"link": sealed, "checkpoint": cp, "hash": h.hex(), "revision": replay.revision(store)}
 
     DUPLICATE_WINDOW = 1000                       # links after a stale base searched for the same change
 
@@ -581,6 +757,10 @@ class Signer:
             store = self._ready()
             if self.not_ready:
                 raise SignerRefused(self.not_ready)
+            if (self.state / "restore.json").exists():
+                raise SignerRefused("this signer was restored from a backup and may not sign at positions it lost "
+                                    "(decision 0019): stop it and take the lost links back from a follower (python -m "
+                                    "keyclerk.restore recover-log), or sign the restore link (restore link)")
             size, head = store.size(), store.head()
             hexhead = head.hex() if head is not None else None
             if not isinstance(base, dict) or base.get("size") != size or base.get("head") != hexhead:
@@ -802,6 +982,37 @@ class Signer:
             self._audit({"op": "link_subject", "anchor": anchor})
             return {"linked": True}
 
+    STATE_CHUNK = 1 << 20
+
+    def _snapshots(self) -> list[int]:
+        d = self.state / "snapshots"
+        return sorted(int(p.name.split(".")[0]) for p in d.glob("*.snapshot.json")) if d.exists() else []
+
+    def snapshot(self) -> dict:
+        """The newest signed snapshot this signer took, for a desk or follower that starts over (issue 28)."""
+        from keyclerk.store import snapshot as S
+        self._readable()
+        sizes = self._snapshots()
+        if not sizes:
+            return {"snapshot": None}
+        d = self.state / "snapshots"
+        return {"snapshot": S.read_sealed(d / f"{sizes[-1]}.snapshot.json"), "size": sizes[-1],
+                "bytes": (d / f"{sizes[-1]}.state.jsonl").stat().st_size}
+
+    def snapshot_state(self, size: int, offset: int, limit: int) -> dict:
+        import base64
+        self._readable()
+        if not (isinstance(size, int) and isinstance(offset, int) and isinstance(limit, int) and offset >= 0
+                and 1 <= limit <= self.STATE_CHUNK):
+            raise SignerRefused(f"snapshot_state: a size, an offset from 0 and a limit of 1 to {self.STATE_CHUNK}")
+        if size not in self._snapshots():
+            raise SignerRefused(f"no snapshot at {size} links (it may have been pruned: ask for the newest again)")
+        with open(self.state / "snapshots" / f"{size}.state.jsonl", "rb") as f:
+            f.seek(offset)
+            chunk = f.read(limit)
+            eof = not f.read(1)
+        return {"chunk": base64.b64encode(chunk).decode("ascii"), "eof": eof}
+
     def checkpoint(self, size: int | None) -> dict:
         store = self._readable()
         with self.lock:
@@ -826,6 +1037,26 @@ class Signer:
         with f.open("a", encoding="utf-8", newline="\n") as h:
             h.write(json.dumps(body, sort_keys=True) + "\n")
         self._audit_prev = body["sha256"]
+
+
+def audit_chain(lines, pub) -> tuple[str | None, str, int]:
+    """Whether whole audit lines verify (every line signed by pub, each naming the one before): (why not or None, the
+    last line's hash, the number of lines). The signer checks its own at start; a backup checks the copy it takes,
+    line by line from the file."""
+    prev, n = "0" * 64, 0
+    for n, line in enumerate(lines, 1):
+        try:
+            e = json.loads(line)
+            body = {k: v for k, v in e.items() if k not in ("sha256", "signature")}
+            sha = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+            if e["prev"] != prev or e["sha256"] != sha:
+                raise ValueError("it does not follow the line before")
+            pub.verify(bytes.fromhex(e["signature"]), sha.encode())
+        except Exception as ex:   # noqa: BLE001 - unreadable, unlinked or unsigned: the chain is broken here
+            return (f"the signer's audit log does not verify at line {n} ({type(ex).__name__}): restore the signer's "
+                    "state from a backup as a whole (decision 0019)"), prev, n
+        prev = sha
+    return None, prev, n
 
 
 def _empty(new: dict) -> dict:
@@ -913,6 +1144,10 @@ def _handler(signer: Signer, token: str | None, role: str = "desk"):
                     out = signer.anchors(req.get("after"), req.get("limit"))
                 elif op == "checkpoint":
                     out = signer.checkpoint(req.get("size"))
+                elif op == "snapshot":                           # issue 28: a desk starts from a snapshot
+                    out = signer.snapshot()
+                elif op == "snapshot_state":
+                    out = signer.snapshot_state(req.get("size"), req.get("offset"), req.get("limit"))
                 elif op == "link_subject":                       # the reconciler, phase 2 (decision 0028)
                     out = signer.link_subject(req.get("anchor"), req.get("sub"))
                 else:
@@ -1030,6 +1265,12 @@ class SignerClient:
     def checkpoint(self, size: int | None = None) -> dict:
         return self._call({"op": "checkpoint", "size": size})
 
+    def snapshot(self) -> dict:
+        return self._call({"op": "snapshot"})
+
+    def snapshot_state(self, size: int, offset: int, limit: int) -> dict:
+        return self._call({"op": "snapshot_state", "size": size, "offset": offset, "limit": limit})
+
     def link_subject(self, anchor: str, sub: str) -> dict:
         return self._call({"op": "link_subject", "anchor": anchor, "sub": sub})
 
@@ -1118,7 +1359,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("approval proofs need --approval-audience and --approval-jwks")
         policy = config.current().get("approvals") or {}
         proofs = approvals.BrokerProofs(a.approval_issuer, a.approval_audience, policy.get("max_age_seconds", 300),
-                                        a.approval_jwks, Path(a.state) / "broker-keys.json", acr=policy.get("acr"))
+                                        a.approval_jwks, Path(a.state) / "broker-keys.json", acr=config.approval_acr())
         proofs.policy = policy
     if not a.listen:
         raise SystemExit("--listen unix:/path or tcp:127.0.0.1:port")
@@ -1129,8 +1370,20 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"keyclerk.signer: {e}") from None
     if signer.broken:
         sys.stderr.write(f"keyclerk.signer: refusing to sign: {signer.broken}\n")
+    if config.acr_finding():                       # at every start (decision 0030 point 5)
+        sys.stderr.write(f"keyclerk.signer: finding: {config.acr_finding()}\n")
+    wcfg = config.current().get("witness")
+    if wcfg:
+        from keyclerk import witness
+        signer.configure_witness(wcfg, [witness.Cosigner(c["url"], c["vkey"]) for c in wcfg["cosigners"]])
+        for name, o in (signer.witness_check() or {}).items():   # before the first signature of this start
+            sys.stderr.write(f"keyclerk.signer: witness {name}: {o['result']}{': ' + o['why'] if 'why' in o else ''}\n")
+        if signer.broken:
+            sys.stderr.write(f"keyclerk.signer: refusing to sign: {signer.broken}\n")
     if signer.replica is not None and not signer.broken:
         signer.start_background(a.full_check_hours * 3600)
+        if signer.witness is not None:
+            signer.start_witness()
     srv = serve(signer, a.listen, token)
     if a.reconciler_listen:
         rtoken = Path(a.reconciler_token).read_text(encoding="utf-8").strip() if a.reconciler_token else None

@@ -1578,6 +1578,10 @@ function entryForm(v, p) {
 const STATE_PILL = { registered: ["registered", "ok"], invited: ["invited, not registered", "warn"],
   "registered-on-site": ["registered at the front office", "ok"], unregistered: ["unregistered", "warn"] };
 function partyCard(v, p) {
+  if (!p.gate) {        // another guest, seen by a guest: the name only (decision 0009)
+    return h("div", { class: "card item" }, h("div", { class: "main" }, h("h3", {}, p.name),
+      h("p", { class: "small muted" }, "another guest")));
+  }
   const states = [p.arrived ? pill("arrived " + new Date(p.arrived).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), "ok") : pill("not arrived", ""),
     p.acknowledged ? pill("acknowledged", "ok") : null, p.confirmed ? pill("with the host", "ok") : null,
     p.suspended ? pill("suspended", "bad") : null, p.departed ? pill("left", "") : null];
