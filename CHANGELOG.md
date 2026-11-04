@@ -3,6 +3,122 @@
 Each release's notes come from its section here. Earlier entries are the releases' own one-line summaries;
 the decision records (docs/decisions) hold the reasoning.
 
+## 0.27.0 (2026-11-04)
+- A restore no longer brings back what was erased: `keyclerk.backup take` writes a signed erasure journal (erased visit
+  ids only) beside each manifest, `keyclerk.backup erasures` refreshes it, and a desk is restored only with a journal
+  at least as new as the backup. `restore resume` and the new `restore leave` (a desk on the change log) erase again
+  what it lists before the desk serves (decision 0028 point 6).
+- A signer restored from a backup signs no change until `restore recover-log` or the restore link has run, so it
+  cannot sign at positions it lost.
+- A backup of a desk on the signed YAML store was refused: its records signature was taken for a key. Fixed.
+- Behind a reverse proxy the public scan budget is kept per client: `api.trusted_proxies` lists the proxy networks
+  (empty by default), and only from a listed proxy does the desk read `api.forwarded_header` (`x-forwarded-for` or
+  `forwarded`), taking the rightmost address that is not a listed proxy (decision 0029 point 7).
+- The configuration is refused when `backup.retention_days` is longer than `store.view_log_keep_days`, so a backup
+  never keeps a look the desk has deleted (decision 0029 point 3).
+- A witness for the change log (decision 0022 point 5, `keyclerk/witness.py`): the signer sends each new checkpoint,
+  as a C2SP signed note, to the witnesses in the new `witness` configuration section, with a consistency proof from
+  what each last countersigned. A signer restored from an older backup, rollback mark included, stops signing when a
+  witness proves by its own countersigned checkpoint that the signer is behind or holds another history; an unsigned
+  answer never stops it. `python -m keyclerk.witness serve` is a small C2SP witness, and any C2SP witness works.
+  An unwitnessed link becomes a readiness incident after `witness.incident_after_minutes`, and
+  `witness.block_after_minutes` can block signing; it is unset by default, so a site cut off from its witness keeps
+  working. New metrics: `keyclerk_witness_total`, `keyclerk_unwitnessed_seconds`.
+- The officer's ceiling judges a lease by its hours rounded up (edge protocol 1.4), at the desk and in the edge's
+  verifier: rounded down, a lease up to 59 minutes longer than `max_lease_hours` passed.
+- The reconciler sees child groups under a managed group: on Keycloak a member of one is under the managed group in
+  every token, yet was not read (review row E5, reproduced on Keycloak 26.8.1). Their members are now removed through
+  the admin API and logged out, the child group itself kept, and each child group is a finding on the run.
+- A guest of a visit sees their own entry in full and only the names of the other guests: not their vehicles,
+  kit, badges or gate times (decision 0009). The host, the organiser, escorts and the front office see the visit whole.
+- The reconciler signs the identity broker's high-water mark with its own key (`--mark-key`). A mark that does not
+  verify, or records older than it, refuse the revision, but memberships the records never required are still removed
+  and the run reports an incident, so a mark written in the broker by hand can no longer stop every removal.
+- A write about something that does not exist gets the same refusal, in the same words and with the same next
+  step, as a write about something that is not the writer's; only the root and the security officer get the plain
+  answer. Authority is checked before an ended membership or a visit's attendees are mentioned.
+- Every preview leaves a line in the activity log (`outcome: preview`, with what a change would have answered);
+  previews are left out of `keyclerk_changes_total`.
+- The view log never loses a look: a full `views.log` rotates to a kept archive (`views-<UTC time>.log`) instead
+  of dropping its oldest lines, and archives are deleted after `store.view_log_keep_days` (default 400).
+- **Upgrading:** `approvals.acr` is required (decision 0030 point 5): a 0.26.x configuration without it is refused
+  at start, saying so. Run `python -m keyclerk.init acr --keycloak URL --realm REALM --config FILE --write` to add
+  the realm's strongest published level once you confirm it, or write `acr: none`, which the desk and the signer
+  report as a finding at every start (docs/install.md, "The sign-in level of an approval").
+- **Upgrading:** the reconciler needs `--mark-key` (docs/install.md, "The reconciler's high-water mark"); run it
+  once with `--adopt-mark` to sign the mark an earlier version left.
+- Backup and restore drill: `python -m keyclerk.backup take` copies a running desk and its signer through SQLite's
+  online backup and verifies the copy (each change log against the records key, the full check, the signer's audit
+  chain). It streams through a private staging directory, leaves out every key and the replicas an earlier resync
+  replaced, and encrypts the copy with age to the recipients the configuration lists (`backup.recipients`, at least
+  two custodians), with a signed manifest. `shipped` records where and when a copy went off-site.
+  `check` and `restore` check the manifest first and refuse a copy that does not match it; a restored desk starts in
+  restore mode. `drill` restores the newest good backup into a scratch directory and reports the recovery time.
+  New `backup` configuration section and metrics `keyclerk_backup_age_seconds`, `keyclerk_backup_drill_failed` and
+  `keyclerk_backup_recovery_seconds`.
+- Restore safety for the signed YAML store: `python -m keyclerk.restore` puts a restored desk in restore mode (no
+  writes, not ready, edges answer 503 and keep their bundle) and resumes it above a high-water mark the security officer
+  and a root trust owner confirm by signature, so no revision number or edge bundle serial is signed twice
+  (docs/install.md, "Restoring a desk from a backup").
+- Signed snapshots of the change log (`kc-snapshot-v1`, `keyclerk/store/snapshot.py`): the signer writes one to
+  `state/snapshots` after each passing background full check when the log has grown, keeping the newest two. A store
+  adopts a snapshot only while empty and only with the links up to it, each checked as an append checks it; the
+  root, head and fence they reach and the state file's hash must be the snapshot's, so a snapshot spares the rebuild,
+  never the history. A follower's resync can start from one, and refuses one that is not the signer's log.
+- Audit events for a SIEM (#29, `keyclerk/siem.py`): the desk's signed activity log as OCSF 1.3.0 JSON. With
+  `siem.reader_token_file`, the management listener answers `GET /audit/events?after=SEQ` to that token only; the
+  cursor is the log's line number, so a reader gets every event once across a restart. `python -m keyclerk.siem
+  forward` sends RFC 5424 syslog over TLS to `siem.syslog`, trusting only its `ca_file`, and resumes from a cursor
+  that moves only after each message is written. Each event carries its line's chain position, signature and
+  records revision; people are pseudonyms and refusals carry reason classes, not text.
+- The change log's signer, restored from an older backup, takes its lost links back from a follower whose chain
+  verifies and starts with the restored one (`python -m keyclerk.restore recover-log`), so it never signs at a
+  position it lost; a follower that forked is refused.
+- The change log has a restore link: when no follower holds the links a restored signer lost, it appends one link
+  with no ops whose `restore` part names the confirmed mark and the proofs of the security officer and a root trust
+  owner, and the numbering resumes at mark + 1 (`python -m keyclerk.restore link`; new log conformance vectors).
+- A desk fetches the signer's snapshot (#28): the signer protocol gains `snapshot` (the newest signed snapshot) and
+  `snapshot_state` (its state file a megabyte at a time), and a follower's resync starts from it when the signer
+  has one, every link before it still checked and the state's hash compared, else from the genesis as before.
+- Privileged roles granted in the broker around KeyClerk are findings (#29): the reconciler reads the realm's
+  role-mapping admin events from a cursor and reports every `realm-management` role and every role named in
+  `reconcile.privileged_roles` mapped to a user or group directly, with who made it. The desk notes each once in
+  its signed activity log, for the security officer's broker view and the SIEM. Report-only: nothing is removed.
+- A SOAR proposes protective changes only (#30): with `soar.protective`, its API client may suspend a person, end a
+  membership or raise a situation level through its registered feed, never grant or approve. Each change is checked
+  and signed like any other, authored by the SOAR's workload; it waits for the security officer, the root or a
+  person on call where policy says so, when it touches a person on call, and past `max_per_hour`, which also
+  records a finding. A feed raise the engine would cap is refused with the reason. The person view lists a person's
+  suspensions.
+- Approvers are reminded, never handed an action (#30): the desk writes `approval_waiting` when it first sees a pending
+  change, `change_expiring` when it has `approvals.remind.expiring_hours` left (24) and `approval_escalated` after
+  `approvals.remind.escalate_after_hours` (72, naming the root and the security officer too), each once, in its signed
+  activity log. Each names the change and its next approvers and carries no link or code that approves.
+- SOAR webhooks (#30, `keyclerk/soar.py`): `python -m keyclerk.soar forward` sends the event types each endpoint in
+  `soar.webhooks` chose as CloudEvents holding the SIEM's OCSF event, signed per Standard Webhooks, at least once and in
+  order per endpoint; a failing endpoint retries from where it stopped and holds no other's queue. Reminders name their
+  approvers as pseudonyms, or as broker ids for an endpoint configured to route them to people. Off unless configured.
+- An edge reports a bastion taking away a lease's assignment before the lease expired, on any bastion: the
+  `lease_ended_early` incident names the lease, and the desk accepts it only for a lease of the edge's last bundle
+  ended before its expiry (edge protocol 1.4, decision 0029 point 8).
+- Edge protocol 1.4 report members, each optional (#31): the bundle carries the records head it was cut from and the
+  edge echoes it, and the desk raises an incident when an edge applied records newer than it holds or a head its
+  change log does not hold; removal confirmations per lease are kept (the first of each); an edge declares what its
+  bastion enforces by itself (`bastion.capabilities`, unknown tokens kept apart, never refused); an evidence entry may
+  name the lease its session ran under. The reference agent (`edge_cli`) echoes the head.
+- Backup hygiene (decision 0019 point 2): `python -m keyclerk.backup escrow challenge` encrypts a fresh value to
+  each recipient that matters, retired ones a kept backup needs included; a custodian opens theirs with the age tool
+  and `escrow answer` records the signed proof. `backup hygiene` reports a key not shown within
+  `backup.escrow_check_days` and a recipient in use past `backup.rotate_after_days`; new gauges
+  `keyclerk_backup_escrow_unproven` and `keyclerk_backup_recipients_due_rotation`.
+- The repository meta for working in public: changelog fragments (`changelog.d/`, `tools/changelog.py`), a
+  public text check on everything posted (`tools/public_text_check.py` and its workflow), ROADMAP.md, CODEOWNERS, a
+  code of conduct, governance, maintainers, support and name-use pages, and a time limit on every CI job.
+- A restore's mark has sources (decision 0019 point 5): `python -m keyclerk.restore status` proposes the newest
+  revision anyone saw from the records heads edges echoed while the desk was in restore mode (edge protocol 1.4)
+  and, with `--witness`, from the witness's countersigned checkpoint, both signatures checked. Two people still
+  confirm the mark.
+
 ## 0.26.3 (2026-10-26)
 - The image's trust store leaves out the emSign roots that certifi 2026.10.19 dropped after the eMudhra intermediate
   key incident (emSign ECC Root CA - G3, emSign Root CA - C1, emSign ECC Root CA - C3), so the desk, the reconciler

@@ -34,3 +34,5 @@ using KeyClerk (adoption, configuration, which plugins it enables) in its own re
 | [0026](0026-the-bundle-long-poll.md) | An edge may wait for its next bundle |
 | [0027](0027-relays-provisional-replacement-and-the-fleet-view.md) | Site relays tighten, a dead edge is replaced provisionally, and KeyClerk supplies the fleet's access facts |
 | [0028](0028-personal-data-erasure-and-retention.md) | Personal data in the log: an internal anchor, erasure that reaches every copy, and retention the deployer sets |
+| [0029](0029-backup-hardening-proxies-and-early-lease-ends.md) | Backup hardening, the client address behind a proxy, and a lease that ends early |
+| [0030](0030-key-rotation-reviews-ha-any-bastion-and-a-parent-iga.md) | Records-key rotation, reminders, console grants, earlier reviews, core HA, any bastion, and a parent IGA |

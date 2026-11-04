@@ -509,7 +509,8 @@
       "enum": [
        "tenant",
        "external",
-       "agent"
+       "agent",
+       "workload"
       ]
      }
     }
@@ -522,7 +523,8 @@
      "entitlements",
      "groups",
      "kind",
-     "person"
+     "person",
+     "suspensions"
     ],
     "additionalProperties": false,
     "properties": {
@@ -538,7 +540,8 @@
       "enum": [
        "tenant",
        "external",
-       "agent"
+       "agent",
+       "workload"
       ]
      },
      "groups": {
@@ -582,6 +585,60 @@
       "type": "array",
       "items": {
        "$ref": "#/components/schemas/Delegation"
+      },
+      "maxItems": 10000
+     },
+     "suspensions": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "suspension_id": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "at": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "by": {
+         "type": "string",
+         "maxLength": 300
+        },
+        "by_name": {
+         "anyOf": [
+          {
+           "type": "string",
+           "maxLength": 300
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "reason": {
+         "anyOf": [
+          {
+           "type": "string",
+           "maxLength": 300
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "lifted": {
+         "anyOf": [
+          {
+           "type": "string",
+           "maxLength": 300
+          },
+          {
+           "type": "null"
+          }
+         ]
+        }
+       }
       },
       "maxItems": 10000
      }
@@ -976,13 +1033,8 @@
       "items": {
        "type": "object",
        "required": [
-        "actions",
-        "arrived",
-        "gate",
         "name",
-        "party",
-        "registered",
-        "role"
+        "party"
        ],
        "additionalProperties": true,
        "properties": {
@@ -2531,6 +2583,7 @@
    "Broker": {
     "type": "object",
     "required": [
+     "console_grants",
      "log_intact",
      "manual_changes",
      "observed",
@@ -2606,6 +2659,34 @@
         "client": {
          "type": "string",
          "maxLength": 300
+        }
+       }
+      },
+      "maxItems": 50
+     },
+     "console_grants": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "at": {
+         "anyOf": [
+          {
+           "type": "string",
+           "maxLength": 300
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "roles": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "maxLength": 300
+         },
+         "maxItems": 20
         }
        }
       },
@@ -5821,7 +5902,7 @@
   },
   "/edge/incident": {
    "post": {
-    "summary": "An incident the edge saw (break-glass used, drift, evidence floor)",
+    "summary": "An incident the edge saw (break-glass used, drift, evidence floor, a lease ended early)",
     "tags": [
      "edge"
     ],

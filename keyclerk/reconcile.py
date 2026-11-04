@@ -288,6 +288,15 @@ class State:
         """Anchor -> the broker's username, for edge leases (Warpgate and the facade know people by it)."""
         self._write("usernames.json", dict(sorted(names.items())))
 
+    def console_cursor(self, at: datetime) -> int:
+        """The newest admin event time read for console grants (ms); a first run looks back a day."""
+        v = self._read("console-grants.json")
+        return int(v["since_ms"]) if isinstance(v, dict) and isinstance(v.get("since_ms"), int) else \
+            int((at - timedelta(days=1)).timestamp() * 1000)
+
+    def save_console_cursor(self, since_ms: int) -> None:
+        self._write("console-grants.json", {"since_ms": since_ms})
+
     def emails(self, emails: dict) -> None:
         """Anchor -> the broker's verified e-mail, for edge leases (an edge gateway such as Warpgate matches an SSO login by it).
         Only verified addresses; the desk puts one only in leases on edges that person holds a lease on."""
@@ -301,6 +310,71 @@ def _history_errors(last: dict | None, new: dict) -> list[str]:
 
 
 # --- one run ------------------------------------------------------------------------------------------------------
+
+MARK_FORMAT = "kc-mark-v1"
+
+
+def _remove_intruders_only(args, state, target, run: dict, problem: str, mark, rev) -> None:
+    """The revision is refused, but memberships the records never required are still taken out of managed groups:
+    otherwise whoever can write the mark could freeze every removal (review 2026-10-26 E4). They are judged against
+    the last desired set the reconciler accepted; with none, only members without an anchor go."""
+    run["incident"] = {"kind": "high-water-mark", "why": problem, "mark": mark, "records_revision": rev}
+    run["alert"] = ("the records revision was refused against the broker's high-water mark; intruders are still removed:"
+                    " see incident")
+    before = state.last_desired()
+    have = target.read_full()
+    want = set(before) if before is not None else {r for r in have if not str(r[1]).startswith("uid:")}
+    plan = {**target.plan(want, have), "add": []}
+    run.update({"observed_before": len(have), "add": [], "remove": plan["remove"],
+                "intrusions_removed": len(plan["remove"]), "findings": plan["findings"] + target.findings})
+    if args.apply and plan["remove"]:
+        state.renew()
+        state.save_intent(plan["remove"])
+        key = hashlib.sha256((run.get("records_sha256", "") + json.dumps(
+            {"add": [], "remove": sorted(map(list, plan["remove"]))})).encode()).hexdigest()
+        res = target.apply(plan, key=key, dry_run=False)
+        run.update({"failed": res.get("failed", []), "missing_people": res.get("missing_people", [])})
+        state.clear_intent()
+UNSIGNED = "the broker's high-water mark is unsigned"
+
+
+def _mark_bytes(realm: str, revision: int) -> bytes:
+    return f"{MARK_FORMAT}|{realm}|{revision}".encode()
+
+
+def mark_key(args):
+    """The reconciler's own key for the high-water mark (review 2026-10-26 E4): a file with an Ed25519 private key,
+    64 hex digits, kept with the reconciler and nowhere else."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    path = getattr(args, "mark_key", None)
+    if not path:
+        return None
+    try:
+        return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(guard.read_bounded(Path(path), 200).strip()))
+    except (OSError, ValueError):
+        raise Refused(f"--mark-key {path}: not a readable Ed25519 private key (64 hex digits)") from None
+
+
+def sign_mark(key, realm: str, revision: int) -> str:
+    return f"{MARK_FORMAT}:{revision}:{key.sign(_mark_bytes(realm, revision)).hex()}"
+
+
+def read_mark(raw, key, realm: str) -> tuple[int | None, str | None]:
+    """(the revision the mark names, the problem with it); (None, None) before the first applied revision."""
+    if raw is None:
+        return None, None
+    parts = str(raw).split(":")
+    if len(parts) == 3 and parts[0] == MARK_FORMAT and parts[1].isdigit() and len(parts[1]) <= 18:
+        revision = int(parts[1])
+        try:
+            key.public_key().verify(bytes.fromhex(parts[2]), _mark_bytes(realm, revision))
+            return revision, None
+        except Exception:   # noqa: BLE001 - malformed or by another key: not this reconciler's mark
+            return revision, "the broker's high-water mark does not verify with this reconciler's key"
+    if str(raw).isdigit() and len(str(raw)) <= 18:
+        return int(raw), UNSIGNED
+    return None, "the broker's high-water mark does not read"
+
 
 def run_once(args, at: datetime | None = None, target: KeycloakTarget | None = None, proofs=None) -> dict:
     at = at or clock.now()
@@ -318,11 +392,18 @@ def run_once(args, at: datetime | None = None, target: KeycloakTarget | None = N
                 if args.reader_client else writer
             target = KeycloakTarget(keycloak=args.keycloak, realm=args.realm, token=writer, admin_token=writer,
                                     reader_token=reader, marker=lim["managed_marker"],
-                                    logout_on_removal=lim.get("logout_on_removal", True))
+                                    logout_on_removal=lim.get("logout_on_removal", True),
+                                    privileged_roles=tuple(lim.get("privileged_roles", ())))
         if getattr(args, "log_replica", None):          # decision 0022 S5: the records are the signed change log
             doc, head, target, log_ids = _from_log(args, target)
             run["records_sha256"] = head                  # the head names this state as the hash names a revision
         _finish_removals(state, target, at)
+        if hasattr(target, "console_grants"):          # decision 0030 point 3: grants made around KeyClerk, report-only
+            found, newest, why = target.console_grants(state.console_cursor(at))
+            run["console_grants"] = found
+            if why:
+                run["console_grants_unread"] = why
+            state.save_console_cursor(newest)
         if log_ids is None:
             if Path(args.records).is_dir():
                 raise Refused("records must be one file: a directory cannot be signed or read atomically")
@@ -359,10 +440,21 @@ def run_once(args, at: datetime | None = None, target: KeycloakTarget | None = N
         # the serial is signed with the records; the newest applied is kept in the broker too, so a lost or wiped
         # state folder cannot let an older signed revision replay
         rev = doc.get("revision")
-        mark = target.high_water() if hasattr(target, "high_water") else None
+        keeps_mark = hasattr(target, "high_water")
+        mkey = mark_key(args) if keeps_mark else None
+        if keeps_mark and mkey is None:
+            raise Refused("the reconciler signs the broker's high-water mark: pass --mark-key, a file with an Ed25519 "
+                          "private key (64 hex digits) that only the reconciler reads")
+        mark, problem = read_mark(target.high_water(), mkey, args.realm) if keeps_mark else (None, None)
+        resign = problem == UNSIGNED
+        if resign and getattr(args, "adopt_mark", False) and isinstance(rev, int) and mark <= rev:
+            problem = None                               # an upgrade: the unsigned mark is signed at this run's apply
         floor = max([x for x in (mark, (state.last_applied() or {}).get("revision")) if isinstance(x, int)], default=None)
-        if floor is not None and not (isinstance(rev, int) and rev >= floor):
-            raise Refused(f"records revision {rev} is older than revision {floor} already applied: never replayed")
+        if not problem and floor is not None and not (isinstance(rev, int) and rev >= floor):
+            problem = f"records revision {rev} is older than revision {floor} already applied: never replayed"
+        if problem:                                      # the revision waits; what the records never required still goes
+            _remove_intruders_only(args, state, target, run, problem, mark, rev)
+            raise Refused(problem)
         run["revision"] = rev
         trusts = load_trusts(args.trust)
         want = desired(doc, at, trusts)
@@ -413,8 +505,8 @@ def run_once(args, at: datetime | None = None, target: KeycloakTarget | None = N
             if not run.get("refused"):
                 state.save_applied(doc)
                 state.save_desired(want)
-                if isinstance(rev, int) and rev != mark and hasattr(target, "set_high_water"):
-                    target.set_high_water(rev)
+                if isinstance(rev, int) and (rev != mark or resign) and hasattr(target, "set_high_water"):
+                    target.set_high_water(sign_mark(mkey, args.realm, rev))
         state.observed(target.read_full() if args.apply else have)
         if log_ids is not None and args.apply:            # phase 2: people seen through their attribute get linked
             run["findings"] = run.get("findings", []) + target.link_subjects(log_ids["signer"], want)   # never on a dry run
@@ -526,6 +618,10 @@ def parse(argv: list[str]):
     ap.add_argument("--interval", type=int, default=60)
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--apply", action="store_true", help="write to the broker; without it a run is a dry run")
+    ap.add_argument("--mark-key", help="the reconciler's Ed25519 private key file (64 hex digits) for the broker's "
+                                       "high-water mark; required with a broker that keeps one")
+    ap.add_argument("--adopt-mark", action="store_true",
+                    help="once, on upgrade: sign an unsigned high-water mark that is not ahead of the records")
     a = ap.parse_args(argv)
     guard.broker_url(a.keycloak)
     guard.name(a.realm, "realm")

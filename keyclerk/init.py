@@ -21,10 +21,19 @@ with --seed (with --signer, the checking signer signs it; with --signing-key, th
         --group all [--owner ANCHOR] [--group-risk CLASS] [--edge-officer ANCHOR] [--home NAME]
 
 TARGET must be empty or absent: init never overwrites. No value it asks for is a secret.
+
+    python -m keyclerk.init acr --keycloak URL --realm REALM [--config keyclerk.yaml --write] [--accept VALUE]
+
+The sign-in level every approval proof must carry (approvals.acr, required from 0.27.0, decision 0030 point 5): init
+reads the levels the realm publishes (acr_values_supported in its OpenID configuration, no credential needed),
+proposes the strongest and asks for confirmation; it never picks one silently. With --write it adds the confirmed
+value to the configuration, which it otherwise leaves untouched; with --no-input it writes only the value --accept
+names, and only when the realm publishes it.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -278,7 +287,113 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
+STRONG = ("passkey", "webauthn", "phishing", "hardware", "mfa", "2fa", "gold", "high", "substantial")
+
+
+def propose_acr(values: list[str]) -> str | None:
+    """The strongest-looking level the realm publishes: a name that says passkey or a second factor, else the highest
+    number (Keycloak's levels of authentication are 0, 1, 2, ...), else the last listed. A proposal only."""
+    vals = [v for v in values if isinstance(v, str) and v.strip()]
+    if not vals:
+        return None
+    for word in STRONG:
+        hit = [v for v in vals if word in v.lower()]
+        if hit:
+            return hit[0]
+    nums = [v for v in vals if v.isdigit()]
+    return max(nums, key=int) if nums else vals[-1]
+
+
+def realm_acr_values(keycloak: str, realm: str, fetch=None) -> list[str]:
+    import json
+    import urllib.parse
+    import urllib.request
+    from keyclerk import guard
+    url = f"{guard.broker_url(keycloak)}/realms/{urllib.parse.quote(guard.name(realm, 'realm'), safe='')}/.well-known/openid-configuration"
+    if fetch is None:
+        with urllib.request.urlopen(url, timeout=15) as r:      # noqa: S310 - the broker the operator named
+            doc = json.loads(r.read(1 << 20))
+    else:
+        doc = fetch(url)
+    vals = doc.get("acr_values_supported") if isinstance(doc, dict) else None
+    return [str(v)[:64] for v in vals] if isinstance(vals, list) else []
+
+
+def write_acr(config_path: Path, value: str) -> None:
+    """approvals.acr added to a configuration that has none; refused when one is there (the operator changes it)."""
+    import yaml
+    raw = Path(config_path).read_text(encoding="utf-8")
+    doc = yaml.safe_load(raw) or {}
+    if (doc.get("approvals") or {}).get("acr"):
+        raise InitRefused(f"{config_path} already names approvals.acr ({doc['approvals']['acr']}): change it by hand")
+    line = f"  acr: {json.dumps(value)}      # proposed by keyclerk init acr and confirmed\n"
+    lines = raw.splitlines(keepends=True)
+    at = next((i for i, x in enumerate(lines) if x.rstrip() == "approvals:"), None)
+    if at is None:
+        out = (raw.rstrip("\n") + "\napprovals:\n  proofs: \"off\"     # as before: without this section no proof "
+               "was required\n" + line)
+    else:
+        out = "".join(lines[:at + 1]) + line + "".join(lines[at + 1:])
+    if (yaml.safe_load(out).get("approvals") or {}).get("acr") != value:
+        raise InitRefused(f"{config_path} has an approvals section init cannot add to: add acr: {value} by hand")
+    tmp = Path(config_path).with_name(Path(config_path).name + ".tmp")
+    tmp.write_text(out, encoding="utf-8", newline="\n")
+    os.replace(tmp, config_path)
+
+
+def acr_main(argv: list[str], ask=None, fetch=None) -> int:
+    ap = argparse.ArgumentParser(prog="python -m keyclerk.init acr",
+                                 description="Propose the sign-in level approvals carry, and write it once confirmed.")
+    ap.add_argument("--keycloak", required=True)
+    ap.add_argument("--realm", required=True)
+    ap.add_argument("--config", help="the configuration to add approvals.acr to, with --write")
+    ap.add_argument("--write", action="store_true")
+    ap.add_argument("--accept", help="the value to write without asking (it must be one the realm publishes)")
+    ap.add_argument("--no-input", action="store_true")
+    a = ap.parse_args(argv)
+    if ask is None and not a.no_input and sys.stdin.isatty():
+        ask = input                                   # the prompt ends in a space below
+    try:
+        vals = realm_acr_values(a.keycloak, a.realm, fetch)
+        proposal = propose_acr(vals)
+        if proposal is None:
+            raise InitRefused(f"realm {a.realm} publishes no acr values, so there is nothing to propose",
+                              ["give the realm a level of authentication bound to a passkey (Authentication, flows, "
+                               "Condition - Level of Authentication) and run this again",
+                               "or write approvals.acr: none, which is a finding at every start"])
+        print(f"realm {a.realm} publishes: {', '.join(vals)}")
+        print(f"proposed approvals.acr: {proposal}")
+        if a.accept is not None:
+            if a.accept not in vals:
+                raise InitRefused(f"{a.accept} is not a level realm {a.realm} publishes", [f"choose one of {', '.join(vals)}"])
+            chosen = a.accept
+        elif ask is not None:
+            got = ask(f"use {proposal}? type it to confirm, or another published value: ").strip()
+            if got not in vals:
+                raise InitRefused("not confirmed: nothing was written", ["run again and type a published value"])
+            chosen = got
+        else:
+            print("not confirmed: pass --accept VALUE, or run in a terminal to confirm")
+            return 1
+        if a.write:
+            if not a.config:
+                raise InitRefused("--write needs --config, the configuration to add it to")
+            write_acr(Path(a.config), chosen)
+            print(f"wrote approvals.acr: {chosen} to {a.config}")
+        else:
+            print(f"add to the configuration:\napprovals:\n  acr: {json.dumps(chosen)}")
+        return 0
+    except InitRefused as e:
+        print(f"keyclerk init acr refused: {e}", file=sys.stderr)
+        for s in e.next_steps:
+            print(f"  next: {s}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["acr"]:
+        return acr_main(argv[1:])
     a = parser().parse_args(argv)
     from keyclerk import config
     try:

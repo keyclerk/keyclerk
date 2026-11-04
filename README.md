@@ -17,7 +17,7 @@
 Access leases for Keycloak. KeyClerk receives people, checks who they are, and hands out keys that end by
 themselves: for employees, contractors, visitors and partners, for applications, privileged roles and doors.
 
-> Status: engine 0.26.3 (2026-10-26). The source is public and released on PyPI (`pip install keyclerk`). It runs on one host for a demo
+> Status: engine 0.27.0 (2026-11-04). The source is public and released on PyPI (`pip install keyclerk`). It runs on one host for a demo
 > and a local test stack; nobody else should run it in production yet. What follows separates what runs today, what exists as a tested library that nothing runs yet,
 > and what is designed only. A claim moves up a column only with the code and a test.
 
@@ -71,6 +71,12 @@ meant to grow: [docs/what-sets-keyclerk-apart.md](docs/what-sets-keyclerk-apart.
   conformance set (`tests/conformance/edge.json`). The bundle key is still a file of its own; moving every granting key into the checking signer is decision 0021,
   not built. Since edge protocol 1.3 a bundle carries no e-mail address: an edge fetches it sealed when it needs it.
 
+- **Backup and restore** (decisions 0019, 0029; from 0.27.0): `python -m keyclerk.backup` takes the desk's and the
+  signer's stores, verifies the copy, and encrypts it with age to the custodians in `backup.recipients`; a signed
+  manifest, a signed erasure journal (so a restore never brings back what was erased) and a signed shipped record sit
+  beside it. A restore checks all of them and puts desk and signer in restore mode, which they leave only above every
+  revision they may have signed. A timed drill restores the newest backup and reports the recovery time as a metric.
+
 ## Tested libraries that nothing runs yet
 
 `keyclerk/apply_engine.py` (the highly available apply engine with leader leases and a reduction journal),
@@ -86,8 +92,8 @@ PACS or OSDP). Each has unit tests; none is wired into the reconciler, the desk 
 - Reviews (event-driven and signed, not campaigns), dormancy, impact diffs in approvals, SoD exceptions, holder
   bounds, outliers, orphan accounts, agents bounded by their person, a witness and leaver proof (decision 0020); joiners,
   movers and leavers from HR (decision 0004).
-- SIEM and SOAR interfaces, identity visibility and Shared Signals (0018 H4 to H6), off-site backup with restore drills
-  and restore safety (0019), every granting key in the checking signer (0021).
+- SIEM and SOAR interfaces, identity visibility and Shared Signals (0018 H4 to H6), signed snapshots and the witness
+  (0019, 0020 G10), every granting key in the checking signer (0021).
 - Many targets per deployment and one writer enforced by credential (decision 0013), persona history (0012), admin
   personas by plane changes 2 to 5 (0011a), invitations and access in hours (0010).
 - For the signed change log (decision 0022, running since 0.26.0): PostgreSQL as a replica, signed snapshots, the
@@ -165,9 +171,9 @@ the desk (`keyclerk.api`). Build from a reviewed commit or a signed tag; the ima
 `requirements.lock`.
 
 ```
-git archive HEAD | podman build -t keyclerk:0.26.3 -   # or a signed release tag: git archive v0.26.3
-podman run --read-only -v ./keyclerk.yaml:/etc/keyclerk/keyclerk.yaml:ro -v ./records.yaml:/etc/keyclerk/records.yaml:ro   -v ./records.yaml.sig:/etc/keyclerk/records.yaml.sig:ro -v ./records.pub:/etc/keyclerk/records.pub:ro   -v ./writer:/run/secrets/writer:ro -v ./reader:/run/secrets/reader:ro -v keyclerk-state:/var/lib/keyclerk keyclerk:0.26.3   keyclerk.reconcile --config /etc/keyclerk/keyclerk.yaml --records /etc/keyclerk/records.yaml   --signing-key /etc/keyclerk/records.pub --keycloak https://id.example --realm example   --secret-file /run/secrets/writer --reader-client keyclerk-reader --reader-secret-file /run/secrets/reader   --state /var/lib/keyclerk --apply
-podman run --read-only -p 127.0.0.1:8090:8090 ... keyclerk:0.26.3 keyclerk.console --host 0.0.0.0   --allowed-host console.example --oidc-public-issuer https://id.example/realms/example   --oidc-redirect https://console.example/callback ...
+git archive HEAD | podman build -t keyclerk:0.27.0 -   # or a signed release tag: git archive v0.27.0
+podman run --read-only -v ./keyclerk.yaml:/etc/keyclerk/keyclerk.yaml:ro -v ./records.yaml:/etc/keyclerk/records.yaml:ro   -v ./records.yaml.sig:/etc/keyclerk/records.yaml.sig:ro -v ./records.pub:/etc/keyclerk/records.pub:ro   -v ./writer:/run/secrets/writer:ro -v ./reader:/run/secrets/reader:ro -v keyclerk-state:/var/lib/keyclerk keyclerk:0.27.0   keyclerk.reconcile --config /etc/keyclerk/keyclerk.yaml --records /etc/keyclerk/records.yaml   --signing-key /etc/keyclerk/records.pub --keycloak https://id.example --realm example   --secret-file /run/secrets/writer --reader-client keyclerk-reader --reader-secret-file /run/secrets/reader   --state /var/lib/keyclerk --apply
+podman run --read-only -p 127.0.0.1:8090:8090 ... keyclerk:0.27.0 keyclerk.console --host 0.0.0.0   --allowed-host console.example --oidc-public-issuer https://id.example/realms/example   --oidc-redirect https://console.example/callback ...
 ```
 
 Without `--apply` a run is a dry run. Records are applied only when they pass every check, carry a valid signature

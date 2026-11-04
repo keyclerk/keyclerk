@@ -27,6 +27,18 @@
    serves. Revisions lost since the snapshot are an incident, with what the witness proves of them; people propose them
    again, nothing rebuilds them automatically. Without a known high-water mark, two people confirm one by signature.
    The witness (governance feature G10, decision 0020) comes before or with backup.
+   Amended 2026-11-03 (maintainer): the two people who confirm a mark without a known one are the security officer
+   and a root trust owner, each signing in at the broker with the nonce of a statement that names the realm, the
+   person, the mark and the restored records. Built in 0.27.0 for the signed YAML store; the change log's signer, the
+   witness and the heads edges echo follow.
+   Built 2026-11-03 (issue 26): points 1, 3 and 4 as `python -m keyclerk.backup` (take, check, restore, drill). The
+   archive is a tar encrypted in the age v1 format (X25519 recipients), so a custodian can decrypt it with the
+   standard age tool. The manifest is signed by a per-host manifest key, not the records key, so a host backs up
+   without holding the records key. `*.key` files are left out and named in the manifest. The metrics are
+   keyclerk_backup_age_seconds, keyclerk_backup_drill_failed and keyclerk_backup_recovery_seconds. Point 2's retention
+   target is configuration (`backup.retention_days`); the shipper prunes. The custodian key rotation check and the
+   escrow check built 2026-11-04 (`backup escrow`, `backup hygiene`, two gauges). The lab drill ran 2026-11-04 (decision 0029 point 9): 26,012 people restored in 40 s, three
+   runs, all passing (docs/testing/realistic-load.md).
 
 ## Consequences
 A disk loss costs at most the snapshot interval, never a forked history or dark edges, and every restore is proven by

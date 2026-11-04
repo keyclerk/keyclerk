@@ -17,7 +17,7 @@ from keyclerk import edge as E
 RELAY_DAYS = 7                 # a relayed ciphertext waits at most this long (a lease credential: until its lease ends)
 RELAY_PER_EDGE_PERSON = 10     # per (edge, person): one edge cannot fill a person's inbox
 EVIDENCE_BATCH = 500
-INCIDENT_KINDS = ("break_glass_used", "drift", "evidence_floor", "bind_without_session", "other")
+INCIDENT_KINDS = ("break_glass_used", "drift", "evidence_floor", "bind_without_session", "lease_ended_early", "other")
 CORE_INCIDENTS = ("officer_not_independent", "attestation_changed", "evidence_fork", "edge_silent", "phoned_unlock",
                   "carried_lease", "attestation_failed")   # raised by the desk
 
@@ -212,6 +212,25 @@ class EdgeStore:
         if not f.exists():
             return []
         return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()[-limit:] if x.strip()]
+
+    def removals_add(self, edge_id: str, removals: list[dict], reported: str) -> int:
+        """Removal confirmations (edge protocol 1.4, the leaver proof): the first confirmation of a lease is kept, a
+        repeat is no change. Returns how many were new."""
+        with self.lock:
+            held = {r["lease_id"] for r in self.removals(edge_id)}
+            fresh = [{**r, "reported": reported} for r in removals if r["lease_id"] not in held]
+            if fresh:
+                d = self._dir(edge_id)
+                d.mkdir(parents=True, exist_ok=True)
+                with (d / "removals.jsonl").open("a", encoding="utf-8") as h:
+                    for r in fresh:
+                        h.write(json.dumps(r, sort_keys=True) + "\n")
+                        held.add(r["lease_id"])
+            return len(fresh)
+
+    def removals(self, edge_id: str) -> list[dict]:
+        f = self._dir(edge_id) / "removals.jsonl"
+        return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines() if x] if f.exists() else []
 
     def evidence_head(self, edge_id: str) -> tuple[int, str]:
         s = self.state(edge_id)

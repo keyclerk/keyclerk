@@ -385,3 +385,6 @@ identity:
   # impact and changes nothing; the engine default is enforce (decision 0011a, accepted 2026-10-23), tested in
   # tests/test_identity.py with a configuration that does not set it
   persona_rule: warn
+approvals:
+  proofs: "off"
+  acr: none                # the test realm has no level; a deployment names one (decision 0030 point 5)

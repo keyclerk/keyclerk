@@ -280,7 +280,7 @@ def test_one_person_cannot_hold_every_worker(server, monkeypatch):
     assert out.count(429) == 3 and out.count(200) == api.PER_PERSON
 
 
-def test_a_preview_answers_like_a_change_but_writes_nothing_and_counts_against_the_limit(server, monkeypatch):
+def test_a_preview_answers_like_a_change_holds_nothing_is_logged_and_counts_against_the_limit(server, monkeypatch):
     from keyclerk import desk as desk_module
     base, tmp = server
     log_before = (tmp / "store" / "log.jsonl").read_bytes()
@@ -289,7 +289,10 @@ def test_a_preview_answers_like_a_change_but_writes_nothing_and_counts_against_t
     r = json.loads(body)
     assert code == 200 and r["outcome"] == "pending" and "second key" in r["reasons"][0]
     validate(r, "Preview")
-    assert (tmp / "store" / "log.jsonl").read_bytes() == log_before and not (tmp / "store" / "pending.json").exists()
+    log_after = (tmp / "store" / "log.jsonl").read_bytes()
+    assert log_after.startswith(log_before) and not (tmp / "store" / "pending.json").exists()
+    added = [json.loads(line) for line in log_after[len(log_before):].splitlines() if line.strip()]
+    assert [(e["outcome"], e["answer"], e["records"]) for e in added] == [("preview", "pending", {})]   # a trace, no records
     code, _, _ = req(base, "POST", "/api/v1/changes/preview", {"action": "add_member"}, cookie="ann")   # no CSRF
     assert code == 403
     monkeypatch.setattr(desk_module, "WRITES_PER_WINDOW", 1)

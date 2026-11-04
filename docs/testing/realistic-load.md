@@ -148,6 +148,18 @@ one transaction. The first version, which judged on whole documents, took 11.9 s
 What is left in a change is the desk's own copy of the records it hands out (a deep copy, as on the YAML store) and the
 signer's judgement in the same process; a streaming working set for the desk's views is an 0.26.x item.
 
+### Backup and restore drill, 2026-11-04 (a lab box: ccx23, 4 dedicated vCPU, 16 GB; Python 3.12; decision 0029)
+
+The same organisation, built with `tools/bench_org.py --keep` into a signer's state (built in 23 s, replica 129 MB),
+then `backup.take` of the signer state and three `backup.drill` runs on it, each a full restore with every check:
+
+| Step | Time | Size or memory |
+|---|---|---|
+| take: online copy, verify (replay, full check, audit chain), encrypt to three recipients | 40.0 s | archive 129.4 MB |
+| drill: check the manifest, decrypt, unpack, verify, compare (three runs) | 39.4 s, 39.5 s, 39.8 s | peak 410 MB |
+
+All three drills passed. The archive is about the size of the replica: SQLite pages go into the tar uncompressed.
+
 ## Limits of this model
 
 - The rates marked as assumptions are defaults to be replaced by a deployment's own numbers: the tool takes them as

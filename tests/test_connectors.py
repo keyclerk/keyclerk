@@ -34,6 +34,7 @@ class Scim:
 
     def __init__(self):
         self.users, self.groups, self.logouts, self.roles = {}, {}, [], {}
+        self.children = {}            # parent group id -> child group ids (Keycloak's hierarchy; SCIM does not show it)
 
     def add_user(self, anchor, dept=None, title=None, active=True, modified="2026-10-20T10:00:00Z"):
         uid = str(uuid.uuid4())
@@ -75,8 +76,11 @@ def serve(data: Scim):
             q = parse_qs(u.query)
             parts = u.path.split("/")
             if "/admin/realms/" in u.path and u.path.endswith("/groups"):          # Keycloak's admin API
+                kids = {c for cs in data.children.values() for c in cs}     # the top level only, as Keycloak 26 answers
                 return self._send(200, [{"id": g["id"], "name": g["displayName"], "attributes": g.get("attributes", {})}
-                                        for g in data.groups.values()])
+                                        for g in data.groups.values() if g["id"] not in kids])
+            if "/admin/realms/" in u.path and u.path.endswith("/children"):
+                return self._send(200, [{"id": c, "name": data.groups[c]["displayName"]} for c in data.children.get(parts[-2], [])])
             if "/admin/realms/" in u.path and u.path.endswith("/role-mappings"):
                 return self._send(200, data.roles.get(parts[-2], {}))
             if "/admin/realms/" in u.path and parts[-2] == "groups":
@@ -116,6 +120,14 @@ def serve(data: Scim):
             if g is not None:
                 g["attributes"] = body.get("attributes", {})
             self._send(204 if g else 404)
+
+        def do_DELETE(self):
+            parts = urlparse(self.path).path.split("/")             # .../users/{uid}/groups/{gid}: the admin API
+            g = data.groups.get(parts[-1]) if parts[-2] == "groups" and parts[-4] == "users" else None
+            if not g:
+                return self._send(404)
+            g["members"] = [m for m in g["members"] if m["value"] != parts[-3]]
+            self._send(204)
 
         def do_PATCH(self):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))

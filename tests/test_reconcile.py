@@ -225,21 +225,34 @@ class MarkedBroker(Broker):
         self.mark = revision
 
 
+def mark_key_file(tmp_path, name="mark.key"):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
+    f = tmp_path / name
+    f.write_text(Ed25519PrivateKey.generate().private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex(),
+                 encoding="utf-8")
+    return str(f)
+
+
+def mark_of(b):
+    return int(b.mark.split(":")[1]) if b.mark else None
+
+
 def test_an_older_signed_revision_never_replays_even_when_the_state_folder_is_lost(tmp_path):
     import shutil
-    b = MarkedBroker()
+    b, key = MarkedBroker(), mark_key_file(tmp_path)
     d3, d2 = doc(), doc()
     d3["revision"], d2["revision"] = 3, 2
-    assert Rc.run_once(args(tmp_path, write(tmp_path, d3, "r3.yaml")), AT, b)["applied"]
-    assert b.mark == 3
+    assert Rc.run_once(args(tmp_path, write(tmp_path, d3, "r3.yaml"), mark_key=key), AT, b)["applied"]
+    assert mark_of(b) == 3 and b.mark.startswith("kc-mark-v1:3:")
     shutil.rmtree(tmp_path / "state")                              # the state folder is lost
-    run = Rc.run_once(args(tmp_path, write(tmp_path, d2, "r2.yaml")), AT, b)
+    run = Rc.run_once(args(tmp_path, write(tmp_path, d2, "r2.yaml"), mark_key=key), AT, b)
     assert not run["applied"] and "older than revision 3" in run["refused"]
     del d3["revision"]
-    run = Rc.run_once(args(tmp_path, write(tmp_path, d3, "r0.yaml")), AT, b)
+    run = Rc.run_once(args(tmp_path, write(tmp_path, d3, "r0.yaml"), mark_key=key), AT, b)
     assert "older than revision 3" in run["refused"]               # once serials are used, none is a downgrade
     d3["revision"] = 4
-    assert Rc.run_once(args(tmp_path, write(tmp_path, d3, "r4.yaml")), AT, b)["applied"] and b.mark == 4
+    assert Rc.run_once(args(tmp_path, write(tmp_path, d3, "r4.yaml"), mark_key=key), AT, b)["applied"] and mark_of(b) == 4
 
 
 def test_the_history_guard_refuses_a_serial_going_back():

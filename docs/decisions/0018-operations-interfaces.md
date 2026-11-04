@@ -1,6 +1,6 @@
 # 0018. Operations interfaces: health, metrics, audit export, SOAR, identity visibility
 
-- Status: accepted (2026-10-24, choices H1 to H6). H1 to H3 built for 0.24.0 (keyclerk/health.py, keyclerk/metrics.py); H4 to H6 not built.
+- Status: accepted (2026-10-24, choices H1 to H6). H1 to H3 built for 0.24.0 (keyclerk/health.py, keyclerk/metrics.py); H4 and H5 built for 0.27.0 (keyclerk/siem.py, keyclerk/soar.py, 2026-11-04); H6 not built.
 - Context: KeyClerk has an event log (CloudEvents 1.0 envelopes holding OCSF events, pseudonymous, read by a cursor)
   and identity visibility designed in 0009 section 6, but no health or metrics endpoint, no forwarder to a SIEM, no
   SOAR path and no feed for other platforms. The runtime stays compact, flexible, federable and distributable,

@@ -121,6 +121,15 @@ def verifier_cases() -> dict:
         ("an outer key_id that is not the pinned key's", {**good, "key_id": "0" * 16}, pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
         ("a module named by a short hash, without a release key", E.build_bundle("edge-a", 7, t0, hz, [lease], [], [], sig,
             {"modules": {"edge": {"sha256": "0" * 63}}, "release": None, "entrypoints": []}, bk), pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
+        # edge protocol 1.4: the records head the bundle was cut from, echoed in the edge's report
+        ("a bundle with its records head (1.4)", E.build_bundle("edge-a", 7, t0, hz, [lease], [], [], sig, pol, bk,
+            records_head={"revision": 12, "size": 40, "head": "ab" * 32}), pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
+        ("a records head without its head (1.4)", E.build_bundle("edge-a", 7, t0, hz, [lease], [], [], sig, pol, bk,
+            records_head={"revision": 12}), pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
+        ("a records head in upper-case hex (1.4)", E.build_bundle("edge-a", 7, t0, hz, [lease], [], [], sig, pol, bk,
+            records_head={"revision": 12, "head": "AB" * 32}), pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
+        ("a null records head (1.4)", reseal(bk, good, lambda d: {**d, "records_head": None}), pins, {"serial": 6},
+         "2026-10-23T13:00:00Z"),
     ]
     import edge_verifier_vectors                        # an edge implementation's vectors, verdicts from this checkout
     cases += edge_verifier_vectors.cases()
@@ -250,6 +259,32 @@ def families() -> dict:
         ("not an address", answer(email="ann")),
         ("an ended notice is not an answer", notice),
     ]
+    hours = [
+        ("exactly eight hours", "2026-10-23T10:00:00Z", "2026-10-23T18:00:00Z"),
+        ("one second over eight hours", "2026-10-23T10:00:00Z", "2026-10-23T18:00:01Z"),
+        ("eight hours and 59 minutes", "2026-10-23T10:00:00Z", "2026-10-23T18:59:00Z"),
+        ("one minute", "2026-10-23T10:00:00Z", "2026-10-23T10:01:00Z"),
+        ("a week", "2026-10-23T10:00:00Z", "2026-10-30T10:00:00Z"),
+    ]
+    base = {"applied_serial": 7, "attestation": {"profile": "basic"}, "drift": []}
+    removal = {"lease_id": "L-example-0001", "system": "bastion-a", "at": "2026-11-04T09:30:00+01:00"}
+    decl = {"product": "warpgate", "version": "0.30.1", "capabilities": ["expires_grants", "records_sessions"],
+            "adapter": ["reads_hardening"]}
+    reports = [
+        ("a report of version 1.3", base),
+        ("the records head echoed", {**base, "records_head": {"revision": 12, "size": 40, "head": "ab" * 32}}),
+        ("a records head of a desk without the log", {**base, "records_head": {"revision": 12, "head": "ab" * 32}}),
+        ("a records head without its revision", {**base, "records_head": {"head": "ab" * 32}}),
+        ("a removal confirmed", {**base, "removals": [removal]}),
+        ("a removal without a zone", {**base, "removals": [{**removal, "at": "2026-11-04T09:30:00"}]}),
+        ("a removal after now", {**base, "removals": [{**removal, "at": "2026-11-04T13:00:00Z"}]}),
+        ("a removal without its bastion", {**base, "removals": [{"lease_id": "L-example-0001", "at": removal["at"]}]}),
+        ("a bastion declared", {**base, "bastion": decl}),
+        ("a token this version does not know", {**base, "bastion": {**decl, "capabilities": ["records_sessions",
+                                                                                           "a_later_token"]}}),
+        ("a bastion without capabilities", {**base, "bastion": {"product": "warpgate", "version": "0.30.1"}}),
+        ("an unknown report member", {**base, "note": "x"}),
+    ]
     raw = {
         "statements": [{"name": n, "sealed": s, "required": r, "format": f} for n, s, r, f in statements],
         "ceilings": [{"name": n, "sealed": s, "edge": e, "officer_key": k, "floor": fl} for n, s, e, k, fl in ceilings],
@@ -258,6 +293,8 @@ def families() -> dict:
         "module_bytes": [{"name": n, "wasm": base64.b64encode(w).decode(), "sha256": h} for n, w, h in modules],
         "requests": [{"name": n, **c} for n, c in requests],
         "email": [{"name": n, "sealed": s, "pins": pins, "lease_id": "L-example-0001", "nonce": nonce} for n, s in email],
+        "ceiling_hours": [{"name": n, "from": a, "until": b} for n, a, b in hours],
+        "reports": [{"name": n, "body": b, "now": "2026-11-04T12:00:00Z"} for n, b in reports],
     }
     notes = {"statements": "unseal_multi(sealed, required, format); ok, and what it says when ok",
              "ceilings": "check_ceiling(edge, officer_key, sealed, floor)", "ended": "verify_ended(sealed, pins, enrolment_key)",
@@ -267,6 +304,12 @@ def families() -> dict:
              "requests": "kc-edge-request-v2 (section 3): message is the bytes the edge signs, base64; ok is the desk's check "
                          "of the header against the request as received (method, path with its query, body), the pinned "
                          "key and the moment now (unix seconds); the query is signed exactly as sent",
+             "reports": "edge protocol 1.4: whether the desk accepts a report body (section 7) at the moment now, and the "
+                        "bastion declaration it keeps: tokens it knows as capabilities and adapter, the rest as "
+                        "unknown, never refused",
+             "ceiling_hours": "edge protocol 1.4: the hours the ceiling policy judges a lease or visit lease by, "
+                              "from its from (or the moment of the cut) to its until: whole hours rounded up, at "
+                              "least one",
              "email": "verify_email(sealed, pins, lease_id, nonce), edge protocol 1.3: ok, and email_sha256, the sha256 hex "
                       "of the address it gives (null when ok with no address, or when refused); nonce is the nonce of the "
                       "edge's own signed request the answer is for"}

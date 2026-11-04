@@ -73,7 +73,8 @@ leases [{lease_id, person, username, email, key_id, public_key, target, role, cl
 visit_leases [{lease_id, person, username, key_id, public_key, ssh_key, targets, role, from, until}],
 ceiling (the officer's sealed kc-edge-ceiling-v2, exactly as sealed) | null,
 policy {modules {edge, ceiling: {sha256}}, release (sealed manifest) | null, entrypoints},
-governed_roles [{displayName, externalId?}] (optional, version 1.1)
+governed_roles [{displayName, externalId?}] (optional, version 1.1),
+records_head {revision, head, size?} (optional, version 1.4)
 ```
 
 The newest bundle is complete: anything the edge holds that is not in it has ended. Verification
@@ -87,7 +88,7 @@ bytes against the hash (`keyclerk.edge.verify_module`) and keeps it by hash: onc
 passes the ceiling policy, and the bundle is younger than `min(horizon of its class, ceiling.max_offline_hours)`. A
 visit lease lives in its own window, passes the ceiling policy too
 (kind visit: its window within `ceiling.max_offline_hours`, and an edge assured by its ceiling and its own
-attestation), and is not revoked. A lost answer: `GET /api/v1/edge/bundle?serial=N` returns the same bundle.
+attestation), and is not revoked. The ceiling policy judges a lease or visit lease by its `hours`: the time from its `from` to its `until` in whole hours rounded up, at least one (version 1.4; earlier versions rounded down, so a lease up to 59 minutes over `max_lease_hours` passed). A lost answer: `GET /api/v1/edge/bundle?serial=N` returns the same bundle.
 
 Waiting for the next bundle (version 1.2, decision 0026): `GET /api/v1/edge/bundle?after=<serial>&wait=<seconds>`, both in
 the signed path. `after` is the serial of the newest bundle the edge accepted, `wait` whole seconds from 1, held to
@@ -127,14 +128,55 @@ modules you load; `edge_cli conformance` does it for the reference.
 
 | Call | Body | Answer |
 |---|---|---|
-| `POST /edge/report` | `{applied_serial, attestation {profile, ...}, drift [text]}` | `{ok}`; the profile is claimed until quotes are verified; a change raises an incident |
+| `POST /edge/report` | `{applied_serial, attestation {profile, ...}, drift [text]}`, and from version 1.4, each optional: `records_head` (the bundle's, echoed), `removals [{lease_id, system, at}]` and `bastion {product, version, capabilities [token], adapter? [token]}` (section 7.1) | `{ok}`; the profile is claimed until quotes are verified; a change raises an incident, as does a change of the declared bastion |
 | `POST /edge/relay` | `{key_id, envelope, purpose: "lease:<id>"}` to a holder of that lease; envelope context equal to purpose | `{relay_id}` |
 | `POST /edge/escrow` | `{system, item_id, envelopes [{key_id, envelope}] x2}` to designated custodians; context `escrow:<system>:<item>` | sealed escrow ack |
 | `GET /edge/escrow/{item}` | | sealed status; forget the value only when `confirmed` |
 | `GET /edge/lease/{lease_id}/email` | | sealed `kc-edge-email-v1` `{edge, lease_id, person, email, nonce, issued}` for a lease live on this edge (version 1.3); check the bundle key, this edge and lease, and that `nonce` is your request's own; use the address to set the credential and keep it nowhere; `email` null when the broker holds no verified address; 404 when the lease is not live here, 429 beyond six a minute per lease |
-| `POST /edge/incident` | `{kind, system, at, detail, log_sha256}`; kinds `break_glass_used`, `drift`, `evidence_floor`, `bind_without_session`, `other` | `{incident_id}` |
-| `POST /edge/evidence` | `{entries [{seq, prev, sha256, size, session, at}]}`, a chain: `prev` is sha256 of the previous entry's canonical bytes | sealed ack up to a sequence; a resend is no change |
+| `POST /edge/incident` | `{kind, system, at, detail, log_sha256}`; kinds `break_glass_used`, `drift`, `evidence_floor`, `bind_without_session`, `lease_ended_early`, `other`. `lease_ended_early` (version 1.4) adds `lease_id` and needs `system` (the bastion) and `at` (a time with its zone, such as `2026-11-04T09:30:00Z`): the bastion took away the lease's assignment before the lease's `until`. Report only a lease of the last bundle; one the desk no longer lists, or an end at or after `until`, is refused | `{incident_id}` |
+| `POST /edge/evidence` | `{entries [{seq, prev, sha256, size, session, at, lease_id?}]}`, a chain: `prev` is sha256 of the previous entry's canonical bytes; `lease_id` (version 1.4) names the lease the session ran under | sealed ack up to a sequence; a resend is no change |
 | `GET /edge/evidence` | | sealed head |
+
+A bastion adapter that knows settings of its bastion which take a lease's assignment away early (a sign-in that
+drops roles the gateway did not grant, say) checks for them when it starts and reports each one it finds as `drift`.
+
+### 7.1 Version 1.4 in the report
+`records_head` is the bundle's member, echoed as the edge applied it: edges are weak witnesses of the records. The
+desk raises an incident when an edge applied records newer than the desk holds, or a head its change log does not
+hold; neither changes what it serves. In the bundle, `records_head` is `{revision, head, size?}`: a whole revision,
+`head` as 64 lower-case hex (the change log's newest link hash with its `size`, or the signed records' sha256 on a
+desk without the log). A verifier refuses a bundle whose `records_head` is present but malformed or null.
+
+`removals` confirm that the bastion's assignment of a lease was removed (`lease_id`, the bastion as `system`, `at` a
+time with its zone, at most 500 per report): the leaver proof. The desk keeps the first confirmation of each lease
+and refuses a time after its own clock.
+
+`bastion` declares what the bastion behind the edge enforces by itself, so the desk knows what still holds while the
+agent is down. `product` and `version` are text of at most 64 characters. `capabilities` are tokens of the bastion:
+
+| Token | The bastion itself |
+|---|---|
+| `expires_grants` | removes a role at its expiry |
+| `time_windows` | enforces a window's start and end |
+| `ends_sessions_on_revoke` | ends live sessions when a role goes |
+| `caps_session_hours` | ends a session at its maximum length |
+| `records_sessions` | records sessions |
+| `injects_credentials` | holds the target's credential; the person never sees it |
+| `matches_subject` | matches a single sign-on login by the identity provider's subject, not by e-mail |
+| `second_key` | asks for a second key or factor at session start, at the bastion (an identity provider's own factor is not declared) |
+
+`adapter` lists what the edge's adapter does beyond the profile below: `reads_hardening` (it reads and restores the
+bastion's hardening, and reports each weakness as `drift`). The desk keeps tokens it does not know apart and never
+refuses them, so a newer agent works with an older desk. A report without `bastion` means unknown, never a bastion
+without capabilities.
+
+### 7.2 The adapter profile
+Every bastion adapter does these through the bastion's own interface; they are not tokens. It manages accounts,
+identities and SSH keys; grants and removes roles with an expiry; lists and removes credentials; lists live sessions
+and closes one. It applies a lease, removes it at its end, and confirms the removal in `removals`. From version 1.4
+it also reports a lease whose assignment the bastion ended early (`lease_ended_early`), and at start each risky
+setting it knows of (one that takes an assignment away early, say) as `drift`. An agent that reports version 1.3 is
+not expected to do the version 1.4 parts.
 
 ## 8. Envelopes to people
 `kc-relay-v1`: `{format, epk, nonce, ct, context}`: X25519 with a fresh key, HKDF-SHA256 (salt `epk || recipient`,

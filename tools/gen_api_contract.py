@@ -79,10 +79,14 @@ S = {
         "approval_sign_in": d({"type": "boolean"}, "true: approving means signing in again at the broker (decision 0006)"),
         "account_url": NULLS(d({"type": "string", "pattern": "^https?://", "maxLength": 2048},
                                "where a person manages how they sign in, such as registering a passkey"))}),
-    "Person": obj({"anchor": ANCHOR, "person": TEXT, "kind": {"enum": ["tenant", "external", "agent"]}}),
-    "PersonAccess": obj({"anchor": ANCHOR, "person": TEXT, "kind": {"enum": ["tenant", "external", "agent"]},
+    "Person": obj({"anchor": ANCHOR, "person": TEXT, "kind": {"enum": ["tenant", "external", "agent", "workload"]}}),
+    "PersonAccess": obj({"anchor": ANCHOR, "person": TEXT, "kind": {"enum": ["tenant", "external", "agent", "workload"]},
                          "groups": arr(obj({"group": ID, "paths": arr(arr(TEXT))})),
-                         "entitlements": arr(ref("Entitlement")), "delegations": arr(ref("Delegation"))}),
+                         "entitlements": arr(ref("Entitlement")), "delegations": arr(ref("Delegation")),
+                         # the person's suspensions, a SOAR's among them (issue 30), lifted or not
+                         "suspensions": arr({"type": "object", "properties": {"suspension_id": TEXT, "at": TEXT,
+                                                                             "by": TEXT, "by_name": NULLS(TEXT),
+                                                                             "reason": NULLS(TEXT), "lifted": NULLS(TEXT)}})}),
     "GraphNode": obj({"id": TEXT, "kind": d({"enum": ["subject", "account", "person", "group", "scope", "place"]},
                                             "subject: the person asked about; account: one of their anchors, with its "
                                             "identity source; scope: a top part of the group tree, drawn as a box"),
@@ -111,7 +115,8 @@ S = {
     "VisitDetail": obj({"visit_id": ID, "at": TIME, "zones": arr(ID, 10),
                         "parties": arr(obj({"party": ID, "role": TEXT, "registered": {"type": "boolean"}, "name": TEXT,
                                             "arrived": NULLS(TIME), "gate": d({"type": "object"}, "what the entry policy says now"),
-                                            "actions": d(arr(TEXT, 4), "what you may record for this party now")}, extra=True), 12),
+                                            "actions": d(arr(TEXT, 4), "what you may record for this party now")},
+                                           required=["party", "name"], extra=True), 12),   # a guest sees others' names only
                         "timeline": d(arr(obj({"at": TIME, "kind": TEXT, "text": TEXT}, extra=True), 500),
                                       "the window, what happened and the timer steps ahead (each re-checks its reason)")},
                        extra=True),
@@ -196,7 +201,11 @@ S = {
     "Broker": obj({"revision": {"type": "integer"}, "observed": {"type": "integer"},
                    "runs": arr({"type": "object"}, 20), "log_intact": {"type": "boolean"},
                    "manual_changes": arr(obj({"at": NULLS(TEXT), "group": TEXT, "member": TEXT, "member_name": NULLS(TEXT),
-                                              "by": TEXT, "client": TEXT}), 50)}),
+                                              "by": TEXT, "client": TEXT}), 50),
+                   # privileged roles granted in the broker around KeyClerk (decision 0030 point 3): for the security
+                   # officer, a viewer and the root; empty for a group manager
+                   "console_grants": arr({"type": "object", "properties": {"at": NULLS(TEXT), "roles": arr(TEXT, 20)}},
+                                         50)}),
 }
 
 DAYS = {"type": "integer", "minimum": 1, "maximum": 3650}
@@ -443,7 +452,7 @@ doc = {
                                   "security": [{"edge": []}], "tags": ["edge"]}},
         "/edge/escrow": {"post": {**op("A break-glass value as two custodian ciphertexts; a signed acknowledgement",
                                          {"type": "object"}, body={"type": "object"}, codes=W), "security": [{"edge": []}], "tags": ["edge"]}},
-        "/edge/incident": {"post": {**op("An incident the edge saw (break-glass used, drift, evidence floor)", {"type": "object"},
+        "/edge/incident": {"post": {**op("An incident the edge saw (break-glass used, drift, evidence floor, a lease ended early)", {"type": "object"},
                                            body={"type": "object"}, codes=W), "security": [{"edge": []}], "tags": ["edge"]}},
         "/edge/evidence": {"get": {**op("The evidence chain's head as the desk holds it (after a lost acknowledgement)",
                                         {"type": "object"}), "security": [{"edge": []}], "tags": ["edge"]},

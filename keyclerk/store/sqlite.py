@@ -341,6 +341,11 @@ class SqliteStore:
         then the link itself; anything raised rolls the transaction back."""
         k = int(self._meta(db, "parts")) if size else L.parts(body)
         L.check_migrate(body, k)
+        if "restore" in body["change"]:
+            from keyclerk.store.replay import revision
+            L.check_restore(body, revision(self))
+            db.execute("INSERT INTO meta (key, value) VALUES ('restore', ?) ON CONFLICT (key) DO UPDATE SET value = "
+                       "excluded.value", (json.dumps([body["seq"], body["change"]["restore"]["mark"]]),))
         self._put_ops(db, size, body["change"]["ops"])
         for kind, key, rec in side:                     # in the link's transaction: with it, or not at all
             db.execute("INSERT INTO side (kind, key, body) VALUES (?, ?, ?) ON CONFLICT (kind, key) "
@@ -369,6 +374,36 @@ class SqliteStore:
                 raise StoreRefused(f"another checkpoint is already kept at {size} links")
             db.execute("INSERT OR IGNORE INTO checkpoints (size, bytes, signature) VALUES (?, ?, ?)",
                        (size, raw, sealed["signature"]))
+        self._write(go)
+
+    def adopt(self, sealed: dict, links, state) -> None:
+        """Start an empty store from a signed snapshot (keyclerk.store.snapshot), in one transaction: the links up to it
+        checked and kept, their ops not applied, the state loaded and its hash checked last; a refusal rolls it all
+        back. Adopted records carry the snapshot's last seq."""
+        from keyclerk.store import snapshot as S
+
+        def go(db):
+            if db.execute("SELECT count(*) FROM links").fetchone()[0] or db.execute("SELECT count(*) FROM records").fetchone()[0]:
+                raise StoreRefused("only an empty store adopts a snapshot")
+            body = S.open_snapshot(sealed, self.pinned, self.realm)
+
+            def keep(seq, s, h, fence):
+                db.execute("INSERT INTO links (seq, hash, fence, bytes, signature) VALUES (?, ?, ?, ?, ?)",
+                           (seq, h, fence, E._raw(s["bytes"]), s["signature"]))
+            frontier = S.chain(links, body, self.pinned, self.realm, keep)
+            last = body["size"] - 1
+            for kind, key, rec in S.records(state, body):
+                db.execute("INSERT INTO records (kind, key, seq, body) VALUES (?, ?, ?, ?)",
+                           (kind, key, last, E.canonical(rec).decode("utf-8")))
+                db.executemany("INSERT INTO refs (kind, field, value, key) VALUES (?, ?, ?, ?)",
+                               [(kind, f, v, key) for f, v in refs_of(kind, rec)])
+            meta = {"frontier": json.dumps([[x, y.hex()] for x, y in frontier]), "fence": str(body["fence"]),
+                    "parts": str(body["parts"]), "migration": body["migration"] or ""}
+            for k, v in meta.items():
+                db.execute("UPDATE meta SET value = ? WHERE key = ?", (v, k))
+            if body["restore"]:
+                db.execute("INSERT INTO meta (key, value) VALUES ('restore', ?) ON CONFLICT (key) DO UPDATE SET value = "
+                           "excluded.value", (json.dumps(body["restore"]),))
         self._write(go)
 
     def side_put(self, kind: str, key: str, record: dict) -> None:
@@ -422,6 +457,11 @@ class SqliteStore:
         with self._lock:
             return self._db.execute(sql, args).fetchall()
 
+    def restore_point(self) -> tuple[int, int] | None:
+        """(seq, mark) of the newest restore link, or None (decision 0019 point 5)."""
+        row = self._q("SELECT value FROM meta WHERE key = 'restore'")
+        return tuple(json.loads(row[0][0])) if row else None
+
     def size(self) -> int:
         return self._q("SELECT count(*) FROM links")[0][0]
 
@@ -454,6 +494,10 @@ class SqliteStore:
                        (start, stop if stop is not None else 2 ** 62))
         for r in rows:
             yield _sealed(r)
+
+    def hashes(self, start: int = 0, stop: int | None = None) -> list[bytes]:
+        return [r[0] for r in self._q("SELECT hash FROM links WHERE seq >= ? AND seq < ? ORDER BY seq",
+                                      (start, stop if stop is not None else 2 ** 62))]
 
     def get(self, kind: str, key: str) -> dict | None:
         check_kind(kind)

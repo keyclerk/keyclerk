@@ -25,6 +25,8 @@ from signed YAML revision n". The YAML-era history is kept aside as a file (step
 2. **Stop the reconciler, then the desk.** The migration takes the desk store's lock and refuses while a desk holds it.
    Leave the signer running.
 3. **Back up** the desk's store folder and the signer's state folder, together. This pair is your way back (below).
+   From 0.27.0, `python -m keyclerk.backup take` with `--desk STORE --signer-state STATE` takes and verifies the pair
+   in one encrypted archive; install.md, "Taking backups and drilling the restore", names the keys and the outbox.
 4. **Migrate**, on the desk's host, into the desk's own folder:
 
    ```

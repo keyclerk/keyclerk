@@ -12,7 +12,7 @@ over the label and the decoded bytes, then parses them (canonical, no floats, no
 kc-change-link-v1 body: {"format", "realm", "seq" (leaf index, 0 is the genesis), "prev" (the link hash of seq-1 in hex,
 64 zeros for the genesis), "fence" (fencing number, never lower than the link before, so a signer that lost its lease
 cannot extend the chain), "at" (UTC time), "change": {"ops": [...], "entry": {...}, "yaml": {...} (the genesis only),
-"migrate": {...} (seq 1 to k only)}}. An op is {"op": "put", "kind", "key", "record"} or {"op": "del", "kind", "key"},
+"migrate": {...} (seq 1 to k only), "restore": {...} (a restore link only)}}. An op is {"op": "put", "kind", "key", "record"} or {"op": "del", "kind", "key"},
 sorted by (kind, key), one per key.
 
 Migration from a signed YAML store (S2; the genesis checks the YAML revision's signature, not only its hash): the
@@ -21,6 +21,13 @@ detached signature by the records key, and how many migrate links follow; links 
 "parts": k} and put ops only. A log whose genesis names no YAML revision has k = 0 and never a migrate link. A store
 refuses every other link until link k, and refuses link k unless the state then equals the signed YAML by meaning
 (keyclerk.store.replay.prove_migration).
+
+A restore link (decision 0019 point 5): a signer restored from an older backup whose lost links no follower holds
+must not sign at the positions it lost; it appends one link with no ops and "restore": {"mark", "confirmations":
+[{"by", "proof"}, {"by", "proof"}]}: the newest revision anyone saw, confirmed by the security officer and a root
+trust owner, each proof the SHA-256 of their broker token (the token in the side table, as approval proofs). The
+revision of the restore link is mark + 1 and each link after it adds one; a mark below the revision the log has
+reached is refused.
 
 kc-checkpoint-v1 body: {"format", "realm", "size" (links in the log), "root" (merkle root, hex), "head" (the link hash
 of seq size-1, hex), "fence", "at"}.
@@ -131,8 +138,9 @@ def _body(body: dict) -> dict:
     if not isinstance(body["at"], str) or not E.TIME.fullmatch(body["at"]):
         raise StoreRefused("at is a UTC time, YYYY-MM-DDTHH:MM:SSZ")
     ch = body["change"]
-    if not isinstance(ch, dict) or not {"ops", "entry"} <= set(ch) <= {"ops", "entry", "yaml", "migrate"}:
-        raise StoreRefused("change has ops and entry (and yaml in the genesis, migrate in a migrate link)")
+    if not isinstance(ch, dict) or not {"ops", "entry"} <= set(ch) <= {"ops", "entry", "yaml", "migrate", "restore"}:
+        raise StoreRefused("change has ops and entry (and yaml in the genesis, migrate in a migrate link, restore in a "
+                           "restore link)")
     if not isinstance(ch["entry"], dict):
         raise StoreRefused("change.entry is an object")
     if "yaml" in ch:
@@ -154,8 +162,27 @@ def _body(body: dict) -> dict:
             raise StoreRefused("migrate is {part, parts}, part = seq, from 1 to parts")
         if any(op["op"] != "put" for op in ch["ops"] if isinstance(op, dict)):
             raise StoreRefused("a migrate link only puts records")
+    if "restore" in ch:
+        r = ch["restore"]
+        if body["seq"] < 1 or ch["ops"] or "yaml" in ch or "migrate" in ch:
+            raise StoreRefused("a restore link follows the genesis and carries no ops")
+        if not isinstance(r, dict) or set(r) != {"mark", "confirmations"} or not _count(r["mark"], 1) \
+                or not isinstance(r["confirmations"], list) or len(r["confirmations"]) != 2 \
+                or any(not isinstance(c, dict) or set(c) != {"by", "proof"} or not isinstance(c["by"], str)
+                       or not 1 <= len(c["by"]) <= 256 or not isinstance(c["proof"], str) or not HEX64.fullmatch(c["proof"])
+                       for c in r["confirmations"]) \
+                or r["confirmations"][0]["by"] == r["confirmations"][1]["by"]:
+            raise StoreRefused("restore is {mark, confirmations}: a whole mark from 1 and two confirmations "
+                               "{by, proof} by two different people, each proof 64 hex characters")
     _ops(ch["ops"])
     return body
+
+
+def check_restore(body: dict, revision_before: int | None) -> None:
+    """A restore link never lowers the revision: its mark is at least the revision the log has reached."""
+    r = body["change"].get("restore")
+    if r is not None and revision_before is not None and r["mark"] < revision_before:
+        raise StoreRefused(f"a restore link's mark {r['mark']} is below revision {revision_before}, which the log reached")
 
 
 def _message(label: str, raw: bytes) -> bytes:
@@ -190,10 +217,10 @@ def _open(sealed, pinned: str, label: str) -> tuple[bytes, dict]:
 # --- links ------------------------------------------------------------------------------------------------------------
 
 def link_body(realm: str, seq: int, prev: str, fence: int, at: str, ops: list[dict], entry: dict,
-              yaml: dict | None = None, migrate: dict | None = None) -> dict:
+              yaml: dict | None = None, migrate: dict | None = None, restore: dict | None = None) -> dict:
     """An unsigned link body, its structure checked: what a signer checks a change as before it signs anything."""
     change = {"ops": sorted(ops, key=lambda o: (o["kind"], o["key"])), "entry": entry, **({"yaml": yaml} if yaml else {}),
-              **({"migrate": migrate} if migrate else {})}
+              **({"migrate": migrate} if migrate else {}), **({"restore": restore} if restore else {})}
     body = _body({"format": LINK_FORMAT, "realm": realm, "seq": seq, "prev": prev, "fence": fence, "at": at,
                   "change": change})
     E.canonical(body)                             # refuses floats and out-of-range integers now, not at signing
@@ -205,8 +232,8 @@ def seal_body(key: Ed25519PrivateKey, body: dict) -> dict:
 
 
 def seal_link(key: Ed25519PrivateKey, realm: str, seq: int, prev: str, fence: int, at: str, ops: list[dict],
-              entry: dict, yaml: dict | None = None, migrate: dict | None = None) -> dict:
-    return seal_body(key, link_body(realm, seq, prev, fence, at, ops, entry, yaml, migrate))
+              entry: dict, yaml: dict | None = None, migrate: dict | None = None, restore: dict | None = None) -> dict:
+    return seal_body(key, link_body(realm, seq, prev, fence, at, ops, entry, yaml, migrate, restore))
 
 
 def open_link(sealed, pinned: str) -> tuple[dict, bytes]:

@@ -91,6 +91,7 @@ class LogStore(DeskFiles):
         if head.get("broken"):
             raise StoreFault(f"the checking signer will not serve its change log: {head['broken']}")
         self.frozen = head.get("frozen")
+        self.witness = head.get("witness")                    # how far the witnesses countersigned (decision 0022 p5)
         seed_doc = records.loads(guard.read_bounded(Path(seed))) if seed else None
         if head.get("migrated") is False:
             if seed_doc is None:
@@ -167,6 +168,7 @@ class LogStore(DeskFiles):
                 if head.get("broken"):
                     raise StoreFault(f"the checking signer will not serve its change log: {head['broken']}")
                 self.frozen = head.get("frozen")
+                self.witness = head.get("witness")
                 self._not_ahead(head)
                 self.follower.catch_up()
                 self._sync_anchors()
@@ -326,6 +328,16 @@ class LogStore(DeskFiles):
     def revision(self) -> int:
         return RP.revision(self.store) or 0
 
+    def records_head(self) -> dict:
+        """The change log's revision, size and newest link hash: what an edge echoes (edge protocol 1.4)."""
+        h = self.store.head()
+        return {"revision": self.revision(), "size": self.store.size(), "head": h.hex() if h else "0" * 64}
+
+    def head_at(self, size: int) -> str | None:
+        """The link hash at size links, or None when the log is shorter."""
+        hs = self.store.hashes(size - 1, size) if size >= 1 else []
+        return hs[0].hex() if hs else None
+
     def state_key(self) -> str:
         h = self.store.head()
         return f"{h.hex() if h else '-'}:{self._gen}"
@@ -355,6 +367,9 @@ class LogStore(DeskFiles):
     # --- what the desk writes ---------------------------------------------------------------------------------------
 
     def commit(self, doc: dict, entry: dict, ops: list[dict] | None = None, tokens: list | None = None) -> dict:
+        from keyclerk import restore
+        if restore.marker(self.path) is not None:
+            raise restore.RestoreMode("the desk is being restored: nothing is written until it resumes")
         """A whole new document: its record changes proposed through the signer as one change, then its visits. ops:
         the change as the desk judged it (S5 T9), re-keyed record by record, instead of a diff of two whole documents;
         tokens the proof tokens it carries."""

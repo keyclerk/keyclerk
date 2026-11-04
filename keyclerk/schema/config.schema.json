@@ -750,6 +750,16 @@
           "maximum": 86400,
           "default": 900,
           "description": "the desk is ready only while the reconciler's last run started at most this long ago (decision 0018)"
+        },
+        "privileged_roles": {
+          "type": "array",
+          "maxItems": 200,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,255}:[^\\s]{1,255}$"
+          },
+          "description": "roles whose grant in the broker outside KeyClerk is a finding, beside every realm-management role (decision 0030 point 3): realm:NAME for a realm role, CLIENT_ID:NAME for a client role. Report-only: KeyClerk never removes them"
         }
       }
     },
@@ -808,6 +818,25 @@
           "type": "string",
           "maxLength": 64,
           "description": "the authentication level every proof must carry (the broker's acr), such as a level bound to a passkey"
+        },
+        "remind": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "action-free reminders for approvers (decision 0030 point 2): lines in the activity log that name a pending change and its next approvers, routed by the deployment (keyclerk.soar webhooks)",
+          "properties": {
+            "expiring_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "description": "change_expiring when a pending change has this long left (24 by default)"
+            },
+            "escalate_after_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "description": "approval_escalated, naming the root and the security officer too, when a change has waited this long (72 by default)"
+            }
+          }
         }
       }
     },
@@ -986,6 +1015,336 @@
             "sqlite"
           ],
           "description": "yaml (the default) or sqlite (the signed change log)"
+        },
+        "view_log_keep_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650,
+          "description": "days a rotated view log (who looked at whose graph or visit) is kept before the desk deletes it; default 400"
+        }
+      }
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "backup hygiene and state (decision 0019): python -m keyclerk.backup takes, checks, restores and drills; the deployment's shipper ships, keeps and prunes",
+      "properties": {
+        "manifests": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "a directory holding the backups' signed manifests and shipped records (where take writes them, or the shipper's local copy); the newest shipped one gives keyclerk_backup_age_seconds"
+        },
+        "recipients": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^age1[02-9ac-hj-np-z]{58}$"
+          },
+          "description": "the age recipients every backup is encrypted to: each custodian's recovery key (at least two) and the drill's test key; a backup is never encrypted to a recipient given anywhere else (decision 0029)"
+        },
+        "manifest_keys": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "description": "the manifest public keys trusted (python -m keyclerk.backup key prints one); a manifest no listed key signed does not count"
+        },
+        "drill_report": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "the restore drill's report file (drill --report); its last line gives keyclerk_backup_drill_failed and the measured recovery time"
+        },
+        "max_age_hours": {
+          "$ref": "#/$defs/hours",
+          "description": "the alert bound on keyclerk_backup_age_seconds: the snapshot interval with a margin; default 26"
+        },
+        "retention_days": {
+          "$ref": "#/$defs/days",
+          "description": "the retention target: how long the shipper keeps each snapshot under object lock. Pruning is the shipper's alone, never the engine's. At most store.view_log_keep_days (default 400), so a backup never keeps a look longer than the desk does (decision 0029 point 3)"
+        },
+        "escrow_check_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 730,
+          "description": "how long a recipient's escrow proof counts (python -m keyclerk.backup escrow); 90 by default"
+        },
+        "rotate_after_days": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 3650,
+          "description": "how long a recipient is used before hygiene asks for its rotation; 365 by default"
+        }
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "the desk's HTTP front (decision 0029 point 7)",
+      "properties": {
+        "trusted_proxies": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 64
+          },
+          "description": "networks of the reverse proxies in front of the desk (CIDR, such as 10.0.0.0/24 or 2001:db8::/64); empty by default. Only from a listed proxy does the desk read the forwarding header, and it takes the rightmost address that is not a listed proxy, so the public scan budget is kept per client"
+        },
+        "forwarded_header": {
+          "enum": [
+            "x-forwarded-for",
+            "forwarded"
+          ],
+          "description": "the one header the listed proxies set: x-forwarded-for (the default) or forwarded (RFC 7239). Only one is read, so a client cannot add the other"
+        }
+      }
+    },
+    "witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "cosigners"
+      ],
+      "description": "the witnesses that countersign the change log's checkpoints (c2sp.org/tlog-witness, decision 0022 point 5): another machine and owner, so a signer restored from an older backup stops instead of signing a second history. Absent: no witness",
+      "properties": {
+        "origin": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._~:/-]*$",
+          "description": "the log's origin: the checkpoint's first line and the records key's name in the note, unique to this realm's log, as a schema-less URL (keyclerk.example.org/realm); never starting kc-, the prefix of KeyClerk's own signed formats"
+        },
+        "cosigners": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url",
+              "vkey"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "pattern": "^https?://",
+                "maxLength": 1024,
+                "description": "the witness's submission prefix (POST url/add-checkpoint)"
+              },
+              "vkey": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 400,
+                "description": "the witness's cosigner key, name+keyid+base64 (Ed25519, type 0x04)"
+              }
+            }
+          }
+        },
+        "quorum": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "description": "how many witnesses must hold a checkpoint for it to count as witnessed; 1 by default. Any one witness's proof of a rollback or fork stops signing"
+        },
+        "every_seconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 86400,
+          "description": "the longest wait between checks; one also runs after each signed link (300 by default)"
+        },
+        "incident_after_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10080,
+          "description": "a link unwitnessed this long is an incident on the desk's readiness and keyclerk_unwitnessed_seconds (30 by default)"
+        },
+        "block_after_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10080,
+          "description": "when set, the signer refuses to sign after a link stays unwitnessed this long; unset by default, so a cut-off site keeps working (DDIL) and the incident says so"
+        }
+      }
+    },
+    "siem": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "audit events for a SIEM as OCSF JSON (decision 0018 H4, keyclerk.siem): a pull API on the management listener and syslog over TLS, each off unless configured",
+      "properties": {
+        "site": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]{0,62}$",
+          "description": "the site in event ids and person pseudonyms (keyclerk by default)"
+        },
+        "reader_token_file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "a file holding the SIEM reader's bearer token (32 characters or more, its own, never the management token): turns on GET /audit/events on the management listener"
+        },
+        "syslog": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "host",
+            "ca_file"
+          ],
+          "description": "syslog over TLS (RFC 5424 over RFC 5425) for python -m keyclerk.siem forward",
+          "properties": {
+            "host": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "description": "6514 by default (RFC 5425)"
+            },
+            "ca_file": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "the CA that signed the receiver's certificate: the only one trusted, no system store"
+            },
+            "server_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253,
+              "description": "the name the receiver's certificate carries, when not host"
+            },
+            "cursor_file": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "where the forwarder keeps the last seq sent (by default siem-syslog.cursor in the store's directory)"
+            }
+          }
+        }
+      }
+    },
+    "soar": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "SOAR interfaces (decision 0018 H5, keyclerk.soar): signed webhooks of chosen events, off unless configured",
+      "properties": {
+        "webhooks": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url",
+              "secret_file",
+              "events"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "maxLength": 1024,
+                "pattern": "^(https://|http://(127\\.0\\.0\\.1|localhost)[:/])",
+                "description": "the endpoint; https, or plain http to the same host only"
+              },
+              "secret_file": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "description": "the endpoint's Standard Webhooks secret (whsec_ and base64, or 24 bytes or more)"
+              },
+              "events": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "keyclerk.approval.waiting.v1",
+                    "keyclerk.change.expiring.v1",
+                    "keyclerk.approval.escalated.v1",
+                    "keyclerk.edge.incident.v1",
+                    "keyclerk.console.grant.v1",
+                    "keyclerk.change.applied.v1",
+                    "keyclerk.change.refused.v1",
+                    "keyclerk.change.pending.v1",
+                    "keyclerk.change.withdrawn.v1",
+                    "keyclerk.change.expired.v1",
+                    "keyclerk.change.recovered.v1",
+                    "keyclerk.activity.other.v1"
+                  ]
+                }
+              },
+              "identities": {
+                "enum": [
+                  "pseudonyms",
+                  "anchors"
+                ],
+                "description": "how reminders name their approvers: pseudonyms (the default) or the broker's ids, for an endpoint that routes reminders to people"
+              },
+              "cursor_file": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              }
+            }
+          }
+        },
+        "protective": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "client",
+            "workload"
+          ],
+          "description": "a SOAR's protective proposals (decision 0018 H5): its API client may only suspend a person, end a membership or raise a situation level, never grant; off unless configured",
+          "properties": {
+            "client": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "the SOAR's API client (the azp of its access token), also listed in --api-client"
+            },
+            "workload": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "the records workload the SOAR acts as: the author of its changes"
+            },
+            "feed": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$",
+              "description": "the situation feed it raises levels through, registered in the records' situation_feeds"
+            },
+            "apply_at_once": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "suspend_person",
+                  "end_membership",
+                  "raise_situation"
+                ]
+              },
+              "description": "the actions that apply at once when the engine allows them (all three by default); the others wait for the security officer, the root or a person on call"
+            },
+            "max_per_hour": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "description": "the SOAR's changes per hour before each waits for a person and an incident is raised (10 by default)"
+            }
+          }
         }
       }
     }
