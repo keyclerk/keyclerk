@@ -232,6 +232,25 @@ def tls_context(ca_file: str) -> ssl.SSLContext:
     return ctx
 
 
+def close_cleanly(s) -> None:
+    """Ends the TLS session with close_notify, then reads until the receiver closes. A socket closed with unread data
+    (TLS 1.3 sends session tickets after the handshake) makes the kernel reset the connection, and the receiver drops
+    what it had not read yet: events the cursor has already passed, lost for good."""
+    if not isinstance(s, ssl.SSLSocket):
+        return     # a plain or stand-in connection has no session to end
+    try:
+        raw = s.unwrap()
+    except (OSError, ssl.SSLError, ValueError):
+        return     # the receiver closed first or the session is gone: nothing left to drain
+    try:
+        raw.shutdown(socket.SHUT_WR)
+        raw.settimeout(10)
+        while raw.recv(65536):
+            pass
+    except OSError:
+        pass
+
+
 def forward(feed: Feed, cfg: dict, once: bool = False, connect=None) -> int:
     """Sends the events after the cursor, each written and flushed before the cursor moves past it. Returns the seq
     reached. once: drain what is there and return; otherwise poll, reconnecting with a growing pause."""
@@ -256,6 +275,7 @@ def forward(feed: Feed, cfg: dict, once: bool = False, connect=None) -> int:
                         write_cursor(cursor_file, seq)
                     if not events:
                         if once:
+                            close_cleanly(s)
                             return seq
                         time.sleep(2)
         except (OSError, ssl.SSLError) as e:
