@@ -130,3 +130,17 @@ def test_an_evidence_entry_may_name_the_lease_its_session_ran_under(edge_server)
 
 def test_incident_kinds_an_edge_sends_are_unchanged():
     assert "records_head_ahead" not in ES.INCIDENT_KINDS                  # raised by the desk, never sent by an edge
+
+
+def test_a_standing_drift_is_one_incident_and_the_cap_never_fails_a_report(edge_server):
+    """Found by the interim soak: every report carrying the same drift raised an incident, and past the edge's cap of
+    60 an hour the cap's refusal answered the report 500, so the edge resent it for ever (the report was stored)."""
+    base, desk = edge_server
+    _bundle_with_ceiling(base)
+    for _ in range(70):                                   # an hour of reports with the same drift
+        assert _report(base, drift=["lease L-1 names no username: not applied"])[0] == 200
+    assert _kinds(desk).count("drift") == 1
+    for i in range(70):                                   # a drift that changes every time: past the cap, still 200
+        code, out = _report(base, drift=[f"lease L-{i} names no username: not applied"])
+        assert code == 200, out
+    assert _kinds(desk).count("drift") == ES.EdgeStore.INCIDENTS_PER_HOUR

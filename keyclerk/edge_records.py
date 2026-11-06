@@ -77,13 +77,18 @@ def edge_errors(doc: dict, e: dict) -> list[str]:
         terrs = tpm_errors(eid, tpm)
         errs += terrs
     errs += unlock_key_errors(eid, e.get("unlock_key"))
-    st = E.officer_statement(eid, o, e["officer_key"],
-                             [E.node(e["enrolment_key"], e.get("unlock_key"), E.tpm_commitment(tpm) if tpm and not terrs else None)])
+    if e.get("site_key") and e["site_key"] in (e["enrolment_key"], e["officer_key"],
+                                               (e.get("node2") or {}).get("enrolment_key")):
+        errs.append(f"{eid}: the site key is a key of its own, never a node's or the officer's (decision 0027)")
+    nodes, nerrs = _nodes(eid, e, tpm if not terrs else None)
+    errs += nerrs
+    st = E.officer_statement(eid, o, e["officer_key"], nodes)
     errs += statement_errors(eid, e.get("statement"), st)
     if any(r.get("id") == eid and _ts(r["at"]) < t0 for r in doc.get("admin_revocations", [])):
         errs.append(f"{eid}: that edge id was ended before; an ended edge id is never used again: "
                     "enrol the machine under a new id")
-    if sum(1 for x in doc.get("edges", []) if x["enrolment_key"] == e["enrolment_key"]) > 1:
+    mine = node_keys(e)
+    if any(k in node_keys(x) for x in doc.get("edges", []) if x is not e for k in mine) or len(set(mine)) != len(mine):
         errs.append(f"{eid}: an enrolment key serves one edge")
     cust = e.get("custodians") or []
     if cust and (len({D.person_rec(doc, c) and D.person_rec(doc, c)["person"] for c in cust}) < 2
@@ -187,8 +192,35 @@ def current(doc: dict, e: dict, at: datetime) -> dict:
     if not rots:
         return e
     r = rots[-1]
-    return {**e, "enrolment_key": r["enrolment_key"], "officer": r["officer"], "officer_key": r["officer_key"],
-            "unlock_key": r.get("unlock_key")}       # the rotation statement states the node whole (0014d)
+    out = {**e, "enrolment_key": r["enrolment_key"], "officer": r["officer"], "officer_key": r["officer_key"],
+           "unlock_key": r.get("unlock_key")}       # the rotation statement states the nodes whole (0014d)
+    out.pop("node2", None)
+    if r.get("node2"):
+        out["node2"] = r["node2"]
+    return out
+
+
+def node_keys(e: dict) -> list[str]:
+    """The enrolment keys of an edge's nodes: one, or two for a high-availability edge (decision 0031)."""
+    return [e["enrolment_key"]] + ([e["node2"]["enrolment_key"]] if e.get("node2") else [])
+
+
+def _nodes(rid: str, rec: dict, tpm: dict | None) -> tuple[list[dict], list[str]]:
+    """The nodes the officer's statement must state, and what is wrong with the second one."""
+    from keyclerk import edge as E
+    nodes = [E.node(rec["enrolment_key"], rec.get("unlock_key"), E.tpm_commitment(tpm) if tpm and not tpm_errors(rid, tpm) else None)]
+    n2, errs = rec.get("node2"), []
+    if n2:
+        if not HEX64.fullmatch(str(n2.get("enrolment_key"))):
+            errs.append(f"{rid}: the second node's enrolment key is an Ed25519 public key in hex")
+        if n2.get("enrolment_key") in (rec.get("enrolment_key"), rec.get("officer_key")):
+            errs.append(f"{rid}: each node has its own enrolment key, and neither is the officer's")
+        errs += unlock_key_errors(rid, n2.get("unlock_key"))
+        t2 = n2.get("tpm")
+        if t2 is not None:
+            errs += tpm_errors(rid, t2)
+        nodes.append(E.node(n2["enrolment_key"], n2.get("unlock_key"), E.tpm_commitment(t2) if t2 and not tpm_errors(rid, t2) else None))
+    return nodes, errs
 
 
 def _new_keys_errors(doc: dict, rid: str, r: dict) -> list[str]:
@@ -221,9 +253,9 @@ def rotation_errors(doc: dict, r: dict) -> list[str]:
     errs += _new_keys_errors(doc, rid, r)                 # the enrolment's own invariants hold for a rotation too
     tpm = e.get("tpm")
     errs += unlock_key_errors(rid, r.get("unlock_key"))
-    st = E.officer_statement(r["edge"], r["officer"], r["officer_key"],
-                             [E.node(r["enrolment_key"], r.get("unlock_key"),
-                                     E.tpm_commitment(tpm) if tpm and not tpm_errors(rid, tpm) else None)], purpose="rotation")
+    nodes, nerrs = _nodes(rid, r, tpm)
+    errs += nerrs
+    st = E.officer_statement(r["edge"], r["officer"], r["officer_key"], nodes, purpose="rotation")
     errs += statement_errors(rid, r.get("statement"), st)
     errs += [x.replace(e["edge_id"] + ":", rid + ":") for x in officer_errors(doc, {**e, "officer": r["officer"]}, t0)]
     return errs

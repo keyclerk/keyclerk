@@ -69,6 +69,23 @@ def body(root: Path = ROOT) -> str:
     return "".join(f.read_text(encoding="utf-8").rstrip("\n") + "\n" for f in sorted(fragments(root), key=_order))
 
 
+def contract_changed(root: Path) -> bool:
+    """Whether what a deployer must supply changed since the last release tag: the generated deployer guide
+    (docs/deployer-contract.md) differs from the tag's, or the tag has none. A repository without a deployer guide (the
+    edge protocol's) has no contract to change."""
+    import subprocess
+    now = root / "docs" / "deployer-contract.md"
+    if not now.exists():
+        return False
+    tag = subprocess.run(["git", "-C", str(root), "describe", "--tags", "--abbrev=0"],  # noqa: S603,S607
+                         capture_output=True, text=True)
+    if tag.returncode != 0:
+        return False                                  # no release yet: nothing to upgrade from
+    at_tag = f"{tag.stdout.strip()}:docs/deployer-contract.md"
+    old = subprocess.run(["git", "-C", str(root), "show", at_tag], capture_output=True, text=True)  # noqa: S603,S607
+    return old.returncode != 0 or old.stdout != now.read_text(encoding="utf-8")
+
+
 def release(root: Path, version: str, date: str) -> str:
     if not VERSION.match(version):
         raise SystemExit(f"{version!r} is not X.Y.Z")
@@ -78,6 +95,9 @@ def release(root: Path, version: str, date: str) -> str:
     frags = fragments(root)
     if not frags:
         raise SystemExit("no fragments in changelog.d/: a release without notes fails at the tag")
+    if contract_changed(root) and "**Upgrading:**" not in body(root):
+        raise SystemExit("what a deployer must supply changed since the last release (docs/deployer-contract.md): "
+                         "add a fragment with an **Upgrading:** line naming each new flag, file or setting")
     path = root / "CHANGELOG.md"
     text = path.read_text(encoding="utf-8")
     if re.search(rf"^## {re.escape(version)} ", text, re.M):

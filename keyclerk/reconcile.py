@@ -115,6 +115,9 @@ def _check_records(doc: dict, log_backed: bool = False) -> list[str]:
     if doc.get("edges") or doc.get("person_keys") or doc.get("edge_visit_leases") or doc.get("edge_rotations"):
         from keyclerk import edge_records
         errs += edge_records.check(doc)
+    if doc.get("ha") is not None:                  # decision 0031: HA as signed realm configuration
+        from keyclerk import ha
+        errs += ha.check(doc)
     return errs
 
 

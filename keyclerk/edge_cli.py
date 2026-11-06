@@ -47,7 +47,7 @@ import argparse
 import json
 import sys
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from keyclerk import edge as E
@@ -111,9 +111,21 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--tpm", nargs="*", default=[],
                    help="JSON files with each node's tpm record (decision 0016), in node order: their commitments are signed")
     s.add_argument("--purpose", default="enrolment", choices=E.STATEMENT_PURPOSES)
-    s = sub.add_parser("cosign")
+    s = sub.add_parser("cosign", help="add this key's signature to a statement, relay certificate or site statement")
     s.add_argument("file")
     s.add_argument("--key", required=True)
+    s = sub.add_parser("relay-cert", help="decision 0027: the document the officer signs to certify a relay key")
+    s.add_argument("--officer-key", required=True, help="the officer's public key, hex")
+    s.add_argument("--relay-key", required=True, help="the relay's public key, hex")
+    s.add_argument("--edges", nargs="+", required=True)
+    s.add_argument("--operations", nargs="+", required=True, help="revoke_lease end_lease cut_sessions suspend_edge "
+                   "rollback_release hold_release")
+    s.add_argument("--serial", type=int, required=True)
+    s.add_argument("--days", type=int, default=31, help="at most 31")
+    s = sub.add_parser("site-statement", help="decision 0027: what the site key and a node sign (provisional or promotion)")
+    s.add_argument("--purpose", required=True, choices=("provisional", "promotion"))
+    for k in ("--edge", "--site-key", "--node-key", "--reason"):
+        s.add_argument(k, required=True)
     s = sub.add_parser("seal")
     s.add_argument("file")
     s.add_argument("--key", required=True)
@@ -196,8 +208,11 @@ def main(argv: list[str] | None = None) -> int:
                  for i, k in enumerate(a.enrolment_key)]
         _out(E.officer_statement(a.edge, a.officer, a.officer_key, nodes, a.purpose))
     elif a.cmd == "cosign":
+        from keyclerk import edge_relay as ER
         obj = json.loads(Path(a.file).read_text(encoding="utf-8"))
-        signed = E.cosign(_key(a.key), obj)
+        doc = E._parse(E._raw(obj["bytes"])) if "bytes" in obj else obj
+        fmt = doc.get("format") if doc.get("format") in (ER.RELAY_FORMAT, ER.SITE_FORMAT) else E.OFFICER_FORMAT
+        signed = E.cosign(_key(a.key), obj, fmt)
         print(json.dumps(_show(signed), indent=1, sort_keys=True), file=sys.stderr)
         _out(signed)
     elif a.cmd == "seal":
@@ -209,6 +224,17 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "quote-nonce":
         from keyclerk import attest
         print(attest.quote_nonce(a.edge, a.seconds, a.nonce).hex())
+    elif a.cmd == "relay-cert":
+        from keyclerk import edge_relay as ER
+        if not 1 <= a.days <= ER.MAX_DAYS:
+            print(f"--days: 1 to {ER.MAX_DAYS}", file=sys.stderr)
+            return 2
+        now = datetime.now(timezone.utc)
+        _out(ER.relay_certificate(a.officer_key, a.relay_key, a.edges, a.operations, a.serial, now,
+                                  now + timedelta(days=a.days)))
+    elif a.cmd == "site-statement":
+        from keyclerk import edge_relay as ER
+        _out(ER.site_statement(a.purpose, a.edge, a.site_key, a.node_key, datetime.now(timezone.utc), a.reason))
     elif a.cmd == "ceiling":
         _out({"format": E.CEILING_FORMAT, "edge": a.edge, "serial": a.serial, "persons": a.persons, "roles": a.roles,
               "targets": a.targets, "classes": a.classes, "max_lease_hours": a.max_lease_hours,

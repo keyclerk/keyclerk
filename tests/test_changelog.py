@@ -79,3 +79,23 @@ def test_release_notes_extraction_matches_the_release_workflow(tmp_path):
         if on:
             lines.append(line)
     assert [line for line in lines if line.strip()] == ["- Added."]
+
+
+
+def test_a_release_whose_deployer_contract_changed_needs_an_upgrading_line(tmp_path, monkeypatch):
+    """the edge implementation's 0.27.0 upgrade took three attempts: each new requirement surfaced as its own refusal at start.
+    A release that changes what a deployer must supply now says so under Upgrading, or it is refused."""
+    root = _repo(tmp_path, {"1-a.added.md": "- A new thing.\n"})
+    monkeypatch.setattr(changelog, "contract_changed", lambda root: True)
+    with pytest.raises(SystemExit, match="Upgrading"):
+        changelog.release(root, "9.9.9", "2026-11-05")
+    (root / "changelog.d" / "1-b.changed.md").write_text("- **Upgrading:** the signer needs `--new`.\n",
+                                                         encoding="utf-8")
+    assert "**Upgrading:**" in changelog.release(root, "9.9.9", "2026-11-05")
+
+
+def test_a_repository_without_a_deployer_guide_releases_without_an_upgrading_line(tmp_path):
+    """The edge protocol's repository shares this tool and has no deployer guide: nothing a deployer supplies changed."""
+    root = _repo(tmp_path, {"1-a.added.md": "- A new thing.\n"})
+    assert not changelog.contract_changed(root)
+    assert "A new thing" in changelog.release(root, "9.9.9", "2026-11-06")

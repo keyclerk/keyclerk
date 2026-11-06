@@ -5,3 +5,7 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# TLC writes counterexample traces beside the spec
+docs/specs/*_TTrace_*.tla
+docs/specs/*_TTrace_*.bin

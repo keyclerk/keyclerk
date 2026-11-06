@@ -3,6 +3,113 @@
 Each release's notes come from its section here. Earlier entries are the releases' own one-line summaries;
 the decision records (docs/decisions) hold the reasoning.
 
+## 0.28.0 (2026-11-06)
+- At least once an hour an edge records a new anchor for its trusted time, the later of the wall clock and the
+  anchor plus the boot clock since (edge protocol 1.5, section 1): a boot clock frozen while the wall clock is honest
+  loses nothing, a wall clock set back while the boot clock runs gains nothing. `keyclerk.edge.ratchet` is the
+  reference; the conformance family `ratchet` holds the freeze, thaw and set-back case and the sub-skew one.
+- The edge policy judges a lease's or visit lease's start on the earlier reading (`now_start`, edge protocol 1.5) and
+  its end on the trusted time, so a wall clock set forward cannot open a lease early; a bundle never re-anchors an edge
+  after a reboot (only the desk's time answer does), and its reductions are stored at once (found by the platform
+  model's adversarial review). Three new admit cases in the conformance set; the edge module changes.
+- `keyclerk.edge.start_time` gives that earlier reading from a start anchor set only by verified time, never by the
+  ratchet, so a wall clock set forward stays refused across wakes; conformance family `start_time` (5 cases).
+- Edge protocol 1.5 states the edge's trusted time (section 1): the wall clock, or the wall clock at the last verified
+  bundle plus the boot clock since it when that is more than 5 minutes later, and nothing live after a reboot until a
+  fresh bundle verifies. Version 1.4 said only "the later of the clock and the newest signed time", which a clock held
+  still defeats while an edge is cut off (decision 0032 point 35, adversarial review T1). the edge implementation's
+  agent already does this; `keyclerk.edge.trusted_time` is the reference and the conformance family `trusted_time` holds
+  seven cases.
+- `python -m keyclerk.init check` checks a planned deployment before anything starts: the configuration whole, and for
+  each service (signer, desk, reconciler, witness) its settings and, given its planned command line, every missing
+  flag, missing file and rule between flags, all at once. docs/deployer-contract.md, generated from the new
+  `keyclerk/contract.py`, says what each service needs; a test keeps it in step with each service's command line, and
+  a release whose contract changed must carry an Upgrading line. The install guide gains the recipe for a Keycloak
+  realm without a level-of-authentication flow (name the passkey level before setting clients' default level).
+- **Upgrading:** nothing new is required to start the services in 0.28.0; run `python -m keyclerk.init check` with
+  each service's command line to see that, and to catch anything 0.27.0 already required (`approvals.acr`, the
+  reconciler's `--mark-key`).
+- The officer's tools for relays and the site key (decision 0027): `edge_cli relay-cert` writes the certificate an
+  officer signs for a relay key (edges, operations, a serial, at most 31 days), and `edge_cli site-statement` the
+  statement the site key and a node sign for a provisional replacement or a promotion; `edge_cli cosign` signs each
+  under its own format, so neither passes for an officer statement or for the other purpose.
+- Relays and the site key, the reference formats (decision 0027, `keyclerk/edge_relay.py`): the officer certifies a
+  relay key for a list of edges and operations, for at most 31 days (`kc-edge-relay-v1`); the relay seals tightenings
+  (`kc-edge-tighten-v1`) bound to that certificate, to the parent bundle serial and to a counter that only rises; an
+  edge applies one only when every operation narrows its state (revoke or end a lease earlier, cut sessions, suspend,
+  roll back to a release above its floor, hold). The site key and a node sign `kc-edge-site-v1` statements for one
+  purpose each: a provisional replacement, or a promotion.
+- A node of a high-availability edge reports how it became active (edge protocol 1.5, decision 0031): the desk
+  keeps the active node, raises an incident when it changes, and verifies a break-glass promotion against the
+  edge's site key (`edges[].site_key`), an incident in itself.
+- A desk follows an HA change link (HA off, a break-glass, another commit witness) at the next position even though
+  no commit witness countersigned it, then follows under the configuration it sets; before, a desk holding HA on stopped
+  at such a link. A break-glass is noted once as a finding in the desk's activity log, for the officer's view and the
+  SIEM export (decision 0031 point 10).
+- The commit witness (decision 0031, `keyclerk/commit_witness.py`, `python -m keyclerk.witness serve --commit`): for a
+  realm in HA mode, the one witness whose compare-and-swap is the commit point. A commit carries the links it adds;
+  each is checked as an append is, the root is recomputed over every link it holds, and only then is the checkpoint
+  countersigned, so of two racing signers one wins. It serves the committed links to a standby, cuts an unanswered
+  tail after a crash, and is re-seeded from checked links (`reseed`), never from nothing. The `ha` head record names
+  it in the signed log.
+- Two signer nodes in practice (decision 0031): `--ha-node`, `--commit-witness` and `--ha-hold` start a signer as a
+  standby with its HA loop. Only the active node serves the log, and only the links the commit witness took; an
+  active node deposes itself when it sees another node's commit, and steps down when it cannot reach the commit
+  witness for its hold time. The desk's `--signer` takes the nodes' addresses, comma separated, and moves to the next
+  one on a standby or a lost connection. `python -m keyclerk.commit_witness seed` exports a stopped signer's log as
+  the commit witness's seed. The install guide's "Two signer nodes" section lays it out.
+- In HA mode a desk checks the commit witness's countersignature itself (decision 0031 point 6): the active signer
+  node serves the countersigned checkpoint with its head and each answer, and the desk adopts links only up to the size
+  it covers, both signatures checked and the root compared. A node that serves links it never committed, a checkpoint
+  only the records key signed, or an answer without the countersignature moves no desk; the desk reads on and says why.
+- In HA mode only the active signer node sends detection witnesses a checkpoint, and only at the committed size
+  (decision 0031 point 8): a standby, or a node deposed by another's commit, sends nothing, so no detection witness can
+  hold a head a takeover drops and halt the new active node.
+- Switching HA on, off, to other nodes or to another commit witness in an existing realm, and break-glass when the
+  commit witness is lost (decision 0031 points 3 and 10): `python -m keyclerk.ha nonce|sign`, offline with the signer
+  nodes stopped. The security officer and a root trust owner each confirm the change by signing in with its statement,
+  which names the change and the head it is made on. A planned change is signed only on the commit witness's committed
+  head; a break-glass only while the commit witness is stopped, and it names the one node that signs on. The change
+  log's link format refuses any other link that touches the `ha` record, so a desk's change never can.
+- The signer in HA mode (decision 0031): `Signer.configure_ha(node, client)` makes it one node of an HA core. It
+  starts as a standby and signs only while active; it answers a change only once the commit witness took it, and
+  names itself in the link's entry (`node`). A standby follows the committed links and takes over, with a signed
+  takeover link, when the committed head has stood still for its hold time. An active node that lost the race is
+  deposed: it drops what was never committed, rebuilds its replica from the committed links and becomes a standby.
+  A change whose answer was lost is committed and answered when it is asked again. An empty commit witness is an
+  outage, never a log of size 0: it is seeded from the log with `reseed`.
+- A high-availability edge is two nodes to the desk (decision 0031): an edge's record may state a second node
+  (`node2`: its own enrolment key, unlock key and TPM, in the officer's statement beside the first), either node's key
+  signs its requests, and the desk keeps each node's last pull and report apart; the edges view lists the nodes. A
+  one-node edge is unchanged.
+- Edge protocol 1.5: `GET /api/v1/edge/time` answers an edge's signed request with the desk's time
+  (`kc-edge-time-v1`, sealed by the bundle key, echoing the request's nonce). After a reboot an edge re-anchors its
+  trusted time on that answer, if it arrived within 30 seconds on its boot clock, and only then is a bundle live
+  again, so a bundle held back and delivered with the clock set back cannot keep a lease alive (decision 0032, second
+  adversarial review M1). `keyclerk.edge.verify_time` is the reference; the conformance family `time` holds six cases.
+- A desk on the change log refused every edge enrolment ("escrow custodians are at least two different people", "the
+  edge's officer is a person of the organisation"): judging a change on what it reaches, the working set loaded only
+  the people named in a hand-kept list of person fields, which had none of the edge kinds' fields. It now also loads
+  every person a record names by its kind's anchor paths (the list the 0028 re-keying uses), so an edge's officer and
+  custodians, a visit lease's person and a place's steward are judged with their records. Found by the soak harness;
+  `tests/test_edges_log_backed.py` holds it.
+- An edge reporting a standing drift raised a new incident at every report, and past its cap of 60 incidents an hour
+  the cap's refusal answered the report 500, though the report was already stored, so the edge sent it again and
+  again. A drift incident is raised only when the drift changes, and an incident over the cap is dropped (counted in
+  `keyclerk_edge_incidents_dropped_total`), never the report. Found by the interim soak.
+- Two signer nodes in HA mode handed the active role back and forth at every hold time when nothing changed: a standby
+  takes over when the committed head stands still, and an idle active moved nothing. The active now beats: at most
+  every third of its hold time it commits its checkpoint again with no links, and the commit witness countersigns it
+  at a later time; a standby counts that as the head moving (decision 0031 point 7, amended). Beats add no link. Found
+  by the first soak, on a shared lab host.
+- A signer in HA mode read the commit witness's answers with the C2SP witness's cap of one note (about 68 KB), so a
+  page of a larger realm's committed links was cut mid-string and the change failed with a JSON error. The commit
+  witness's answers are now read up to `MAX_COMMIT`, and any witness answer over its cap is refused, never cut and
+  parsed. Found by the soak harness on a slower box.
+- An active signer node whose own commit answer was lost (the witness took the change, the answer did not arrive)
+  marked itself deposed, so for a whole hold time nobody beat and a takeover added a link. It now sees that the
+  committed links are its own and stays active. A beat that gets no answer is not retried at every tick.
+
 ## 0.27.0 (2026-11-04)
 - A restore no longer brings back what was erased: `keyclerk.backup take` writes a signed erasure journal (erased visit
   ids only) beside each manifest, `keyclerk.backup erasures` refreshes it, and a desk is restored only with a journal

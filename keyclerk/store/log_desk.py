@@ -170,13 +170,31 @@ class LogStore(DeskFiles):
                 self.frozen = head.get("frozen")
                 self.witness = head.get("witness")
                 self._not_ahead(head)
+                before = self.store.size()
                 self.follower.catch_up()
                 self._sync_anchors()
+                self._note_break_glass(before)
             except Exception as e:
                 self.follow_failure = f"{type(e).__name__}: {str(e)[:200]}"
                 raise
             self.follow_failure = None
             self._merged = None
+
+    def _note_break_glass(self, since: int) -> None:
+        """A break-glass the desk just adopted (decision 0031 point 10) is an incident: one finding line in the
+        activity log per such link, which the officer's view and the SIEM export carry."""
+        noted = {x.get("link") for x in self.log(500) if x.get("action") == "ha_break_glass"}
+        for seq in range(since, self.store.size()):
+            if seq in noted:
+                continue
+            body, _ = L.open_link(self.store.link(seq), self._signer.public_key())
+            ha = body["change"].get("ha")
+            if ha and ha.get("mode") == "break_glass":
+                self.note({"change_id": body["change"]["entry"].get("change_id"), "action": "ha_break_glass",
+                           "actor": None, "outcome": "finding", "link": seq, "records": {},
+                           "reasons": [f"the core signs on without its commit witness from link {seq}, on node "
+                                       f"{ha.get('node')} (decision 0031 point 10): an incident; HA comes back with a "
+                                       "commit witness seeded from that node's log"]})
 
     def follow_breaks(self) -> int:
         """Times this desk could not follow the signer: resyncs after a link it refused, and a failed refresh."""

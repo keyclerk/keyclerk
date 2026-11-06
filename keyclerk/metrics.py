@@ -39,6 +39,8 @@ SPEC: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "keyclerk_edge_pulls_total": ("counter", "Bundle pulls by edges by result (served, refused).", ("result",)),
     "keyclerk_edge_incidents_total": ("counter", "Edge incidents by kind. Alert: attestation_failed, any.",
                                       ("kind",)),
+    "keyclerk_edge_incidents_dropped_total": ("counter", "Edge incidents a report raised over the edge's cap of 60 an "
+                                              "hour: dropped, the report kept. Alert: any, repeatedly.", ("kind",)),
     "keyclerk_edges_silent": ("gauge", "Edges that stopped pulling past pull_max_hours. Alert: any.", ()),
     "keyclerk_log_breaks": ("gauge", "Breaks in the change log's hash chain or signatures, and times the desk could not "
                             "follow the checking signer. Alert: any.", ()),

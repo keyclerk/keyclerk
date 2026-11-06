@@ -390,10 +390,52 @@ def acr_main(argv: list[str], ask=None, fetch=None) -> int:
         return 1
 
 
+def check_main(argv: list[str]) -> int:
+    """python -m keyclerk.init check --config FILE --for signer,desk,reconciler,witness [--SERVICE-args "..."]
+
+    The preflight (the deployer contract, keyclerk/contract.py): every problem a planned deployment has, at once,
+    before any service starts. The configuration is validated whole; for each service named, its configuration keys,
+    and, given its planned command line in --SERVICE-args, its required flags, the files they name and the rules
+    between them. Exit 0 when nothing is missing, 1 otherwise."""
+    import shlex
+
+    from keyclerk import config, contract as K
+    ap = argparse.ArgumentParser(prog="python -m keyclerk.init check", description=check_main.__doc__.splitlines()[0])
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--for", dest="services", required=True, help="services, comma separated: "
+                    + ", ".join(s.name for s in K.SERVICES))
+    for s in K.SERVICES:
+        ap.add_argument(f"--{s.name}-args", help=f"the {s.name}'s planned command line (without {' '.join(s.command)})")
+    a = ap.parse_args(argv)
+    names = [x.strip() for x in a.services.split(",") if x.strip()]
+    problems = [f"no such service {n}: one of {', '.join(K.BY_NAME)}" for n in names if n not in K.BY_NAME]
+    cfg = None
+    try:
+        from keyclerk import guard
+        cfg = guard.load_yaml(Path(a.config))
+        problems += [f"configuration: {e}" for e in config.validate(cfg if isinstance(cfg, dict) else {})]
+    except (OSError, ValueError) as e:
+        problems.append(f"configuration {a.config}: {e}")
+    for n in names:
+        if n in K.BY_NAME:
+            raw = getattr(a, f"{n}_args")
+            for x in K.check(n, shlex.split(raw) if raw is not None else None, cfg if isinstance(cfg, dict) else None):
+                key = x.rsplit("the configuration needs ", 1)[-1] if "the configuration needs " in x else None
+                if key is None or not any(key in q for q in problems if q.startswith("configuration")):
+                    problems.append(x)                   # a key the configuration check named already: once
+    for x in problems:
+        print(x)
+    if not problems:
+        print(f"nothing missing for {', '.join(names)}")
+    return 1 if problems else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["acr"]:
         return acr_main(argv[1:])
+    if argv[:1] == ["check"]:
+        return check_main(argv[1:])
     a = parser().parse_args(argv)
     from keyclerk import config
     try:

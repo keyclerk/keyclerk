@@ -5,7 +5,7 @@
   "keyclerk/edge/visit_window",
   "keyclerk/edge/attestation"
  ],
- "source_sha256": "3da4f15829fdc9863ab3b0021b4f0dc8308ee1896dd5dc55e3e5c09bd2352230",
- "wasm_sha256": "59606fcf1f44cefa6911003039587adb24dde2e99c014c336a8842e6f108f077",
+ "source_sha256": "eb36919c6fea0726e286db389ba928abffde47b977a649375de962df6064132f",
+ "wasm_sha256": "415e5980546c8794506b196b9601686906f051a51fd62b4a7c2d847c13a555a5",
  "opa": "1.21.0"
 }

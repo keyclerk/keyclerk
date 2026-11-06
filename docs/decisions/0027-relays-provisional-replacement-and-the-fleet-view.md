@@ -88,3 +88,5 @@
   certifies every relay directly, subtrees as lists, short expiries; withholding bounded by the horizon; a provisional
   replacement only after a silence period, one per edge id, both frozen if the original returns; the site key needs a
   PIN or presence and labels each use.
+- 2026-11-05 The officer's side built: edge_cli relay-cert and site-statement, cosign under each format; the relay itself is
+  the edge implementation's.

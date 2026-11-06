@@ -29,6 +29,12 @@ CASES = [
     ("edge", "admit", "past the privileged horizon a lease no longer admits", {**ADMIT, "now": 9000, "issued": 1500, "visit_leases": []}),
     ("edge", "admit", "a visit lease admits in its own window", {**ADMIT, "now": 200000, "issued": 1500}),
     ("edge", "admit", "a revoked lease never admits", {**ADMIT, "now": 2000, "issued": 1500, "visit_leases": [], "revoked": ["L-1"]}),
+    ("edge", "admit", "a start is judged on the earlier reading: a wall clock set forward opens nothing early (1.5)",
+     {**ADMIT, "now": 1200, "now_start": 900, "issued": 1100, "visit_leases": []}),
+    ("edge", "admit", "a visit lease's start is judged on the earlier reading too (1.5)",
+     {**ADMIT, "leases": [], "now": 1200, "now_start": 900, "issued": 1100}),
+    ("edge", "admit", "with the earlier reading past the start, the lease admits (1.5)",
+     {**ADMIT, "now": 1200, "now_start": 1100, "issued": 1100, "visit_leases": []}),
     ("edge", "admit", "another person is not admitted", {**ADMIT, "person": "idp:0000-x", "now": 2000, "issued": 1500}),
     ("edge", "admit", "another target is not admitted", {**ADMIT, "target": "db", "now": 2000, "issued": 1500}),
     ("edge", "visit_window", "inside policy and ceiling", {"hours": 48, "max_offline_hours": 72}),
@@ -259,12 +265,63 @@ def families() -> dict:
         ("not an address", answer(email="ann")),
         ("an ended notice is not an answer", notice),
     ]
+    def clock(edge="edge-a", n=nonce, key=bk):
+        return E.time_answer(key, edge, n, t)
+    times = [
+        ("the desk's time for this request, on time", clock(), 2),
+        ("held back past the wait on the boot clock", clock(), 31),
+        ("an answer for another edge", clock(edge="edge-b"), 2),
+        ("an answer to another request (replayed)", clock(n="b3RoZXItcmVxdWVzdC1ub25jZQ"), 2),
+        ("signed by another key", clock(key=other), 2),
+        ("an e-mail answer is not a time answer", answer(), 2),
+    ]
     hours = [
         ("exactly eight hours", "2026-10-23T10:00:00Z", "2026-10-23T18:00:00Z"),
         ("one second over eight hours", "2026-10-23T10:00:00Z", "2026-10-23T18:00:01Z"),
         ("eight hours and 59 minutes", "2026-10-23T10:00:00Z", "2026-10-23T18:59:00Z"),
         ("one minute", "2026-10-23T10:00:00Z", "2026-10-23T10:01:00Z"),
         ("a week", "2026-10-23T10:00:00Z", "2026-10-30T10:00:00Z"),
+    ]
+    verified = "2026-11-05T10:00:00Z"            # the last verified bundle: wall clock then, boot clock then 1000 s
+    clocks = [
+        ("honest clocks, an hour on", "2026-11-05T11:00:00Z", verified, 1000, 4600, True),
+        ("the wall clock set back an hour: the boot clock wins", "2026-11-05T10:00:00Z", verified, 1000, 4600, True),
+        ("the wall clock held at the last bundle for a day", "2026-11-05T10:00:00Z", verified, 1000, 87400, True),
+        ("the wall clock set forward a day: it stands, leases end early", "2026-11-06T11:00:00Z", verified, 1000, 4600,
+         True),
+        ("within the skew: the wall clock stands", "2026-11-05T10:56:00Z", verified, 1000, 4600, True),
+        ("rebooted since the last bundle: nothing is live", "2026-11-05T11:00:00Z", verified, 1000, 30, False),
+        ("no verified bundle in this boot", "2026-11-05T11:00:00Z", None, None, 30, True),
+    ]
+    def wake(h, wall, boot):                         # a wake h hours after the anchor: its wall clock and boot clock
+        return {"wall": wall, "boot": boot}
+    day = 86400
+    ratchets = [
+        ("honest clocks, hourly wakes for a day", verified, 1000,
+         [wake(i, f"2026-11-05T{10 + i:02d}:00:00Z", 1000 + 3600 * i) for i in range(1, 6)],
+         {"wall": "2026-11-05T16:00:00Z", "boot": 1000 + 3600 * 6}),
+        ("the boot clock frozen a day while the wall stays honest, then thawed, then the wall set back a day", verified,
+         1000, [wake(0, "2026-11-05T16:00:00Z", 1000), wake(0, "2026-11-05T22:00:00Z", 1000),
+                wake(0, "2026-11-06T10:00:00Z", 1000), wake(0, "2026-11-06T11:00:00Z", 1000 + 3600)],
+         {"wall": "2026-11-05T12:00:00Z", "boot": 1000 + 7200}),
+        ("the wall set back 4 minutes before every hourly wake: no lag accumulates", verified, 1000,
+         [wake(i, f"2026-11-05T{9 + i:02d}:56:00Z", 1000 + 3600 * i) for i in range(1, 6)],
+         {"wall": "2026-11-05T15:56:00Z", "boot": 1000 + 3600 * 6}),
+        ("both clocks held back together: beyond what the edge can see (the stated limit)", verified, 1000,
+         [wake(0, "2026-11-05T10:00:00Z", 1000), wake(0, "2026-11-05T10:00:00Z", 1000)],
+         {"wall": "2026-11-05T10:00:00Z", "boot": 1000 + 0 * day}),
+    ]
+    starts = [                                     # (name, wall, signed_at, boot_at_signed, boot, same_boot)
+        ("honest clocks: the earlier reading is the wall clock", "2026-11-05T12:00:00Z", "2026-11-05T10:00:00Z", 1000,
+         1000 + 7200, True),
+        ("the wall set forward a day: the start anchor plus the boot clock holds the start back", "2026-11-06T12:00:00Z",
+         "2026-11-05T10:00:00Z", 1000, 1000 + 7200, True),
+        ("the wall set forward and hourly wakes since: the ratchet raised its anchor, the start anchor did not",
+         "2026-11-06T17:00:00Z", "2026-11-05T10:00:00Z", 1000, 1000 + 3600 * 7, True),
+        ("the boot clock frozen: the start is delayed, never opened early", "2026-11-05T22:00:00Z",
+         "2026-11-05T10:00:00Z", 1000, 1000, True),
+        ("after a reboot, before verified time: nothing starts", "2026-11-05T12:00:00Z", "2026-11-05T10:00:00Z", 1000,
+         50, False),
     ]
     base = {"applied_serial": 7, "attestation": {"profile": "basic"}, "drift": []}
     removal = {"lease_id": "L-example-0001", "system": "bastion-a", "at": "2026-11-04T09:30:00+01:00"}
@@ -284,6 +341,44 @@ def families() -> dict:
                                                                                            "a_later_token"]}}),
         ("a bastion without capabilities", {**base, "bastion": {"product": "warpgate", "version": "0.30.1"}}),
         ("an unknown report member", {**base, "note": "x"}),
+        ("a node active by the witness (1.5)", {**base, "activation": {"by": "witness", "at": "2026-11-04T09:00:00Z"}}),
+        ("a break-glass activation without its statement (1.5)",
+         {**base, "activation": {"by": "break_glass", "at": "2026-11-04T09:00:00Z"}}),
+        ("a node active on its own timer (1.5)", {**base, "activation": {"by": "timer", "at": "2026-11-04T09:00:00Z"}}),
+    ]
+    from datetime import timedelta
+    from keyclerk import edge_relay as R
+    ofk, rlk, other = _key(7), _key(8), _key(9)
+    t0 = datetime(2026, 11, 5, 11, 0, tzinfo=timezone.utc)
+
+    def cert(edges=("edge-a",), ops=R.OPERATIONS, key=ofk, days=7):
+        return E.cosign(key, R.relay_certificate(E.public_hex(key), E.public_hex(rlk), list(edges), list(ops), 1, t0,
+                                                 t0 + timedelta(days=days)), R.RELAY_FORMAT)
+    c = cert()
+
+    def tighten(ops, counter=1, parent=12, cert_=c, key=rlk):
+        return E.seal(key, R.tightening(cert_, "edge-a", parent, counter, ops, t0 + timedelta(hours=1)), R.TIGHTEN_FORMAT)
+    rpins = {"edge": "edge-a", "officer_key": E.public_hex(ofk)}
+    rstate = {"serial": 12, "newest": "2026-11-05T11:30:00Z", "relay_counters": {}}
+    applied = {"leases": [{"lease_id": "L-example-0001", "until": "2026-11-05T18:00:00Z"}], "visit_leases": []}
+    revoke = [{"op": "revoke_lease", "lease_id": "L-example-0001"}]
+    relays = [
+        ("a certified relay revokes a lease", c, tighten(revoke), rstate),
+        ("ends a lease earlier", c, tighten([{"op": "end_lease", "lease_id": "L-example-0001",
+                                              "until": "2026-11-05T13:00:00Z"}]), rstate),
+        ("ends a lease later: refused", c, tighten([{"op": "end_lease", "lease_id": "L-example-0001",
+                                                    "until": "2026-11-06T00:00:00Z"}]), rstate),
+        ("a lease the edge does not hold", c, tighten([{"op": "revoke_lease", "lease_id": "L-example-0009"}]), rstate),
+        ("an operation the certificate does not allow", cert(ops=["revoke_lease"]),
+         tighten([{"op": "suspend_edge"}], cert_=cert(ops=["revoke_lease"])), rstate),
+        ("a certificate not from the pinned officer", cert(key=other), tighten(revoke, cert_=cert(key=other)), rstate),
+        ("signed by another key than the certified relay key", c, tighten(revoke, key=other), rstate),
+        ("made against an older parent bundle", c, tighten(revoke, parent=11), rstate),
+        ("a counter at or below the last one", c, tighten(revoke, counter=2),
+         {**rstate, "relay_counters": {E.public_hex(rlk): 2}}),
+        ("a certificate expired in trusted time", cert(days=1), tighten(revoke, cert_=cert(days=1)),
+         {**rstate, "newest": "2026-11-07T00:00:00Z"}),
+        ("another edge's certificate", cert(edges=["edge-b"]), tighten(revoke, cert_=cert(edges=["edge-b"])), rstate),
     ]
     raw = {
         "statements": [{"name": n, "sealed": s, "required": r, "format": f} for n, s, r, f in statements],
@@ -294,7 +389,15 @@ def families() -> dict:
         "requests": [{"name": n, **c} for n, c in requests],
         "email": [{"name": n, "sealed": s, "pins": pins, "lease_id": "L-example-0001", "nonce": nonce} for n, s in email],
         "ceiling_hours": [{"name": n, "from": a, "until": b} for n, a, b in hours],
+        "time": [{"name": n, "sealed": sl, "pins": pins, "nonce": nonce, "waited": w} for n, sl, w in times],
+        "start_time": [{"name": n, "wall": w, "signed_at": sa, "boot_at_signed": bs, "boot": b, "same_boot": sb}
+                       for n, w, sa, bs, b, sb in starts],
+        "ratchet": [{"name": n, "anchor": an, "boot_at_anchor": ba, "wakes": ws, "now": nw} for n, an, ba, ws, nw in ratchets],
+        "trusted_time": [{"name": n, "wall": w, "wall_at_verify": wv, "boot_at_verify": bv, "boot": b, "same_boot": sb}
+                         for n, w, wv, bv, b, sb in clocks],
         "reports": [{"name": n, "body": b, "now": "2026-11-04T12:00:00Z"} for n, b in reports],
+        "relays": [{"name": n, "cert": ce, "tighten": t, "pins": rpins, "state": st, "applied": applied,
+                    "now": "2026-11-05T12:30:00Z", "release": {"serial": 5, "floor": 3}} for n, ce, t, st in relays],
     }
     notes = {"statements": "unseal_multi(sealed, required, format); ok, and what it says when ok",
              "ceilings": "check_ceiling(edge, officer_key, sealed, floor)", "ended": "verify_ended(sealed, pins, enrolment_key)",
@@ -307,9 +410,26 @@ def families() -> dict:
              "reports": "edge protocol 1.4: whether the desk accepts a report body (section 7) at the moment now, and the "
                         "bastion declaration it keeps: tokens it knows as capabilities and adapter, the rest as "
                         "unknown, never refused",
+             "relays": "edge protocol 1.5, section 14: verify_tighten(cert, tighten, pins, state, applied, now, release):"
+                       " ok, and the state the edge stores after a tightening it applies",
              "ceiling_hours": "edge protocol 1.4: the hours the ceiling policy judges a lease or visit lease by, "
                               "from its from (or the moment of the cut) to its until: whole hours rounded up, at "
                               "least one",
+             "ratchet": "edge protocol 1.5, section 1: from an anchor and the boot clock at it, each wake (wall, boot) "
+                        "records ratchet(anchor, boot_at_anchor, boot, wall), the later raw reading; then the anchor "
+                        "and trusted_time at now (same boot)",
+             "start_time": "edge protocol 1.5, section 1: start_time(wall, signed_at, boot_at_signed, boot, same_boot): "
+                           "the earlier reading on which starts are judged (admit's now_start), from the start anchor, "
+                           "verified time only (the newest bundle's issue time or the desk's time answer) and the boot "
+                           "clock at its arrival; never the ratchet's anchor; null after a reboot until verified time",
+             "time": "edge protocol 1.5, section 1: verify_time(sealed, pins, nonce, waited): the desk's time for one "
+                     "signed request of this edge (its nonce), arrived within 30 seconds of the request on the edge's "
+                     "boot clock (waited, seconds); ok, and the issued time it anchors on after a reboot",
+             "trusted_time": "edge protocol 1.5, section 1: the moment an edge acts on, from its wall clock, the trusted "
+                             "time it recorded and its boot clock (seconds, counting suspend) at its last verified "
+                             "bundle, the boot "
+                             "clock now, and whether it is the same boot; skew 300 s. live is false when no bundle "
+                             "verified in this boot: nothing is live until a fresh one does",
              "email": "verify_email(sealed, pins, lease_id, nonce), edge protocol 1.3: ok, and email_sha256, the sha256 hex "
                       "of the address it gives (null when ok with no address, or when refused); nonce is the nonce of the "
                       "edge's own signed request the answer is for"}

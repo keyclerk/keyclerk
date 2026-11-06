@@ -89,6 +89,48 @@ def _ts(s: str) -> datetime:
     return datetime.strptime(s, ISO).replace(tzinfo=timezone.utc)
 
 
+def trusted_time(wall: datetime, wall_at_verify: datetime | None, boot_at_verify: float | None, boot: float,
+                 same_boot: bool, skew: int = SKEW) -> dict:
+    """The moment an edge acts on (edge protocol 1.5, section 1; decision 0032 point 35): the wall clock, unless the
+    boot clock since the last verified bundle says more time has passed, and then that later moment, so a wall clock
+    set back or held still never keeps a lease alive. `wall_at_verify` is the trusted time the edge recorded at that
+    bundle (this function's own result then), never the raw wall clock, so a clock set back while a bundle arrives
+    cannot pull it back. The boot clock counts suspend and restarts at boot: after a reboot
+    no verify point is known in this boot, and nothing is live until a fresh bundle verifies. Within the skew the wall
+    clock stands; past it the clocks are said to disagree. the edge implementation's agent implements this rule
+    (agent/internal/clock/clock.go Trusted)."""
+    if not same_boot or wall_at_verify is None or boot_at_verify is None:
+        return {"trusted": wall, "skewed": False, "live": False}
+    by_boot = wall_at_verify + timedelta(seconds=boot - boot_at_verify)
+    if by_boot > wall + timedelta(seconds=skew):
+        return {"trusted": by_boot, "skewed": True, "live": True}
+    return {"trusted": wall, "skewed": wall > by_boot + timedelta(seconds=skew), "live": True}
+
+
+RATCHET_MAX_SECONDS = 3600                  # the most an edge sleeps between two wakes that ratchet its anchor
+
+
+def ratchet(anchor: datetime, boot_at_anchor: float, boot: float, wall: datetime) -> datetime:
+    """The anchor an edge records at every wake, at most RATCHET_MAX_SECONDS apart (edge protocol 1.5, section 1): the
+    later of the wall clock and the anchor plus the boot clock since. A boot clock frozen while the wall clock stays
+    honest loses nothing, and a wall clock set back while the boot clock runs gains nothing. It records the later raw
+    reading, never trusted_time's result: that keeps the wall clock within the skew, and recorded wake after wake the
+    lag would compound by up to the skew each time. Both clocks tampered at once is beyond what an edge can see."""
+    return max(wall, anchor + timedelta(seconds=boot - boot_at_anchor))
+
+
+def start_time(wall: datetime, signed_at: datetime | None, boot_at_signed: float | None, boot: float,
+               same_boot: bool) -> datetime | None:
+    """The earlier reading, on which an edge judges a start, a widening (edge protocol 1.5, section 1): the earlier of
+    the wall clock and the start anchor plus the boot clock since. The start anchor is verified time only, the issue
+    time of the newest verified bundle or the desk's time answer, with the boot clock at its arrival; never the
+    ratchet's anchor, which a wall clock set forward raises at the next wake. A boot clock frozen only lowers it, so
+    it can delay a start, never open one early. None after a reboot until verified time arrives: nothing starts."""
+    if not same_boot or signed_at is None or boot_at_signed is None:
+        return None
+    return min(wall, signed_at + timedelta(seconds=boot - boot_at_signed))
+
+
 def ceiling_hours(start: datetime, end: datetime) -> int:
     """The hours the ceiling policy judges a span by: whole hours rounded up, at least one (edge protocol 1.4). Rounded
     down, a lease of 8 hours 59 minutes passed a ceiling of 8 hours."""
@@ -319,6 +361,13 @@ class Replay:
 def check_request(header: str, method: str, path: str, body: bytes, public_of, replay: Replay,
                   now: float | None = None) -> str:
     """The edge id, or ValueError. The same answer for an unknown edge and a bad signature (no id enumeration)."""
+    return check_request_node(header, method, path, body, public_of, replay, now)[0]
+
+
+def check_request_node(header: str, method: str, path: str, body: bytes, public_of, replay: Replay,
+                       now: float | None = None) -> tuple[str, str]:
+    """(the edge id, the enrolment key of the node that signed), or ValueError. public_of gives an edge's key, or the
+    keys of its nodes (one, or two for a high-availability edge, decision 0031)."""
     now = time.time() if now is None else now
     parts = (header or "").split(";")
     if len(parts) != 4:
@@ -328,14 +377,21 @@ def check_request(header: str, method: str, path: str, body: bytes, public_of, r
         raise ValueError("the KeyClerk-Edge header is malformed")
     if abs(now - int(secs)) > SKEW:
         raise ValueError("the edge's clock differs from the desk's by more than 5 minutes")
-    pub = public_of(edge_id)
-    try:
-        load_public(pub or "").verify(bytes.fromhex(sig), request_message(edge_id, method, path, int(secs), nonce, body))
-    except Exception:   # noqa: BLE001
-        raise ValueError("not a request signed by an enrolled edge") from None
+    keys = public_of(edge_id)
+    keys = [keys] if isinstance(keys, str) or keys is None else list(keys)
+    msg, signer = request_message(edge_id, method, path, int(secs), nonce, body), None
+    for pub in keys:
+        try:
+            load_public(pub or "").verify(bytes.fromhex(sig), msg)
+            signer = pub
+            break
+        except Exception:   # noqa: BLE001 - another node's key, or none
+            continue
+    if signer is None:
+        raise ValueError("not a request signed by an enrolled edge")
     if not replay.fresh(edge_id, nonce, now):
         raise ValueError("a nonce used before: replayed request refused")
-    return edge_id
+    return edge_id, signer
 
 
 # --- enrolment: the officer and the edge both prove their keys -------------------------------------------------
@@ -725,6 +781,36 @@ def verify_email(sealed: dict, pins: dict, lease_id: str, nonce: str) -> tuple[l
     email = m.get("email")
     if email is not None and not (isinstance(email, str) and 3 <= len(email) <= MAX_EMAIL and "@" in email):
         errs.append("an address is text with an @, at most 320 characters, or null")
+    return errs, (m if not errs else {})
+
+
+TIME_FORMAT = "kc-edge-time-v1"             # edge protocol 1.5, section 1 (decision 0032, second adversarial review M1)
+TIME_MAX_WAIT = 30                          # seconds on the edge's boot clock from its request to the answer
+
+
+def time_answer(key: Ed25519PrivateKey, edge_id: str, nonce: str, issued: datetime) -> dict:
+    """The desk's time, sealed for one signed request of that edge (its nonce): what an edge re-anchors on after a
+    reboot, never on its own clock."""
+    return seal(key, {"edge": edge_id, "nonce": nonce, "issued": issued.strftime(ISO)}, TIME_FORMAT)
+
+
+def verify_time(sealed: dict, pins: dict, nonce: str, waited: float) -> tuple[list[str], dict]:
+    """The answer to an edge's own time request (GET /api/v1/edge/time): signed by the pinned bundle key, for this
+    edge, answering this request (its nonce), and arrived within TIME_MAX_WAIT seconds of the request on the edge's
+    boot clock (`waited`), so an answer held back cannot move the anchor back. When it holds, the edge's anchor is the
+    answer's `issued` time, and only then is a bundle live again after a reboot."""
+    try:
+        m = unseal(sealed, pins["bundle_key"], TIME_FORMAT)
+        _ts(m.get("issued"))
+    except (ValueError, KeyError, TypeError) as e:
+        return [str(e)], {}
+    errs = []
+    if m.get("edge") != pins["edge"]:
+        errs.append("an answer for another edge")
+    if m.get("nonce") != nonce:
+        errs.append("an answer to another request: replayed")
+    if not isinstance(waited, (int, float)) or isinstance(waited, bool) or not 0 <= waited <= TIME_MAX_WAIT:
+        errs.append(f"the answer arrived more than {TIME_MAX_WAIT} s after the request on the boot clock: held back")
     return errs, (m if not errs else {})
 
 

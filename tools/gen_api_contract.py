@@ -425,6 +425,9 @@ doc = {
                                                       "request (edge protocol 1.3); the edge keeps it nowhere",
                                                       {"type": "object"}, ["lease_id"], codes=("401", "404", "429")),
                                                  "security": [{"edge": []}], "tags": ["edge"]}},
+        "/edge/time": {"get": {**op("The desk's time for this signed request (edge protocol 1.5): after a reboot the edge "
+                                    "anchors its trusted time on it", {"type": "object"}, [], codes=("401",)),
+                               "security": [{"edge": []}], "tags": ["edge"]}},
         "/edges/{edge_id}/unlock": {"post": op("Read a phoned-unlock code (an unlock approver of the edge, never the person)",
                                                {"type": "object"}, ["edge_id"], body={"type": "object"}, codes=W, tag="change")},
         "/edges/{edge_id}/incidents/{incident_id}/close": {"post": op("Close an edge incident (its officer or the security officer)",

@@ -1794,6 +1794,69 @@
                 }
               }
             }
+          },
+          "node2": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enrolment_key"
+            ],
+            "description": "the second node of a high-availability edge (decision 0031): its own enrolment key, phoned-unlock key and TPM, each in the officer's statement beside the first node's",
+            "properties": {
+              "enrolment_key": {
+                "type": "string"
+              },
+              "unlock_key": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{87}$",
+                "description": "the edge node's P-256 public key for phoned unlock (kc-unlock-v2), uncompressed SEC1, base64url"
+              },
+              "tpm": {
+                "type": "object",
+                "description": "an assured edge's TPM (decision 0016): the EK the officer pinned on site, its certificate if any, the attestation key, the PCR baseline; the officer signs its commitment",
+                "required": [
+                  "ek_public",
+                  "ek_sha256",
+                  "ak_public",
+                  "pcr_baseline"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "ek_public": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "ek_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "ek_cert": {
+                    "type": "string",
+                    "maxLength": 8192
+                  },
+                  "ak_public": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "pcr_baseline": {
+                    "type": "object",
+                    "maxProperties": 24,
+                    "patternProperties": {
+                      "^([0-9]|1[0-9]|2[0-3])$": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          },
+          "site_key": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "the site's physical key (decisions 0027 and 0031), pinned on site in the edge's enrolment: it signs a node's break-glass promotion (kc-edge-site-v1, purpose promotion), which the desk verifies against it"
           }
         }
       }
@@ -2003,6 +2066,88 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{87}$",
             "description": "the edge node's P-256 public key for phoned unlock (kc-unlock-v2), uncompressed SEC1, base64url"
+          },
+          "node2": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enrolment_key"
+            ],
+            "description": "the second node of a high-availability edge (decision 0031): its own enrolment key, phoned-unlock key and TPM, each in the officer's statement beside the first node's",
+            "properties": {
+              "enrolment_key": {
+                "type": "string"
+              },
+              "unlock_key": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{87}$",
+                "description": "the edge node's P-256 public key for phoned unlock (kc-unlock-v2), uncompressed SEC1, base64url"
+              },
+              "tpm": {
+                "type": "object",
+                "description": "an assured edge's TPM (decision 0016): the EK the officer pinned on site, its certificate if any, the attestation key, the PCR baseline; the officer signs its commitment",
+                "required": [
+                  "ek_public",
+                  "ek_sha256",
+                  "ak_public",
+                  "pcr_baseline"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "ek_public": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "ek_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "ek_cert": {
+                    "type": "string",
+                    "maxLength": 8192
+                  },
+                  "ak_public": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "pcr_baseline": {
+                    "type": "object",
+                    "maxProperties": 24,
+                    "patternProperties": {
+                      "^([0-9]|1[0-9]|2[0-3])$": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ha": {
+      "type": "object",
+      "description": "the core's high availability (decision 0031 point 3): the log's origin, the commit witness's cosigner vkey, and the signer nodes that may hold the records key; absent: HA is off",
+      "required": [
+        "origin",
+        "commit_witness",
+        "nodes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "origin": {
+          "type": "string"
+        },
+        "commit_witness": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         }
       }
