@@ -16,12 +16,20 @@ direction. It changes in the pull request that adds or moves an issue. Versions 
 - Edge protocol 1.0 to 1.5 (github.com/keyclerk/edge-protocol).
 
 ## Next: 0.29.0, trust
-- Every granting key in the signer, the records key rotated and recoverable after a compromise, and access reviews by
-  owners, with a grace period for people who move; the groundwork for EU digital identity wallets.
+1. #38 Every key that grants lives in the checking signer: bundles and every object an edge verifies are built
+   there, from the records it signed; the unlock key moves in too.
+2. #39 A sealed identity map names each lease's bastion account.
+3. #40 A key custodian under the checking signer, refusing anything that would fork or rewrite the change log.
+4. #41 The records key rotated and recovered after a compromise.
+5. #42 Minimal access reviews, with a grace period for people who move.
+6. #43 Groundwork for EU digital identity wallets.
+7. #44 A validity window on the site key's promotion statement (with keyclerk/edge-protocol#18, edge protocol 1.6).
+8. #37 The desk and the management listener listen on IPv6.
 
-## Then
-- 0.30.0: people and wallets. People with their engagements, sponsors and end dates, and credentials received from EU
-  digital identity wallets, remotely and at the desk.
+## Then: 0.30.0, people and wallets
+1. #45 People, engagements and sponsors, identified or pseudonymous.
+2. #46 Receiving credentials from EU digital identity wallets, remotely and at the desk.
+3. #47 A proximity reader for wallets at the desk.
 
 ## Later
 - 0.31.0: session constraints in the lease and external sign-in bindings; holder bounds and separation-of-duty
