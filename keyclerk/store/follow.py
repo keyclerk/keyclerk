@@ -12,6 +12,10 @@ desk cannot produce one.
 
 A resync keeps what only the desk holds (visits, their events and badges) from the old store while it still reads;
 the proof tokens come from the signer (op tokens). Wiring into the Desk, and the log-breaks metric, is decision 0022 S5.
+
+In HA mode (the store holds the log's `ha` record, decision 0031 point 6) the follower adopts a size only with the
+commit witness's countersignature on it, both signatures checked here: never a link a signer node only says was
+committed. Without that countersignature it adopts nothing and says why (NotCommitted); the desk reads on.
 """
 from __future__ import annotations
 
@@ -22,6 +26,14 @@ from keyclerk.store.link import StoreRefused
 
 DESK_SIDE = ("visits", "visit_events", "badges")
 PAGE = 500
+
+
+class NotCommitted(RuntimeError):
+    """In HA mode the signer showed no countersignature of the commit witness to follow up to: nothing adopted."""
+
+
+def _ha(store) -> dict | None:
+    return (store.get("head", "ha") or {}).get("value") if store.size() else None
 
 
 class Follower:
@@ -40,6 +52,16 @@ class Follower:
         return answer
 
     def apply(self, answer: dict, tokens: list | None = None) -> None:
+        cfg = _ha(self.store)
+        if cfg is not None:                       # an answer counts only with the commit witness's countersignature
+            from keyclerk import ha as HA
+            try:
+                size, root = HA.committed(answer.get("commit") or "", cfg, self.store.pinned)
+            except ValueError:
+                size, root = None, None
+            if size != self.store.size() + 1:
+                self.catch_up()                   # adopted, if at all, as far as a countersignature shows
+                return
         side = [("proof_tokens", sha, {"token": t}) for sha, t in tokens or []]
         try:
             self.store.append(answer["link"], side=side)
@@ -47,7 +69,8 @@ class Follower:
         except StoreRefused as e:
             self._alarm(f"the desk's store refused the signer's link: {e}")
             return
-        if self.store.head().hex() != answer["hash"] or self.store.root().hex() != answer["root"]:
+        if self.store.head().hex() != answer["hash"] or self.store.root().hex() != answer["root"] \
+                or (cfg is not None and self.store.root() != root):
             self._alarm("the desk's store reached another head or root than the signer's")
 
     def catch_up(self) -> None:
@@ -57,17 +80,60 @@ class Follower:
             self._alarm(f"catching up with the signer failed: {e}")
 
     def _pull(self, store) -> None:
-        while True:
-            got = self.client.links(store.size(), PAGE)
+        cfg = _ha(store)
+        stop = root = None
+        if cfg is not None:
+            stop, root = self._committed(store, cfg)
+        while stop is None or store.size() < stop:
+            got = self.client.links(store.size(), PAGE if stop is None else min(PAGE, stop - store.size()))
             for sealed in got["links"]:
+                if stop is not None and store.size() >= stop:
+                    break
                 store.append(sealed)
-            if store.size() >= got["size"] or not got["links"]:
+                if cfg is None and _ha(store) is not None:    # this link switched HA on: the rest only as committed
+                    cfg = _ha(store)
+                    stop, root = self._committed(store, cfg)
+                    if stop < store.size():
+                        raise StoreRefused("the commit witness has not taken the link that switched HA on")
+            if not got["links"] or store.size() >= (got["size"] if stop is None else stop):
                 break
+        if stop is not None and root is not None and store.size() == stop and store.root() != root:
+            raise StoreRefused("the links the signer served reach another root than the commit witness countersigned")
+        if cfg is not None and _ha(store) != cfg:   # an HA change link was adopted: follow on under what it set
+            return self._pull(store)
         if store.size() == 0:
             return                                # a log started empty and not yet seeded has no checkpoint
         cp = self.client.checkpoint(None)["checkpoint"]
         if store.checkpoint() != cp:
             store.add_checkpoint(cp)
+
+    def _committed(self, store, cfg: dict) -> tuple[int, bytes | None]:
+        """(the size to follow up to, its countersigned root). Without a countersignature that holds, the one link a
+        desk adopts is an HA change link at exactly the next position (decision 0031 points 3 and 10): it is signed
+        with the commit witness stopped or replaced (off, break-glass, another commit witness), carries two people's
+        confirmations by the link format, and the configuration it sets governs what follows (root None: no
+        countersigned root to compare)."""
+        from keyclerk import ha as HA
+        note = self.client.head().get("commit")
+        why = None
+        if note:
+            try:
+                return HA.committed(note, cfg, store.pinned)
+            except ValueError as e:
+                why = f"the signer's commit countersignature does not hold: {e}"
+        nxt = self.client.links(store.size(), 1)["links"]
+        if nxt:
+            from keyclerk.store import link as L
+            try:
+                body, _ = L.open_link(nxt[0], store.pinned)
+            except StoreRefused:
+                body = None
+            if body is not None and "ha" in body["change"] and body["seq"] == store.size():
+                return store.size() + 1, None
+        if why:
+            raise StoreRefused(why)
+        raise NotCommitted("the signer shows no countersignature of the commit witness yet (it has not committed "
+                           "since it became active): nothing adopted; the desk reads on and follows again")
 
     def _links(self, start: int, stop: int):
         """The signer's links from start to stop, a page at a time."""

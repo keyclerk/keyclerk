@@ -642,6 +642,9 @@ def scoped_errors(doc: dict, reach: set[str]) -> list[str]:
             errs += visits.check(doc)
         if doc.get("edges") or doc.get("person_keys") or doc.get("edge_visit_leases") or doc.get("edge_rotations"):
             errs += edge_records.check(doc)
+        if doc.get("ha") is not None:
+            from keyclerk import ha
+            errs += ha.check(doc)
         return [e for e in errs if covered(subject_of(e, doc), reach)]
 
 

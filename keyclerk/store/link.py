@@ -29,6 +29,13 @@ trust owner, each proof the SHA-256 of their broker token (the token in the side
 revision of the restore link is mark + 1 and each link after it adds one; a mark below the revision the log has
 reached is refused.
 
+An HA change link (decision 0031 points 3 and 10): after the genesis and its migrate links, the `ha` head record is
+put or removed only by a link with "ha": {"mode", "confirmations": [{"by", "proof"}, {"by", "proof"}], "node"
+(break_glass only)} and that one op: `set` puts the record (HA on, or other nodes or another commit witness), `off`
+removes it, `break_glass` removes it when the commit witness is lost and names the one signer node that signs on from
+this link's base (seq and prev). The confirmations are the security officer's and a root trust owner's, as a restore
+link's (operator 2026-11-05).
+
 kc-checkpoint-v1 body: {"format", "realm", "size" (links in the log), "root" (merkle root, hex), "head" (the link hash
 of seq size-1, hex), "fence", "at"}.
 
@@ -56,7 +63,7 @@ ZERO = "0" * 64
 SIDE_KINDS = ("visits", "visit_events", "badges", "proof_tokens", "genesis_yaml",    # not in the log
               "anchor_map", "anchor_idp")                                          # decision 0028: the mapping, erasable
 PROOF_KINDS = ("approval_proofs", "proposal_proofs")
-HEAD_FIELDS = ("realm", "home", "connected_organisations", "root", "retired_places", "situation_feeds")
+HEAD_FIELDS = ("realm", "home", "connected_organisations", "root", "retired_places", "situation_feeds", "ha")
 LOG_KINDS = {**{k: v for k, v in R.KINDS.items() if k not in SIDE_KINDS},
              "persons": "person", "places": "place_id", "org_units": "org_id", "zones": "zone_id",
              **{k: "sha256" for k in PROOF_KINDS}, "head": None}
@@ -138,9 +145,9 @@ def _body(body: dict) -> dict:
     if not isinstance(body["at"], str) or not E.TIME.fullmatch(body["at"]):
         raise StoreRefused("at is a UTC time, YYYY-MM-DDTHH:MM:SSZ")
     ch = body["change"]
-    if not isinstance(ch, dict) or not {"ops", "entry"} <= set(ch) <= {"ops", "entry", "yaml", "migrate", "restore"}:
+    if not isinstance(ch, dict) or not {"ops", "entry"} <= set(ch) <= {"ops", "entry", "yaml", "migrate", "restore", "ha"}:
         raise StoreRefused("change has ops and entry (and yaml in the genesis, migrate in a migrate link, restore in a "
-                           "restore link)")
+                           "restore link, ha in an HA change link)")
     if not isinstance(ch["entry"], dict):
         raise StoreRefused("change.entry is an object")
     if "yaml" in ch:
@@ -175,7 +182,39 @@ def _body(body: dict) -> dict:
             raise StoreRefused("restore is {mark, confirmations}: a whole mark from 1 and two confirmations "
                                "{by, proof} by two different people, each proof 64 hex characters")
     _ops(ch["ops"])
+    _ha_change(body)
     return body
+
+
+HA_MODES = ("set", "off", "break_glass")
+_NODE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+
+
+def _ha_change(body: dict) -> None:
+    """The ha head record changes only by an HA change link, two people confirming it (decision 0031)."""
+    ch = body["change"]
+    touches = [op for op in ch["ops"] if op["kind"] == "head" and op["key"] == "ha"]
+    if "ha" not in ch:
+        if touches and body["seq"] != 0 and "migrate" not in ch:
+            raise StoreRefused("the ha head record changes only by an HA change link, confirmed by the security officer "
+                               "and a root trust owner (python -m keyclerk.ha)")
+        return
+    h = ch["ha"]
+    if body["seq"] < 1 or "yaml" in ch or "migrate" in ch or "restore" in ch:
+        raise StoreRefused("an HA change link follows the genesis and is no migrate or restore link")
+    if not isinstance(h, dict) or h.get("mode") not in HA_MODES \
+            or set(h) != ({"mode", "confirmations", "node"} if h["mode"] == "break_glass" else {"mode", "confirmations"}) \
+            or ("node" in h and not (isinstance(h["node"], str) and _NODE.fullmatch(h["node"]))) \
+            or not isinstance(h["confirmations"], list) or len(h["confirmations"]) != 2 \
+            or any(not isinstance(c, dict) or set(c) != {"by", "proof"} or not isinstance(c["by"], str)
+                   or not 1 <= len(c["by"]) <= 256 or not isinstance(c["proof"], str) or not HEX64.fullmatch(c["proof"])
+                   for c in h["confirmations"]) \
+            or h["confirmations"][0]["by"] == h["confirmations"][1]["by"]:
+        raise StoreRefused("ha is {mode: set, off or break_glass, confirmations, node (break_glass only)}: two "
+                           "confirmations {by, proof} by two different people, each proof 64 hex characters")
+    want = "put" if h["mode"] == "set" else "del"
+    if len(ch["ops"]) != 1 or len(touches) != 1 or touches[0]["op"] != want:
+        raise StoreRefused(f"an HA change link of mode {h['mode']} carries one op: {want} head ha")
 
 
 def check_restore(body: dict, revision_before: int | None) -> None:
@@ -217,10 +256,12 @@ def _open(sealed, pinned: str, label: str) -> tuple[bytes, dict]:
 # --- links ------------------------------------------------------------------------------------------------------------
 
 def link_body(realm: str, seq: int, prev: str, fence: int, at: str, ops: list[dict], entry: dict,
-              yaml: dict | None = None, migrate: dict | None = None, restore: dict | None = None) -> dict:
+              yaml: dict | None = None, migrate: dict | None = None, restore: dict | None = None,
+              ha: dict | None = None) -> dict:
     """An unsigned link body, its structure checked: what a signer checks a change as before it signs anything."""
     change = {"ops": sorted(ops, key=lambda o: (o["kind"], o["key"])), "entry": entry, **({"yaml": yaml} if yaml else {}),
-              **({"migrate": migrate} if migrate else {}), **({"restore": restore} if restore else {})}
+              **({"migrate": migrate} if migrate else {}), **({"restore": restore} if restore else {}),
+              **({"ha": ha} if ha else {})}
     body = _body({"format": LINK_FORMAT, "realm": realm, "seq": seq, "prev": prev, "fence": fence, "at": at,
                   "change": change})
     E.canonical(body)                             # refuses floats and out-of-range integers now, not at signing

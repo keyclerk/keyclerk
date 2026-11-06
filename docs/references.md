@@ -138,13 +138,38 @@ contract an edge implements, has its own list: github.com/keyclerk/edge-protocol
 - [ATTEST] GitHub, *attest-build-provenance*: the release's signed provenance.
   <https://github.com/actions/attest-build-provenance>
 
+## Prior art behind high availability (decision 0031)
+- [TLAPLUS] L. Lamport, *Specifying Systems* (2002) and the TLA+ tools: the language of the core signer's failover
+  specification, `docs/specs/SignerFailover.tla`. <https://lamport.azurewebsites.net/tla/tla.html>
+- [SMALLSCOPE] D. Jackson, *Software Abstractions* (MIT Press, 2006; revised 2012): the small scope hypothesis, why an
+  exhaustive check at small bounds (two signers, three links) finds the design errors that matter.
+  <https://mitpress.mit.edu/9780262528900/software-abstractions/>
+- [SUNLIGHT] F. Valsorda, *Sunlight*: a Certificate Transparency log that keeps one writer without leader election,
+  through a store with compare-and-swap semantics holding the latest checkpoint. <https://github.com/FiloSottile/sunlight>
+- [KLEPPMANN] M. Kleppmann, *How to do distributed locking* (2016): fencing tokens checked by the resource; a paused
+  process acts on a stale belief, so clocks may drive timeouts only, never safety.
+  <https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html>
+- [CHUBBY] M. Burrows, *The Chubby lock service for loosely-coupled distributed systems* (OSDI 2006): sequencers the
+  resource checks, beside leases. <https://research.google/pubs/the-chubby-lock-service-for-loosely-coupled-distributed-systems/>
+- [LEASES] C. Gray, D. Cheriton, *Leases: an efficient fault-tolerant mechanism for distributed file cache consistency*
+  (SOSP 1989): leases are safe only with bounded clock drift, which 0031 avoids depending on.
+  <https://dl.acm.org/doi/10.1145/74850.74870>
+- [RAFT] D. Ongaro, J. Ousterhout, *In Search of an Understandable Consensus Algorithm* (USENIX ATC 2014): terms and a
+  majority; the consensus 0031 does not need for a single writer. <https://raft.github.io/raft.pdf>
+- [QNETD] Red Hat, *Configuring quorum devices* (RHEL 10): a third host as tie-breaker for a two-node cluster, on a
+  separate host and ideally a separate network. <https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/configuring_and_managing_high_availability_clusters/configuring-quorum-devices>
+- [RFC2281] T. Li, B. Cole, P. Morton, D. Li, *Cisco Hot Standby Router Protocol (HSRP)*, and [RFC5798] S. Nadas,
+  *Virtual Router Redundancy Protocol (VRRP) Version 3*: two-way automatic takeover on a hold timer, with no third
+  vote; right for an address, wrong for a signer, where two active sides sign two histories.
+  <https://www.rfc-editor.org/rfc/rfc2281>, <https://www.rfc-editor.org/rfc/rfc5798>
+
 ## Named for context
 - [RFC8785] A. Rundgren, B. Jordan, S. Erdtman, *JSON Canonicalization Scheme (JCS)*: a different canonical form,
   named to say KeyClerk does not use it. <https://www.rfc-editor.org/rfc/rfc8785>
+- [RFC9901] D. Fett, K. Yasuda, B. Campbell, *Selective Disclosure for JSON Web Tokens (SD-JWT)*: the format a wallet's
+  PID and attestations take, which decision 0034 receives. <https://www.rfc-editor.org/rfc/rfc9901>
 - [WARPGATE] Warpgate: an access gateway an edge can drive with the leases it applies; the pull request template is
   adapted from its own. <https://github.com/warp-tech/warpgate>
 - [SPIFFE] SPIFFE: workload identity, which a workload's account in KeyClerk can carry. <https://spiffe.io/>
-- [TLAPLUS] L. Lamport, *TLA+*: the language of the planned specification the two-node edge profile is checked against.
-  <https://lamport.azurewebsites.net/tla/tla.html>
 - [OTEL] OpenTelemetry: where an organisation's device telemetry belongs, never in KeyClerk's records.
   <https://opentelemetry.io/>

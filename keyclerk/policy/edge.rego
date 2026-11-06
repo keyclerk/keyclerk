@@ -56,11 +56,15 @@ attestation_refusals contains "the endorsement key has no manufacturer certifica
 }
 
 # admit: may this person open a session to this target now?
-# input: {"person", "target", "now", "issued", "leases": [...], "visit_leases": [...], "revoked": [...]}
+# input: {"person", "target", "now", "now_start"?, "issued", "leases": [...], "visit_leases": [...], "revoked": [...]}
+# now is the edge's trusted time, the later reading, for ends and horizons; now_start (edge protocol 1.5, section 1)
+# the earlier reading, for starts: a start is a widening, so a wall clock set forward cannot open a lease early.
+start_now := object.get(input, "now_start", input.now)
+
 lease_ok(l) if {
 	l.person == input.person
 	l.target == input.target
-	l.from <= input.now
+	l.from <= start_now
 	input.now < l.until
 	not l.lease_id in input.revoked
 	input.now - input.issued <= object.get(horizons, l.class, 0) * 3600
@@ -69,7 +73,7 @@ lease_ok(l) if {
 visit_ok(v) if {
 	v.person == input.person
 	input.target in v.targets
-	v.from <= input.now
+	v.from <= start_now
 	input.now < v.until
 	not v.lease_id in input.revoked
 }

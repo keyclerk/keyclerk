@@ -36,7 +36,7 @@ OPTIONAL = ("accounts", "leases", "catalogue", "sod", "groups", "delegations", "
             "surge_packages", "surge_grants", "approvers", "visits", "visit_events", "badges",
             "edges", "person_keys", "edge_visit_leases", "edge_rotations")
 HEAD = ("realm", "home", "connected_organisations", "root", "persons", "places", "org_units", "zones", "retired_places",
-        "situation_feeds", "revision", "approval_proofs", "proposal_proofs")   # every top-level kind is in HEAD or KINDS (a test holds it)
+        "situation_feeds", "ha", "revision", "approval_proofs", "proposal_proofs")   # every top-level kind is in HEAD or KINDS (a test holds it)
 
 
 class _Plain(yaml.SafeDumper):

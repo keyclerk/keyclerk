@@ -17,7 +17,8 @@ import hashlib
 
 from keyclerk import edge as E
 
-FAMILIES = ("statements", "ceilings", "ended", "unlock", "module_bytes", "requests", "email", "ceiling_hours", "reports")
+FAMILIES = ("statements", "ceilings", "ended", "unlock", "module_bytes", "requests", "email", "ceiling_hours", "reports", "relays",
+            "trusted_time", "time", "ratchet", "start_time")
 
 
 def verdict(family: str, c: dict) -> dict:
@@ -64,9 +65,32 @@ def verdict(family: str, c: dict) -> dict:
             if not isinstance(body, dict) or not set(body) <= desk.REPORT_FIELDS:
                 raise guard.InputRejected("an unknown report member")
             _, _, bastion = desk._report_14(body, E._ts(c["now"]))
+            desk._activation(body, E._ts(c["now"]))                # 1.5: the shape; its statement is section 14's
             return {"ok": True, "bastion": bastion}
         except guard.InputRejected:
             return {"ok": False, "bastion": None}
+    if family == "relays":                       # edge protocol 1.5, section 14
+        from keyclerk import edge_relay
+        errs, eff = edge_relay.verify_tighten(c["cert"], c["tighten"], c["pins"], c["state"], c["applied"],
+                                              E._ts(c["now"]), c.get("release"))
+        return {"ok": not errs, "state": eff.get("state") if not errs else None}
+    if family == "time":                         # edge protocol 1.5, section 1: the desk's time, for one request
+        errs, m = E.verify_time(c["sealed"], c["pins"], c["nonce"], c["waited"])
+        return {"ok": not errs, "issued": m.get("issued") if not errs else None}
+    if family == "ratchet":                      # edge protocol 1.5, section 1: wakes, then the moment acted on
+        anchor, at = E._ts(c["anchor"]), c["boot_at_anchor"]
+        for w in c["wakes"]:
+            anchor, at = E.ratchet(anchor, at, w["boot"], E._ts(w["wall"])), w["boot"]
+        t = E.trusted_time(E._ts(c["now"]["wall"]), anchor, at, c["now"]["boot"], True)
+        return {"anchor": anchor.strftime("%Y-%m-%dT%H:%M:%SZ"), "trusted": t["trusted"].strftime("%Y-%m-%dT%H:%M:%SZ")}
+    if family == "start_time":                   # edge protocol 1.5, section 1: the earlier reading, for starts
+        t = E.start_time(E._ts(c["wall"]), E._ts(c["signed_at"]) if c["signed_at"] else None, c["boot_at_signed"],
+                         c["boot"], c["same_boot"])
+        return {"start_now": t.strftime("%Y-%m-%dT%H:%M:%SZ") if t else None}
+    if family == "trusted_time":                 # edge protocol 1.5, section 1
+        t = E.trusted_time(E._ts(c["wall"]), E._ts(c["wall_at_verify"]) if c["wall_at_verify"] else None,
+                           c["boot_at_verify"], c["boot"], c["same_boot"])
+        return {"trusted": t["trusted"].strftime("%Y-%m-%dT%H:%M:%SZ"), "skewed": t["skewed"], "live": t["live"]}
     if family == "ceiling_hours":
         return {"hours": E.ceiling_hours(E._ts(c["from"]), E._ts(c["until"]))}
     if family == "module_bytes":

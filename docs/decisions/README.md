@@ -36,3 +36,7 @@ using KeyClerk (adoption, configuration, which plugins it enables) in its own re
 | [0028](0028-personal-data-erasure-and-retention.md) | Personal data in the log: an internal anchor, erasure that reaches every copy, and retention the deployer sets |
 | [0029](0029-backup-hardening-proxies-and-early-lease-ends.md) | Backup hardening, the client address behind a proxy, and a lease that ends early |
 | [0030](0030-key-rotation-reviews-ha-any-bastion-and-a-parent-iga.md) | Records-key rotation, reminders, console grants, earlier reviews, core HA, any bastion, and a parent IGA |
+| [0031](0031-high-availability-for-edges-and-the-core-signer.md) | High availability: two-node edges, and a standby core signer whose commits the witness serialises |
+| [0032](0032-people-engagements-personae-and-claims.md) | People, engagements, personae and claims: proof as a lease on trust (proposed) |
+| [0033](0033-a-key-custodian-under-the-checking-signer.md) | A key custodian under the checking signer |
+| [0034](0034-receiving-eudi-wallet-credentials.md) | Receiving EUDI Wallet credentials: KeyClerk as a registered relying party (proposed) |

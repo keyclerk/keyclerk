@@ -78,6 +78,7 @@ import socket
 import socketserver
 import sys
 import threading
+import time
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -106,6 +107,7 @@ class Signer:
     def __init__(self, key: Ed25519PrivateKey, state: Path, proofs=None, full_check: bool = False):
         self.key, self.state, self.proofs = key, Path(state), proofs
         self.witness: dict | None = None          # the witness section and its cosigners (configure_witness)
+        self.ha: dict | None = None               # HA: node, commit client, role (configure_ha, decision 0031)
         self._witness_due = threading.Event()
         self.full_check = full_check              # every change judged by the full check (the reference path, 0022 S4)
         self.state.mkdir(parents=True, exist_ok=True)
@@ -377,7 +379,18 @@ class Signer:
             raise SignerRefused(self.broken)
         if self.replica is None:
             raise SignerRefused("this signer keeps no change log yet: migrate its last signed revision first (op migrate)")
+        self._ha_serving()
         return self.replica
+
+    def _ha_serving(self) -> int | None:
+        """In HA mode (decision 0031 point 6) only the active node serves the log, and only the links the commit
+        witness took: a desk never adopts a link that may yet be dropped. None when HA is off."""
+        if self.ha is None:
+            return None
+        if self.ha["role"] != "active":
+            raise SignerRefused(f"{STANDBY} ({self.ha['why'] or 'not active'}): ask the active one; a standby takes "
+                                "over only when the committed head stops moving")
+        return self.ha.get("committed", 0)
 
     def _ready(self):
         if self.broken:
@@ -594,8 +607,15 @@ class Signer:
             return self._head()
 
     def _head(self) -> dict:
-        from keyclerk.store import replay
+        from keyclerk.store import merkle, replay
         r = self.replica
+        n = self.ha.get("committed") if self.ha is not None else None
+        if n is not None and n < r.size():            # a tail the commit witness has not taken: not served
+            frontier = []
+            for h in r.hashes(0, n):
+                frontier = merkle.push(frontier, h)
+            return {"size": n, "head": r.hashes(n - 1, n)[0].hex() if n else None, "root": merkle.root(frontier).hex(),
+                    "fence": self.FENCE, "checkpoint": r.checkpoint(n), "migration": r.migration()}
         return {"size": r.size(), "head": r.head().hex() if r.head() else None, "root": r.root().hex(), "fence": self.FENCE,
                 "revision": replay.revision(r), "checkpoint": r.checkpoint(), "migration": r.migration()}
 
@@ -606,8 +626,11 @@ class Signer:
         if self.replica is None:
             return {"size": 0, "migrated": False}
         with self.lock:
+            self._ha_serving()
             return {**self._head(), **({"frozen": frozen} if frozen else {}),
-                    **({"witness": self.witness_state()} if self.witness is not None else {})}
+                    **({"witness": self.witness_state()} if self.witness is not None else {}),
+                    **({"ha": {"node": self.ha["node"], "role": self.ha["role"], "why": self.ha["why"]},
+                        "commit": self.ha.get("note")} if self.ha is not None else {})}
 
     # --- the witness (decision 0022 point 5, decision 0020 G10) ---------------------------------------------------
 
@@ -653,12 +676,25 @@ class Signer:
         if self.witness is None or self.replica is None or self.broken:
             return None
         origin = self.witness["origin"]
+        committed = None
+        if self.ha is not None:                    # decision 0031 point 8: detection witnesses see committed heads only,
+            if self.ha["role"] != "active":        # from the active node, so none can hold a head a takeover drops
+                return None
+            committed = self.ha.get("committed", 0)
         snap = self.replica.snapshot()
         try:
-            size = snap.size()
+            size = snap.size() if committed is None else min(committed, snap.size())
             if not size:
                 return None
-            text = N.checkpoint_text(origin, size, snap.root())
+            if size == snap.size():
+                root = snap.root()
+            else:
+                from keyclerk.store import merkle
+                frontier = []
+                for h in snap.hashes(0, size):
+                    frontier = merkle.push(frontier, h)
+                root = merkle.root(frontier)
+            text = N.checkpoint_text(origin, size, root)
             signed = text + "\n" + N.sign(text, origin, self.key)
             cache: list = []
 
@@ -691,6 +727,245 @@ class Signer:
                                "the witness's owner resets this log there (python -m keyclerk.witness reset)")
                 self._audit({"op": "witness_stop", "result": o["result"], "witness": name, "size": o["size"]})
         return out
+
+    # --- high availability: commits the commit witness serialises (decision 0031) -----------------------------------
+
+    def configure_ha(self, node: str, client, hold_seconds: float = 30.0, clock=None) -> None:
+        """This signer is one node of an HA core: it starts as a standby and signs only once active. client is a
+        keyclerk.commit_witness.CommitClient; the commit witness's key and the origin come from the signed log's ha
+        head record, never from here."""
+        import time as _t
+        from keyclerk import ha as HA
+        if not HA.NODE.fullmatch(node):
+            raise SignerRefused("an HA node name is lower case, digits and hyphens")
+        self.ha = {"node": node, "client": client, "hold": float(hold_seconds), "role": "standby", "why": None,
+                   "clock": clock or _t.monotonic, "seen": (None, 0.0)}
+
+    def _ha_cfg(self, store) -> dict:
+        from keyclerk.store import note as N
+        rec = store.get("head", "ha")
+        cfg = (rec or {}).get("value")
+        if not isinstance(cfg, dict):
+            raise SignerRefused("HA is configured on this signer but the log holds no ha head record (decision 0031)")
+        if self.ha["node"] not in cfg["nodes"]:
+            raise SignerRefused(f"this signer's node {self.ha['node']} is not one of the log's HA nodes")
+        return {**cfg, "witness_key": N.parse_vkey(cfg["commit_witness"])}
+
+    def _committed_checkpoint(self, cfg: dict, client=None) -> tuple[int, bytes]:
+        """The commit witness's countersigned checkpoint, both signatures checked: (size, root)."""
+        from keyclerk.store import note as N
+        status, _, body = (client or self.ha["client"]).checkpoint(cfg["origin"])
+        if status == 404:                                 # never read as a log of size 0 (decision 0031 point 9)
+            raise OSError("the commit witness holds no checkpoint of this log: seed it from the log (python -m "
+                          "keyclerk.witness reseed)")
+        if status != 200:
+            raise OSError(f"the commit witness answered {status} for its checkpoint")
+        text, sigs = N.split(body.decode("utf-8"))
+        origin, size, root = N.parse_checkpoint(text)
+        at = N.verify(text, sigs, cfg["witness_key"]) if origin == cfg["origin"] else None
+        if origin != cfg["origin"] or N.verify(text, sigs, (origin, N.LOG, N.raw_public(self.key))) is None \
+                or at is None:
+            raise OSError("the commit witness's checkpoint is not signed by the records key and countersigned by it")
+        if client is None:
+            self.ha["seen_note"] = (size, body.decode("utf-8"))
+            self.ha["seen_at"] = at                      # the witness's time of its countersignature: moves at a beat
+        return size, root
+
+    def _own_tail_committed(self, store, cfg: dict, done: int) -> bool:
+        """Whether the witness's committed log of size done is this node's own: it holds done links and its link at
+        done - 1 is the committed one."""
+        from keyclerk.store import link as L
+        if store.size() < done or done == 0:
+            return False
+        try:
+            return L.open_link(store.link(done - 1), self.public_key())[1] == self._head_at(cfg, done)
+        except (OSError, L.StoreRefused):
+            return False
+
+    def _beat(self, done: int, now: float) -> None:
+        """The active's beat (decision 0031 point 7, amended): the committed checkpoint committed again with no links,
+        at most every third of the hold time. The witness countersigns it again with its own time, so a standby sees
+        the committed head move although nothing changed, and a healthy active that is idle is never deposed. A beat
+        at a size the witness no longer holds is refused (409): another node committed, and the next tick deposes this
+        one. No answer changes nothing: an active that cannot reach the witness steps down after its hold time."""
+        if now - self.ha.get("beat_at", float("-inf")) < self.ha["hold"] / 3:
+            return
+        seen = self.ha.get("seen_note")
+        if not seen or seen[0] != done:
+            return
+        self.ha["beat_at"] = now                          # an attempt, answered or not: no retry at every tick
+        try:
+            status, _, _ = self.ha["client"].commit(done, [], seen[1])
+        except OSError:
+            return
+        if status not in (200, 409):
+            self._audit({"op": "ha_beat_refused", "size": done, "status": status})
+
+    def _commit_tail(self, store) -> None:
+        """The links this signer holds above the committed size, sent to the commit witness. Committed: return. Lost
+        to another signer (the witness's own checkpoint shows it): deposed, resynced as a standby, refused. No
+        answer: the outcome is unknown, the links stay, and the next request commits them again."""
+        from keyclerk.store import note as N
+        cfg = self._ha_cfg(store)
+        try:
+            done, _ = self._committed_checkpoint(cfg)
+        except OSError as e:
+            raise SignerRefused(f"the commit witness does not answer ({e}): the change is not committed; ask again") from None
+        size = store.size()
+        if done == size:
+            self.ha["committed"], self.ha["note"] = size, self.ha["seen_note"][1]
+            return
+        text = N.checkpoint_text(cfg["origin"], size, store.root())
+        note = text + "\n" + N.sign(text, cfg["origin"], self.key)
+        links = list(store.links(done, size)) if done <= size else []
+        try:
+            status, _, body = self.ha["client"].commit(done, links, note) if done <= size else (409, "", b"")
+        except OSError as e:
+            raise SignerRefused(f"the commit witness did not answer ({e}): the outcome is unknown; ask again") from None
+        if status == 200 and N.verify(text, N.split(note + body.decode("utf-8"))[1], cfg["witness_key"]) is not None:
+            self.ha["committed"], self.ha["note"] = size, note + body.decode("utf-8")
+            return
+        if status in (409, 422):
+            self._deposed(store, cfg, f"the commit witness holds another history or a longer one ({status})")
+        raise SignerRefused(f"the commit witness answered {status}: the change is not committed; ask again")
+
+    def _deposed(self, store, cfg: dict, why: str) -> None:
+        """Another signer committed first. The committed log is fetched from the commit witness and replaces this
+        signer's replica (its uncommitted tail is dropped, never served); it becomes a standby. A fork below what this
+        signer had committed would be an alarm, but the witness's compare-and-swap makes that unreachable."""
+        self.ha["role"], self.ha["why"] = "standby", f"deposed: {why}"
+        self._audit({"op": "ha_deposed", "size": store.size()})
+        self._resync_from_commit(cfg)
+        raise SignerRefused(f"{STANDBY} (deposed: another signer committed first): ask the active one "
+                            "(decision 0031)")
+
+    def _resync_from_commit(self, cfg: dict) -> None:
+        """The replica rebuilt from the commit witness's links, every one checked as an append, and swapped in."""
+        from keyclerk.store import link as L
+        from keyclerk.store.sqlite import SqliteStore
+        done, _ = self._committed_checkpoint(cfg)
+        old = self.replica
+        fresh = self.state / "replica-resync.db"
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(fresh) + suffix).unlink(missing_ok=True)
+        new = SqliteStore(fresh, self.public_key(), old.realm)
+        try:
+            for kind, key, rec in [(k, kk, r) for k in ("proof_tokens", "anchor_map", "anchor_idp")
+                                   for kk, r in old.side_scan(k)]:
+                new.side_put(kind, key, rec)
+            while new.size() < done:
+                for sealed in self.ha["client"].links(cfg["origin"], new.size()):
+                    new.append(sealed)
+            if new.size():
+                new.add_checkpoint(L.seal_checkpoint(self.key, new.realm, new.size(), new.root(), new.head(),
+                                                     self.FENCE, _now()))
+        finally:
+            new.close()
+        old.close()
+        for suffix in ("", "-wal", "-shm"):
+            src, dst = Path(str(fresh) + suffix), self.state / ("replica.db" + suffix)
+            if src.exists():
+                os.replace(src, dst)
+            else:
+                dst.unlink(missing_ok=True)
+        self.replica = SqliteStore(self.state / "replica.db", self.public_key(), old.realm)
+        self._write_mark()
+
+    def ha_tick(self) -> str:
+        """One step of the HA loop: a standby follows the committed links, and takes over when the committed head has
+        not moved for its hold time, by signing a takeover link that the commit witness must take. Returns its role."""
+        from keyclerk.store import link as L
+        if self.ha is None or self.replica is None or self.broken:
+            return "off"
+        with self.lock:
+            store = self.replica
+            cfg = self._ha_cfg(store)
+            now = self.ha["clock"]()
+            try:
+                done, _ = self._committed_checkpoint(cfg)
+            except OSError:
+                # the witness is away: nothing is committed and nobody takes over. An active node that cannot reach
+                # it for its hold time steps down, so desks ask its peer; its safety never rested on this (point 4)
+                if self.ha["role"] == "active" and now - self.ha.get("ok_at", now) > self.ha["hold"]:
+                    self.ha["role"], self.ha["why"] = "standby", "lost the commit witness"
+                    self._audit({"op": "ha_stepped_down", "size": store.size()})
+                return self.ha["role"]
+            self.ha["ok_at"] = now
+            if self.ha["role"] == "active":
+                if done > self.ha.get("committed", done) and self._own_tail_committed(store, cfg, done):
+                    # its own answer was lost, but the witness took its links: the commit is this node's (a lost
+                    # takeover answer too). Adopted, not "deposed": else nobody beats for a whole hold time
+                    self.ha["committed"], self.ha["note"] = done, self.ha["seen_note"][1]
+                    self._audit({"op": "ha_adopted_lost_answer", "size": done})
+                if done == self.ha.get("committed", done):
+                    self._beat(done, now)
+                    return "active"
+                self.ha["role"], self.ha["why"] = "standby", f"deposed: the commit witness holds {done} links"
+                self._audit({"op": "ha_deposed", "size": store.size()})    # another node committed: resync below
+            if store.size() > done or (store.size() == done and done and store.head() is not None and
+                                       L.open_link(store.link(done - 1), self.public_key())[1] != self._head_at(cfg, done)):
+                self._resync_from_commit(cfg)            # an uncommitted tail of its own: dropped
+                store = self.replica
+            try:
+                while store.size() < done:
+                    for sealed in self.ha["client"].links(cfg["origin"], store.size()):
+                        store.append(sealed)
+            except L.StoreRefused:                       # its own history parted from the committed one: rebuilt
+                self._resync_from_commit(cfg)
+                store = self.replica
+            mark = (done, self.ha.get("seen_at"))      # the head moves with a link, or with the active's beat
+            if self.ha["seen"][0] != mark:
+                self.ha["seen"] = (mark, now)
+                return "standby"
+            if now - self.ha["seen"][1] < self.ha["hold"]:
+                return "standby"
+            return self._take_over(store, cfg, done)
+
+    def _head_at(self, cfg: dict, size: int) -> bytes | None:
+        from keyclerk.store import link as L
+        got = self.ha["client"].links(cfg["origin"], size - 1, 1)
+        return L.open_link(got[0], self.public_key())[1] if got else None
+
+    def _take_over(self, store, cfg: dict, done: int) -> str:
+        """The committed head stood still for the hold time: sign a takeover link and commit it. If the witness takes
+        it, this signer is active; if not, another signer moved first and this one stays a standby."""
+        import secrets
+        from keyclerk.store import link as L
+        entry = {"change_id": "C-" + secrets.token_hex(6), "action": "ha_takeover", "actor": "keyclerk:signer",
+                 "outcome": "applied", "node": self.ha["node"]}
+        body = L.link_body(store.realm, store.size(), store.head().hex() if store.head() else L.ZERO, self.FENCE,
+                           _now(), [], entry)
+        _, h = store.append_checked(body, lambda b: L.seal_body(self.key, b))
+        store.add_checkpoint(L.seal_checkpoint(self.key, store.realm, store.size(), store.root(), h, self.FENCE, _now()))
+        try:
+            self._commit_tail(store)
+        except SignerRefused:
+            if self.ha["role"] != "active":
+                return "standby"
+            raise
+        self.ha["role"], self.ha["why"], self.ha["ok_at"] = "active", f"took over at {done}", self.ha["clock"]()
+        self._audit({"op": "ha_takeover", "size": done})
+        self._write_mark()
+        return "active"
+
+    def start_ha(self, every_seconds: float) -> threading.Thread:
+        """The HA loop (ha_tick) every every_seconds, in a thread of its own; a role change is said on stderr."""
+        def loop():
+            last = None
+            while True:
+                try:
+                    role = self.ha_tick()
+                except Exception as e:   # noqa: BLE001 - nothing moves on an error: the next tick retries
+                    role = self.ha["role"]
+                    sys.stderr.write(f"keyclerk.signer: HA tick incomplete: {e}\n")
+                if role != last:
+                    sys.stderr.write(f"keyclerk.signer: HA node {self.ha['node']} is {role}"
+                                     f"{': ' + self.ha['why'] if self.ha['why'] else ''}\n")
+                    last = role
+                time.sleep(every_seconds)
+        t = threading.Thread(target=loop, name="keyclerk-ha", daemon=True)
+        t.start()
+        return t
 
     def start_witness(self) -> threading.Thread:
         """The witness check after each signed link and at least every every_seconds, in a thread of its own."""
@@ -745,6 +1020,88 @@ class Signer:
             (self.state / "restore.json").unlink(missing_ok=True)   # the numbering resumed above the mark
             return {"link": sealed, "checkpoint": cp, "hash": h.hex(), "revision": replay.revision(store)}
 
+    def ha_change(self, mode: str, value: dict | None, node: str | None, confirmations: list[tuple[str, str]], verify,
+                  witness=None) -> dict:
+        """Switch HA on or off, or name other nodes or another commit witness, or break the glass (decision 0031 points 3
+        and 10): one HA change link, signed only once the security officer and a root trust owner each proved the
+        statement for this realm, mode, value and base (operator 2026-11-05). Never over the socket: run offline with
+        every signer node stopped (python -m keyclerk.ha). With HA on, `witness` is the current commit witness's
+        client: a planned change is signed only on its committed head; a break-glass only while it does not answer."""
+        import secrets
+        from datetime import datetime, timezone
+
+        from keyclerk import ha as HA
+        from keyclerk import restore as R
+        from keyclerk.store import link as L
+        from keyclerk.store import note as N
+        from keyclerk.store import replay
+        with self.lock:
+            store = self._ready()
+            if self.not_ready:
+                raise SignerRefused(self.not_ready)
+            if (self.state / "restore.json").exists():
+                raise SignerRefused("this signer was restored from a backup: resume its numbering first (decision 0019)")
+            current = (store.get("head", "ha") or {}).get("value")
+            if mode == "set":
+                errs = HA.check({"ha": value})
+                if errs:
+                    raise SignerRefused(errs[0])
+                if value == current:
+                    raise SignerRefused("the log already holds this HA configuration")
+            elif mode in ("off", "break_glass"):
+                if current is None:
+                    raise SignerRefused("HA is off in this log: there is nothing to switch off")
+                value = None
+            else:
+                raise SignerRefused("an HA change is set, off or break_glass")
+            if (mode == "break_glass") != (node is not None):
+                raise SignerRefused("a break-glass names the one signer node that signs on; nothing else names a node")
+            if node is not None and node not in current["nodes"]:
+                raise SignerRefused(f"{node} is not one of the log's HA nodes")
+            size, head = store.size(), store.head()
+            hexhead = head.hex() if head is not None else L.ZERO
+            if current is not None:
+                if witness is None:
+                    raise SignerRefused("HA is on in this log: give the commit witness's address, so the change is "
+                                        "signed on its committed head (or, for a break-glass, while it is stopped)")
+                cfg = {**current, "witness_key": N.parse_vkey(current["commit_witness"])}
+                try:
+                    done, root = self._committed_checkpoint(cfg, witness)
+                except OSError as e:
+                    if mode != "break_glass":
+                        raise SignerRefused(f"the commit witness does not answer ({e}): with it lost, two people break "
+                                            "the glass (decision 0031 point 10), then switch HA on again") from None
+                else:
+                    if mode == "break_glass":
+                        raise SignerRefused("the commit witness answers: stop it before breaking the glass, so no other "
+                                            "node can commit meanwhile, or change HA the planned way")
+                    if (done, root) != (size, store.root()):
+                        raise SignerRefused(f"this node's head ({size}) is not the committed head ({done}): change HA on "
+                                            "the node whose head the commit witness took")
+            nonce = lambda by: HA.statement(store.realm, by, mode, size, hexhead, value, node)   # noqa: E731
+            problems = R.check_confirmations(replay.records(store), store.realm, 0, "", dict(confirmations), verify,
+                                             datetime.now(timezone.utc), nonce=nonce, what="the HA change")
+            if problems:
+                raise SignerRefused("the HA change is not confirmed: " + "; ".join(problems))
+            ordered = sorted(confirmations)
+            proofs = [{"by": by, "proof": hashlib.sha256(token.encode()).hexdigest()} for by, token in ordered]
+            op = {"op": "put", "kind": "head", "key": "ha", "record": {"value": value}} if mode == "set" \
+                else {"op": "del", "kind": "head", "key": "ha"}
+            entry = {"change_id": "C-" + secrets.token_hex(6), "action": "ha_" + mode, "outcome": "applied",
+                     "actor": None, "records": {}}
+            try:
+                body = L.link_body(store.realm, size, hexhead, self.FENCE, _now(), [op], entry,
+                                   ha={"mode": mode, "confirmations": proofs, **({"node": node} if node else {})})
+                side = [("proof_tokens", p["proof"], {"token": token}) for p, (_, token) in zip(proofs, ordered, strict=False)]
+                sealed, h = store.append_checked(body, lambda b: L.seal_body(self.key, b), side=side)
+            except L.StoreRefused as e:
+                raise SignerRefused(str(e)) from None
+            cp = L.seal_checkpoint(self.key, store.realm, store.size(), store.root(), h, self.FENCE, _now())
+            store.add_checkpoint(cp)
+            self._write_mark()
+            self._audit({"op": "ha_change", "mode": mode, "node": node, "by": [p["by"] for p in proofs]})
+            return {"link": sealed, "checkpoint": cp, "hash": h.hex(), "revision": replay.revision(store), "mode": mode}
+
     DUPLICATE_WINDOW = 1000                       # links after a stale base searched for the same change
 
     def propose(self, base: dict, change: dict, tokens: list, rows: list | None = None) -> dict:
@@ -761,6 +1118,9 @@ class Signer:
                 raise SignerRefused("this signer was restored from a backup and may not sign at positions it lost "
                                     "(decision 0019): stop it and take the lost links back from a follower (python -m "
                                     "keyclerk.restore recover-log), or sign the restore link (restore link)")
+            if self.ha is not None:                   # decision 0031: only the active node signs, and it commits first
+                self._ha_serving()                    # a standby says so before anything else: the desk asks the next
+                self._commit_tail(store)              # an earlier change whose answer was lost: committed, or deposed
             size, head = store.size(), store.head()
             hexhead = head.hex() if head is not None else None
             if not isinstance(base, dict) or base.get("size") != size or base.get("head") != hexhead:
@@ -771,6 +1131,8 @@ class Signer:
             if not isinstance(change, dict) or set(change) != {"ops", "entry"}:
                 raise SignerRefused("a change is exactly ops and entry")
             _entry_shape(change["entry"])
+            if self.ha is not None:
+                change = {**change, "entry": {**change["entry"], "node": self.ha["node"]}}
             per_kind: dict[str, int] = {}
             for op in change["ops"] if isinstance(change["ops"], list) else []:
                 k = op.get("kind") if isinstance(op, dict) else None
@@ -805,8 +1167,10 @@ class Signer:
             cp = L.seal_checkpoint(self.key, store.realm, store.size(), store.root(), h, self.FENCE, _now())
             store.add_checkpoint(cp)
             self._write_mark()
+            if self.ha is not None:
+                self._commit_tail(store)              # answered only once the commit witness took it
             return {"link": sealed, "checkpoint": cp, "hash": h.hex(), "root": store.root().hex(),
-                    "revision": replay.revision(store)}
+                    "revision": replay.revision(store), **({"commit": self.ha["note"]} if self.ha is not None else {})}
 
     def _duplicate(self, store, base, change) -> dict | None:
         """A change proposed again after its answer was lost: the desk's base is stale only because this very change
@@ -831,9 +1195,12 @@ class Signer:
             body, h = L.open_link(sealed, self.public_key())
             if body["change"]["entry"].get("change_id") != cid:
                 continue
-            if body["change"]["ops"] != ops or body["change"]["entry"] != change["entry"]:
+            kept = {k: v for k, v in body["change"]["entry"].items() if k != "node"}     # the node is the signer's
+            if body["change"]["ops"] != ops or kept != change["entry"]:
                 raise SignerRefused(f"change {cid[:40]} is already link {seq}, with other contents: a change id names "
                                     "one change; give a new change a new id")
+            if self.ha is not None:
+                self._commit_tail(store)              # asked again: committed before it is answered
             return {"duplicate": seq, "link": sealed, "checkpoint": store.checkpoint(seq + 1), "hash": h.hex()}
         return None
 
@@ -930,7 +1297,9 @@ class Signer:
         if not (isinstance(start, int) and isinstance(limit, int) and start >= 0 and 1 <= limit <= 500):
             raise SignerRefused("links: start from 0, limit 1 to 500")
         with self.lock:
-            return {"links": list(store.links(start, start + limit)), "size": store.size()}
+            n = self._ha_serving()
+            size = store.size() if n is None else min(n, store.size())
+            return {"links": list(store.links(min(start, size), min(start + limit, size))), "size": size}
 
     def tokens(self, after: str | None, limit: int) -> dict:
         """The proof tokens, for a desk that lost its store: bounded, and every call a signed line in the audit log."""
@@ -1016,6 +1385,9 @@ class Signer:
     def checkpoint(self, size: int | None) -> dict:
         store = self._readable()
         with self.lock:
+            n = self._ha_serving()
+            if n is not None and (size is None or size > n):
+                size = n
             cp = store.checkpoint(size)
         if cp is None:
             raise SignerRefused(f"no checkpoint at {size} links")
@@ -1077,11 +1449,19 @@ _ENTRY_WORD = re.compile(r"[a-z_]{1,40}")
 _ENTRY_SUMMARY = re.compile(r"[a-z_]{1,40} on [A-Za-z0-9_:, -]{0,400}")    # the desk's "<action> on <visit ids>"
 
 
+from keyclerk.ha import NODE as _HA_NODE  # noqa: E402
+
+
+STANDBY = "this signer is an HA standby"
+
+
 def _entry_shape(entry) -> None:
     """A link keeps an entry's structure, never its free text (decision 0028): the desk's LINK_ENTRY fields, each in
     its shape, checked here because the signed log is kept for good and no erasure reaches it."""
-    if not isinstance(entry, dict) or not set(entry) <= {"change_id", "action", "actor", "outcome", "records", "summary"}:
-        raise SignerRefused("an entry is change_id, action, actor, outcome and records (and a visit's summary) only")
+    if not isinstance(entry, dict) or not set(entry) <= {"change_id", "action", "actor", "outcome", "records", "summary",
+                                                         "node"}:
+        raise SignerRefused("an entry is change_id, action, actor, outcome and records (and a visit's summary, and in HA "
+                            "the signer node) only")
     from keyclerk import anchors as A
     checks = [("change_id", lambda v: isinstance(v, str) and _ENTRY_ID.fullmatch(v)),
               ("action", lambda v: isinstance(v, str) and _ENTRY_WORD.fullmatch(v)),
@@ -1089,6 +1469,7 @@ def _entry_shape(entry) -> None:
               ("actor", lambda v: v is None or A.is_internal(v) or (isinstance(v, str) and v.startswith("keyclerk:")
                                                                      and _ENTRY_WORD.fullmatch(v[9:]))),
               ("summary", lambda v: isinstance(v, str) and _ENTRY_SUMMARY.fullmatch(v)),
+              ("node", lambda v: isinstance(v, str) and _HA_NODE.fullmatch(v)),
               ("records", lambda v: isinstance(v, dict) and all(_ENTRY_WORD.fullmatch(str(k)) and isinstance(x, list)
                                                                 for k, x in v.items()))]
     for key, ok in checks:
@@ -1186,10 +1567,14 @@ def serve(signer: Signer, listen: str, token: str | None, role: str = "desk"):
 
 
 class SignerClient:
-    """What the desk's store calls instead of holding the records key."""
+    """What the desk's store calls instead of holding the records key. In HA (decision 0031) the address is the
+    nodes' addresses, comma separated: a call goes to the node that answered last, and to the next one when a node is
+    a standby or does not answer. A standby signs and serves nothing, so asking the next one is always safe; a change
+    whose answer was lost is found again by its change id wherever it is asked."""
 
     def __init__(self, address: str, token_file: str | None = None):
-        self.address = address
+        self.addresses = [x.strip() for x in address.split(",") if x.strip()]
+        self.address = self.addresses[0]
         self.token = Path(token_file).read_text(encoding="utf-8").strip() if token_file else None
 
     def _call(self, req: dict) -> dict:
@@ -1197,10 +1582,28 @@ class SignerClient:
         op = str(req.get("op"))
         try:
             with metrics.timed("keyclerk_signer_seconds", op=op):
-                return self._call_raw(req)
+                if len(self.addresses) == 1:
+                    return self._call_raw(req)
+                return self._call_any(req)
         except Exception:
             metrics.inc("keyclerk_signer_errors_total", op=op)
             raise
+
+    def _call_any(self, req: dict) -> dict:
+        i = self.addresses.index(self.address)
+        why = []
+        for addr in self.addresses[i:] + self.addresses[:i]:
+            self.address = addr
+            try:
+                return self._call_raw(req)
+            except SignerRefused as e:
+                if not str(e).startswith(STANDBY):
+                    raise
+                why.append(f"{addr}: a standby")
+            except OSError as e:
+                why.append(f"{addr}: {e}")
+        raise SignerRefused(f"no active signer node answered ({'; '.join(why)}): the core is taking over, or the "
+                            "commit witness is away; the desk reads on from its replica")
 
     def _call_raw(self, req: dict) -> dict:
         if self.token:
@@ -1318,10 +1721,8 @@ def resume_main(argv: list[str]) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["resume"]:
-        return resume_main(argv[1:])
+def parser() -> argparse.ArgumentParser:
+    """The command line, without starting anything: what the deployer contract and the preflight read."""
     ap = argparse.ArgumentParser(prog="python -m keyclerk.signer", description=__doc__.splitlines()[0])
     ap.add_argument("--key", required=True)
     ap.add_argument("--state", required=True)
@@ -1339,7 +1740,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--full-check", action="store_true",
                     help="judge every change by the full check, not scoped to what it reaches (the reference path)")
     ap.add_argument("--adopt", metavar="STORE", help="take over the current revision of this desk store, then exit")
+    ap.add_argument("--ha-node", help="this signer's node name in the log's ha record (decision 0031); with "
+                                      "--commit-witness, the signer starts as a standby")
+    ap.add_argument("--commit-witness", metavar="URL", help="the realm's commit witness (its key comes from the log)")
+    ap.add_argument("--ha-hold", type=float, default=30.0,
+                    help="seconds the committed head stands still before this standby takes over")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["resume"]:
+        return resume_main(argv[1:])
+    ap = parser()
     a = ap.parse_args(argv)
+    if bool(a.ha_node) != bool(a.commit_witness):
+        raise SystemExit("HA needs both --ha-node and --commit-witness")
+    if a.ha_node and a.ha_hold < 5:
+        raise SystemExit("--ha-hold is at least 5 seconds: a shorter one takes over from a node that merely paused")
     from keyclerk import config, guard
     config.configure(a.config)
     key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(guard.read_bounded(Path(a.key), 200).strip()))
@@ -1380,10 +1798,21 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write(f"keyclerk.signer: witness {name}: {o['result']}{': ' + o['why'] if 'why' in o else ''}\n")
         if signer.broken:
             sys.stderr.write(f"keyclerk.signer: refusing to sign: {signer.broken}\n")
+    if a.ha_node:
+        from keyclerk import commit_witness
+        if signer.replica is None:
+            raise SystemExit("HA needs the change log: migrate this signer first (decision 0031 point 12)")
+        signer.configure_ha(a.ha_node, commit_witness.CommitClient(a.commit_witness), a.ha_hold)
+        try:
+            signer._ha_cfg(signer.replica)
+        except SignerRefused as e:
+            raise SystemExit(f"keyclerk.signer: {e}") from None
     if signer.replica is not None and not signer.broken:
         signer.start_background(a.full_check_hours * 3600)
         if signer.witness is not None:
             signer.start_witness()
+        if signer.ha is not None:
+            signer.start_ha(max(1.0, a.ha_hold / 6))
     srv = serve(signer, a.listen, token)
     if a.reconciler_listen:
         rtoken = Path(a.reconciler_token).read_text(encoding="utf-8").strip() if a.reconciler_token else None

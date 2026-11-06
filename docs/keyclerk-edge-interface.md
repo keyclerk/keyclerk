@@ -18,6 +18,39 @@ An edge pins three keys at installation, from people, never from the desk:
 The edge also keeps its own floors: the highest bundle serial applied, the newest signed time seen, and the highest
 ceiling serial held. Losing them is a reinstall, not a reset.
 
+**Trusted time (version 1.5).** Every end an edge enforces (a lease, a visit lease, a class horizon, a certificate's
+expiry) is judged at its trusted time, never at its wall clock alone. At each verified bundle the edge records its
+trusted time at that moment (never its raw wall clock, so a clock set back while a bundle arrives cannot pull the
+record back), its boot clock (time since boot, counting suspend, as CLOCK_BOOTTIME) and the boot's id. Its trusted time
+is then the wall clock, unless the time recorded at that bundle plus the boot clock since it is more than 5 minutes
+later, and then that later moment: a wall clock set back or held still cannot keep anything alive. With the 5-minute
+skew allowed here and in a bundle's issue time, an end can be acted on up to 10 minutes late, never more. The edge also
+wakes at least once an hour and records a new anchor each time: the later of the wall clock and the anchor plus the
+boot clock since (never the trusted time itself, which keeps the wall clock within the skew and would let a lag grow
+by the skew at each wake). So a boot clock frozen while the wall clock is honest (a paused virtual machine) loses
+nothing, and a wall clock set back while the boot clock runs gains nothing; both tampered at once is beyond what an
+edge can see, and is a limit of the deployment. The family `ratchet` in section 13 holds the cases. After a reboot, the
+recorded boot clock no longer counts: nothing is live until the desk's time answer arrives (below), and a bundle never
+re-anchors the edge, however new its serial: a bundle held back and delivered with the wall clock set to its signing
+time would make old time current. A verified bundle's reductions (its floors, revocations and ends) are stored at once
+all the same, before anything is live again. (A tpm clock, where the edge has one, may stand in for the boot clock
+across the reboot.) The earlier of the two readings, the wall clock or the anchor plus the boot clock since, judges a
+widening and never an end, with one difference: for a start the anchor is the start anchor, verified time only (the
+newest verified bundle's issue time, or the desk's time answer, with the boot clock at its arrival), never the
+ratchet's anchor, which a wall clock set forward would raise at the next wake. A lease's or visit lease's start is
+judged on that earlier reading (`now_start` in the edge policy's admit, section 6), its end and horizon on the trusted
+time (`now`), so a wall clock set forward opens nothing early, however many wakes pass. The family `start_time` in
+section 13 holds the cases. The family `trusted_time` in section 13 holds the cases. Edge protocol 1.4 stated only "the
+later of the clock and the newest signed time", which a clock held at the newest signed time defeats while the edge is
+cut off.
+
+**After a reboot (version 1.5)** no positive grant becomes live on the edge's own word about time. The edge asks the desk
+for its time with a signed request (`GET /api/v1/edge/time`) and gets `kc-edge-time-v1` `{edge, nonce, issued}`, sealed
+by the bundle key and echoing that request's nonce. It accepts the answer only for this edge, for that nonce, and when it
+arrives within 30 seconds of the request on the boot clock; its trusted time is then anchored at `issued`, and only from
+then is a verified bundle live again. Until then only reductions apply (a revocation, an end, the ended notice). The
+nonce is kept in memory for the boot, never in the edge's state. The family `time` in section 13 holds the cases.
+
 ## 2. Enrolment
 1. The edge makes its enrolment key (`python -m keyclerk.edge_cli keygen edge.key`) and its phoned-unlock key: P-256,
    inside its TPM where it has one, else `unlock-keygen unlock.key`.
@@ -55,7 +88,7 @@ document to check a signature. Two shapes:
 - **sealed** `{"bytes": base64(canonical JSON), "signature": hex, "key": hex, "key_id": hex16}`, exactly these members;
   the object inside names its `format` and the signer's `key_id`. Formats: `kc-edge-bundle-v3`, `kc-edge-ceiling-v2`
   (sealed by the officer), `kc-edge-ended-v2`, `kc-edge-carried-v1`, `kc-edge-key-rollover-v1`,
-  `kc-edge-escrow-ack-v1`, `kc-edge-escrow-status-v1`, `kc-edge-evidence-ack-v1`, `kc-edge-email-v1`, `kc-policy-release-v1`.
+  `kc-edge-escrow-ack-v1`, `kc-edge-escrow-status-v1`, `kc-edge-evidence-ack-v1`, `kc-edge-email-v1`, `kc-edge-time-v1`, `kc-policy-release-v1`.
 - **multi-signed** `{"bytes": ..., "signatures": [{"key", "key_id", "signature"}]}`: signed by exactly the keys named
   (each once, no other); the object inside names its `format`. Format: `kc-edge-officer-v2`.
 
@@ -121,7 +154,8 @@ Signed integers are 0 to 2^53-1, and a lease of a class without a horizon is nev
 ## 6. Policy in the edge
 `edge.wasm` (entrypoints `keyclerk/edge/settings`, `admit`, `visit_window`, `attestation`) and `ceiling.wasm`
 (`keyclerk/ceiling/decision`) are named in the bundle by hash and fetched by hash; evaluate them in process (wazero or similar). `settings` gives the
-horizons, `visit_max_hours`, `local_window_hours` and `session_max_hours`. Run `tests/conformance/edge.json` against the
+horizons, `visit_max_hours`, `local_window_hours` and `session_max_hours`. `admit` takes `now` (the trusted time: ends and horizons) and, from version 1.5,
+`now_start` (the earlier reading: starts, section 1). Run `tests/conformance/edge.json` against the
 modules you load; `edge_cli conformance` does it for the reference.
 
 ## 7. Calls an edge makes
@@ -133,6 +167,7 @@ modules you load; `edge_cli conformance` does it for the reference.
 | `POST /edge/escrow` | `{system, item_id, envelopes [{key_id, envelope}] x2}` to designated custodians; context `escrow:<system>:<item>` | sealed escrow ack |
 | `GET /edge/escrow/{item}` | | sealed status; forget the value only when `confirmed` |
 | `GET /edge/lease/{lease_id}/email` | | sealed `kc-edge-email-v1` `{edge, lease_id, person, email, nonce, issued}` for a lease live on this edge (version 1.3); check the bundle key, this edge and lease, and that `nonce` is your request's own; use the address to set the credential and keep it nowhere; `email` null when the broker holds no verified address; 404 when the lease is not live here, 429 beyond six a minute per lease |
+| `GET /edge/time` | | sealed `kc-edge-time-v1` `{edge, nonce, issued}` (version 1.5): the desk's time for this signed request; check the bundle key, this edge, that `nonce` is your request's own and that it arrived within 30 seconds on your boot clock; after a reboot your trusted time is anchored at `issued`, and only then is a bundle live again (section 1) |
 | `POST /edge/incident` | `{kind, system, at, detail, log_sha256}`; kinds `break_glass_used`, `drift`, `evidence_floor`, `bind_without_session`, `lease_ended_early`, `other`. `lease_ended_early` (version 1.4) adds `lease_id` and needs `system` (the bastion) and `at` (a time with its zone, such as `2026-11-04T09:30:00Z`): the bastion took away the lease's assignment before the lease's `until`. Report only a lease of the last bundle; one the desk no longer lists, or an end at or after `until`, is refused | `{incident_id}` |
 | `POST /edge/evidence` | `{entries [{seq, prev, sha256, size, session, at, lease_id?}]}`, a chain: `prev` is sha256 of the previous entry's canonical bytes; `lease_id` (version 1.4) names the lease the session ran under | sealed ack up to a sequence; a resend is no change |
 | `GET /edge/evidence` | | sealed head |
@@ -177,6 +212,15 @@ and closes one. It applies a lease, removes it at its end, and confirms the remo
 it also reports a lease whose assignment the bastion ended early (`lease_ended_early`), and at start each risky
 setting it knows of (one that takes an assignment away early, say) as `drift`. An agent that reports version 1.3 is
 not expected to do the version 1.4 parts.
+
+### 7.3 Version 1.5: how a node became active
+A node of a high-availability edge (two nodes in its officer's statement) says in its report how it became the active
+one: `activation {by, at, statement?}`, `by` one of `witness` (a majority with the core's witness), `local_witness` (a
+majority with the site's own witness device) or `break_glass`, `at` a time with its zone. A break-glass promotion
+carries the site key's `promotion` statement (section 15) whole, for this edge and this node, and only it carries one;
+the desk verifies it against the edge's site key and refuses an activation it cannot verify. The desk keeps which node
+is active, and raises an incident when the active node changes and for every break-glass promotion. A node never
+becomes active on its own timer: the election is the edge implementation's, with a third vote.
 
 ## 8. Envelopes to people
 `kc-relay-v1`: `{format, epk, nonce, ct, context}`: X25519 with a fresh key, HKDF-SHA256 (salt `epk || recipient`,
@@ -245,9 +289,36 @@ An assured edge proves three things; until it has, it gets what a basic edge get
 ## 13. Conformance
 `tests/conformance/edge.json` (`edge_cli conformance`): the policy cases, the bundle verifier, and the families of
 `keyclerk/edge_conformance.py`: `statements` (multi-signed), `ceilings` (sealed), `ended`, `unlock` (both sides reach
-one code, or both refuse) and `module_bytes`. Keys in it are fixed seeds; never use them for anything else.
+one code, or both refuse), `module_bytes`, and from version 1.5 `trusted_time` (section 1). Keys in it are fixed
+seeds; never use them for anything else.
 
 ## 14. Not here yet
 The bundle key and the desk's unlock key move into the checking signer (decision 0015), which then checks every lease
 against the records; a lease's username and e-mail need a source the signer can check first (found in a review, 2026-10-24).
 Two nodes per edge (the HA profile) are in the statement format; the desk enrols one node until the HA profile lands.
+## 15. Relays and the site key (version 1.5)
+A relay between the desk and the edges of a site tightens, never grants (KeyClerk decision 0027).
+- **The certificate.** The edges' officer signs `kc-edge-relay-v1` with their hardware key (the multi-signed envelope
+  of `kc-edge-officer-v2`, signed by exactly that key): `{officer_key, relay_key, edges [ids], operations [op], serial,
+  issued, expires}`, at most 31 days from issued to expires, the edges a list, never a pattern.
+- **A tightening.** The relay seals `kc-edge-tighten-v1` with its key: `{cert_sha256, edge, parent_serial, counter,
+  signed_at, ops [{op, ...}]}`. Operations: `revoke_lease {lease_id}`, `end_lease {lease_id, until}`, `cut_sessions
+  {lease_id | "*"}`, `suspend_edge {}`, `rollback_release {serial}`, `hold_release {}`.
+- **What the edge checks.** The chain from its pinned officer key through the certificate to the tightening:
+  - the certificate names this edge and each operation;
+  - it has not expired in the edge's trusted time (section 1), and never later than its newest signed time;
+  - the tightening names the certificate by the sha256 of its bytes, and names this edge;
+  - its parent serial is the serial of the bundle the edge applied, so a newer parent bundle supersedes it;
+  - its counter is above the last one applied from that relay key;
+  - every operation narrows the edge's current state: a lease it holds, an end before the lease's own, a release
+    below the current one and no lower than its floor.
+
+  Anything else is refused whole.
+- **What no relay can do.** No operation adds a lease, widens a window, lifts a suspension or ends an edge. A parent
+  bundle lifts a suspension; only the officer's ended notice ends an edge.
+- **The site key.** One physical key per site, pinned in each of its edges' enrolment, signs `kc-edge-site-v1` with the
+  node it names, both keys over the same bytes: `{purpose, edge, site_key, node_key, at, reason}`. `purpose` is
+  `provisional` (a replacement that runs on a dead edge's cached bundle until the officer confirms or ends it) or
+  `promotion` (a node made active by hand, section 7.3). The purpose is inside the signed bytes, so a statement made for
+  one never serves as the other.
+

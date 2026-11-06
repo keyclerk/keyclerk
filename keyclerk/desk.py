@@ -325,7 +325,8 @@ class DeskFiles:
             _atomic(self.path / "pending.json", json.dumps(p, sort_keys=True).encode("utf-8"))
 
 
-REPORT_FIELDS = {"applied_serial", "attestation", "drift", "records_head", "removals", "bastion"}
+REPORT_FIELDS = {"applied_serial", "attestation", "drift", "records_head", "removals", "bastion", "activation"}
+ACTIVATION_BY = ("witness", "local_witness", "break_glass")     # edge protocol 1.5, decision 0031 point 2
 EVIDENCE_FIELDS = {"seq", "prev", "sha256", "size", "session", "at"}
 # What a bastion enforces by itself, so it still holds while the edge's agent is down (edge protocol 1.4, decision 0030
 # point 7); what every adapter does through the bastion's API is the conformance profile, never a token.
@@ -343,6 +344,23 @@ def _zoned(v, what: str) -> datetime:
     if at is None or at.tzinfo is None:
         raise guard.InputRejected(f"{what}: a time with its zone, such as 2026-11-04T09:30:00Z")
     return at.astimezone(timezone.utc)
+
+
+def _activation(body: dict, now: datetime) -> dict | None:
+    """A report's activation (edge protocol 1.5): how this node became the active one. {by, at, statement?}: by a
+    majority with the core's witness, with the site's own witness device, or by break-glass, which carries the site
+    key's promotion statement whole. Its signature is checked by the desk against the edge's site key."""
+    if "activation" not in body:
+        return None
+    a = body["activation"]
+    if not isinstance(a, dict) or not {"by", "at"} <= set(a) <= {"by", "at", "statement"} or a.get("by") not in ACTIVATION_BY:
+        raise guard.InputRejected(f"activation: {{by: {' | '.join(ACTIVATION_BY)}, at, statement?}}")
+    at = _zoned(a["at"], "activation.at")
+    if at > now + timedelta(minutes=5):
+        raise guard.InputRejected("activation.at is in the future")
+    if (a["by"] == "break_glass") != ("statement" in a):
+        raise guard.InputRejected("a break-glass activation carries the site key's promotion statement, and only it does")
+    return {"by": a["by"], "at": _iso(at), **({"statement": a["statement"]} if "statement" in a else {})}
 
 
 def _report_14(body: dict, now: datetime) -> tuple[dict | None, list[dict], dict | None]:
@@ -1259,6 +1277,21 @@ class Desk:
             raise LookupError("no enrolled edge by that id")
         return edge_records.current(doc, e, now)
 
+    def edge_keys_of(self, edge_id: str) -> list[str]:
+        """The enrolment keys an edge's nodes sign with now (decision 0031: one, or two); empty if unknown."""
+        from keyclerk import edge_records
+        doc, now = self.store.load(), self.clock()
+        e = next((x for x in doc.get("edges", []) if x["edge_id"] == edge_id), None)
+        return edge_records.node_keys(edge_records.current(doc, e, now)) if e else []
+
+    def _node_seen(self, edge_id: str, node: str | None, **what) -> None:
+        """What one node of an edge did last (decision 0031): kept apart per node, under the edge."""
+        if not node:
+            return
+        nodes = dict(self.edge_store.state(edge_id).get("nodes") or {})
+        nodes[node] = {**(nodes.get(node) or {}), **what}
+        self.edge_store.update_state(edge_id, nodes=nodes)
+
     def edge_public_of(self, edge_id: str) -> str | None:
         """The enrolment key an edge signs with now (an ended edge too, so it can learn it was ended); None if unknown."""
         from keyclerk import edge_records
@@ -1276,7 +1309,7 @@ class Desk:
             return None
         e = next((x for x in doc.get("edges", []) if x["edge_id"] == edge_id), None)
         at = D._ts(r["at"])
-        keys = [edge_records.current(doc, e, at)["enrolment_key"]] if e else []    # bound to its keys
+        keys = edge_records.node_keys(edge_records.current(doc, e, at)) if e else []   # bound to every node's key
         return E.ended_notice(self.bundle_key, edge_id, at, r.get("reason", ""), keys)
 
     def _unlock_private(self):
@@ -1429,8 +1462,10 @@ class Desk:
     LONG_POLL_MAX_WAIT = 55                    # seconds: under common proxy idle timeouts (decision 0026)
 
     def edge_bundle(self, edge_id: str, serial: str | None = None, quote: str | None = None,
-                    request: tuple | None = None, after: str | None = None, wait: str | None = None) -> dict:
+                    request: tuple | None = None, after: str | None = None, wait: str | None = None,
+                    node: str | None = None) -> dict:
         from keyclerk import metrics, restore
+        self._node_seen(edge_id, node, last_pull=_iso(self.clock()))
         if restore.marker(self.store.path) is not None:
             raise restore.RestoreMode("the desk is being restored: keep the current bundle and pull again later")
         try:
@@ -1647,7 +1682,7 @@ class Desk:
         import base64
         return {"edge": edge_id, "serial": c["serial"], "sha256": E.sha256(base64.b64decode(body["ceiling"]["bytes"]))}
 
-    def edge_report(self, edge_id: str, body: dict) -> dict:
+    def edge_report(self, edge_id: str, body: dict, node: str | None = None) -> dict:
         """What the edge applied, its attestation (the hardware profile as policy input) and any drift it saw."""
         if not isinstance(body, dict) or not set(body) <= REPORT_FIELDS:
             raise guard.InputRejected("a report is {applied_serial, attestation, drift} and, from edge protocol 1.4, "
@@ -1665,11 +1700,16 @@ class Desk:
             raise guard.InputRejected("attestation.profile: assured or basic")
         drift = [guard.text(x, "drift", 300) for x in (body.get("drift") or [])][:50]
         head, removals, bastion = _report_14(body, self.clock())
+        activation = _activation(body, self.clock())
+        if activation is not None:
+            self._activation(edge_id, node, activation)
         report = {"applied_serial": int(body.get("applied_serial") or 0), "attestation": {k: guard.text(v, k, 200) for k, v in att.items()},
                   "drift": drift, "at": _iso(self.clock()), "attestation_verified": False}   # claimed until quotes are verified
-        before = ((self.edge_store.state(edge_id).get("report") or {}).get("attestation") or {}).get("profile")
+        last = self.edge_store.state(edge_id).get("report") or {}
+        before = (last.get("attestation") or {}).get("profile")
         if before and before != att.get("profile"):
-            self.edge_store.incident(edge_id, {"kind": "attestation_changed", "detail": f"claimed profile {before} became {att.get('profile')}"})
+            self._report_incident(edge_id, {"kind": "attestation_changed",
+                                            "detail": f"claimed profile {before} became {att.get('profile')}"})
         if head is not None:
             report["records_head"] = head
             self._echoed_head(edge_id, head)
@@ -1677,15 +1717,59 @@ class Desk:
             report["bastion"] = bastion
             was = (self.edge_store.state(edge_id).get("report") or {}).get("bastion")
             if was and was != bastion:
-                self.edge_store.incident(edge_id, {"kind": "bastion_changed", "detail": (
+                self._report_incident(edge_id, {"kind": "bastion_changed", "detail": (
                     f"declared {was['product']} {was['version']} {sorted(was['capabilities'])} became "
                     f"{bastion['product']} {bastion['version']} {sorted(bastion['capabilities'])}")[:900]})
         if removals:
             self.edge_store.removals_add(edge_id, removals, report["at"])
         self.edge_store.update_state(edge_id, report=report, last_report=report["at"])
-        if drift:
-            self.edge_store.incident(edge_id, {"kind": "drift", "detail": "; ".join(drift)[:900]})
+        self._node_seen(edge_id, node, report=report, last_report=report["at"])
+        if drift and sorted(drift) != sorted(last.get("drift") or []):   # a drift that changed, not every report of it
+            self._report_incident(edge_id, {"kind": "drift", "detail": "; ".join(drift)[:900]})
         return {"ok": True}
+
+    def _report_incident(self, edge_id: str, rec: dict) -> None:
+        """An incident a report raises. The edge's cap on incidents (60 an hour) drops the incident, never the report:
+        the report is stored already, and a refusal made the edge send it again and again. Dropped ones are counted."""
+        from keyclerk import metrics
+        try:
+            self.edge_store.incident(edge_id, rec)
+        except ValueError:
+            metrics.inc("keyclerk_edge_incidents_dropped_total", kind=str(rec.get("kind") or "other"))
+
+    def _activation(self, edge_id: str, node: str | None, a: dict) -> None:
+        """How a node of a high-availability edge became active (decision 0031 point 2). A break-glass promotion must
+        carry a promotion statement for this edge and this node, signed by the edge's pinned site key and the node: an
+        incident either way. The desk records which node is active and raises an incident when that changes."""
+        from keyclerk import edge as E
+        from keyclerk import edge_records, edge_relay
+        doc, now = self.store.load(), self.clock()
+        e = next((x for x in doc.get("edges", []) if x["edge_id"] == edge_id), None)
+        keys = {E.key_id(k): k for k in edge_records.node_keys(edge_records.current(doc, e, now))} if e else {}
+        if node is None or node not in keys:
+            raise guard.InputRejected("activation: only a node of this edge reports how it became active")
+        if a["by"] == "break_glass":
+            if not e.get("site_key"):
+                raise Refusal("a break-glass promotion needs the edge's site key on record (edges[].site_key): the "
+                              "promotion cannot be verified, so it is not accepted")
+            try:
+                st = edge_relay.verify_site(a["statement"], e["site_key"], edge_id, "promotion")
+            except ValueError as x:
+                raise guard.InputRejected(f"activation.statement: {x}") from None
+            if st["node_key"] != keys[node]:
+                raise guard.InputRejected("activation.statement promotes another node")
+            a = {**a, "statement_at": st["at"], "reason": st["reason"]}
+        st_ = self.edge_store.state(edge_id)
+        was = st_.get("active_node")
+        if was != node or (st_.get("nodes") or {}).get(node, {}).get("activation", {}).get("at") != a["at"]:
+            if a["by"] == "break_glass":
+                self.edge_store.incident(edge_id, {"kind": "break_glass_promotion", "detail": (
+                    f"node {node} was promoted by the site key at {a['at']}: {a.get('reason', '')}")[:900]}, core=True)
+            elif was and was != node:
+                self._report_incident(edge_id, {"kind": "node_promoted", "detail": (
+                    f"node {node} became active ({a['by']}) at {a['at']}, after node {was}")[:900]})
+        self._node_seen(edge_id, node, activation={k: v for k, v in a.items() if k != "statement"})
+        self.edge_store.update_state(edge_id, active_node=node)
 
     def _echoed_head(self, edge_id: str, head: dict) -> None:
         """An edge echoes the records head of the bundle it applied: a weak witness of the records (edge protocol
@@ -1874,15 +1958,26 @@ class Desk:
         doc, now = self.store.load(), self.clock()
         e = self._edge(doc, guard.ident(edge_id, "edge"), now)
         a = who.get("anchor")
-        if not isinstance(body, dict) or set(body) != {"person", "target", "key_fingerprint", "nonce", "minutes"}:
-            raise guard.InputRejected("send {person, target, key_fingerprint, nonce, minutes}")
+        base = {"person", "target", "key_fingerprint", "nonce", "minutes"}
+        if not isinstance(body, dict) or not base <= set(body) <= base | {"node"}:
+            raise guard.InputRejected("send {person, target, key_fingerprint, nonce, minutes, node?}")
         person = self._anchor(body["person"], "person")
         if not a or not any(D.same(doc, a, x) for x in e.get("unlock_approvers", [])):
             raise PermissionError("only an unlock approver of this edge reads an unlock code")
         if D.same(doc, a, person):
             raise Refusal("an unlock approver never unlocks themselves: a second person reads the code")
-        if not e.get("unlock_key"):
-            raise Refusal("this edge has no unlock key: enrol one first")
+        nodes = {E.key_id(e["enrolment_key"]): e.get("unlock_key")}          # kc-unlock-v2 binds the node
+        if e.get("node2"):
+            nodes[E.key_id(e["node2"]["enrolment_key"])] = e["node2"].get("unlock_key")
+        node_id = body.get("node")
+        if node_id is None:
+            if len(nodes) > 1:
+                raise Refusal("this edge has two nodes: name the node (its id, which the node shows) the code is for")
+            node_id = next(iter(nodes))
+        elif not isinstance(node_id, str) or node_id not in nodes:
+            raise Refusal(f"{str(node_id)[:20]} is not a node of {edge_id}")
+        if not nodes[node_id]:
+            raise Refusal("this node has no unlock key: enrol one first")
         target = guard.ident(body["target"], "target")
         if target not in {t["target"] for t in e["targets"]}:
             raise Refusal(f"{target} is not a target of {edge_id}")
@@ -1898,9 +1993,8 @@ class Desk:
                 raise Refusal(f"at most {settings['unlock_per_hour']} unlocks an hour for this edge (edge.rego)")
             self.edge_store.update_state(edge_id, unlocks=recent + [_iso(now)])
         own = self._unlock_private()
-        node_id = E.key_id(e["enrolment_key"])                 # kc-unlock-v2 binds the node (one of up to two)
         try:
-            code = E.unlock_code(E.unlock_secret(own, E.unlock_public(own), e["unlock_key"], edge_id, node_id),
+            code = E.unlock_code(E.unlock_secret(own, E.unlock_public(own), nodes[node_id], edge_id, node_id),
                                  edge_id, node_id, person, fp, target, nonce, minutes)
         except ValueError as x:
             raise Refusal(f"unlock: {x}") from None
@@ -1972,6 +2066,17 @@ class Desk:
             self.edge_store.update_state(edge_id, ceiling_stale=True)
         return None, None
 
+    def edge_time(self, edge_id: str, request: tuple | None) -> dict:
+        """The desk's time for one signed request of this edge (edge protocol 1.5, section 1): after a reboot an edge
+        re-anchors its trusted time on this answer, never on its own clock, so a bundle held back and delivered with
+        the clock set back cannot keep a lease alive (decision 0032, second adversarial review M1)."""
+        from keyclerk import edge as E
+        nonce = (request or (None, None))[1]
+        if not nonce:
+            raise Refusal("the time answers an edge's signed request only")
+        self._node_seen(edge_id, None)
+        return E.time_answer(self.bundle_key, edge_id, nonce, self.clock())
+
     def edge_email(self, edge_id: str, lease_id: str, request: tuple | None) -> dict:
         """The verified address of a lease's person (decision 0028 point 5, edge protocol 1.3): for a lease in the last
         bundle this edge was served and live now, on an edge whose officer is not frozen; sealed with the bundle key for
@@ -2039,6 +2144,9 @@ class Desk:
                         "serial": int(st.get("serial", 0)), "last_pull": st.get("last_pull"), "last_report": st.get("last_report"),
                         "ceiling_serial": (c or {}).get("serial"), "evidence_seq": int(st.get("evidence_seq", 0)),
                         "enrolment_key_id": E.key_id(edge_records.current(doc, e, now)["enrolment_key"]),
+                        "nodes": [{"node": E.key_id(k), **{f: (st.get("nodes") or {}).get(E.key_id(k), {}).get(f)
+                                                            for f in ("last_pull", "last_report")}}
+                                  for k in edge_records.node_keys(edge_records.current(doc, e, now))],
                         "incidents": self.edge_store.incidents(e["edge_id"])[-20:], "dropped": st.get("last_dropped", [])[:20],
                         "silent": bool(st.get("silent")), "unlock": bool(e.get("unlock_key")),
                         "unlock_approver": bool(a and any(D.same(doc, a, x) for x in e.get("unlock_approvers", []))),

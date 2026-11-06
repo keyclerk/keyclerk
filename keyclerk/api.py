@@ -95,12 +95,13 @@ ROUTES = [
     ("GET", "/edge-key", lambda d, w, p, b: d.edge_key()),                       # public, served before sign-in (below)
     # decision 0014: what an edge agent calls, signed with its enrolment key (KeyClerk-Edge header), never a session
     ("GET", "/edge/bundle", lambda d, w, p, b: d.edge_bundle(w["edge"], p.get("serial"), w.get("quote"), w.get("request"),
-                                                            p.get("after"), p.get("wait"))),
+                                                            p.get("after"), p.get("wait"), node=w.get("node"))),
     ("GET", "/edge/lease/{lease_id}/email", lambda d, w, p, b: d.edge_email(w["edge"], p["lease_id"], w.get("request"))),
+    ("GET", "/edge/time", lambda d, w, p, b: d.edge_time(w["edge"], w.get("request"))),     # edge protocol 1.5
     ("GET", "/edge/module/{sha256}", lambda d, w, p, b: d.edge_module(w["edge"], p["sha256"])),
     ("GET", "/edge/attest/challenge", lambda d, w, p, b: d.edge_attest_challenge(w["edge"])),
     ("POST", "/edge/attest/activate", lambda d, w, p, b: d.edge_attest_activate(w["edge"], b)),
-    ("POST", "/edge/report", lambda d, w, p, b: d.edge_report(w["edge"], b)),
+    ("POST", "/edge/report", lambda d, w, p, b: d.edge_report(w["edge"], b, node=w.get("node"))),
     ("POST", "/edge/relay", lambda d, w, p, b: d.edge_relay(w["edge"], b)),
     ("POST", "/edge/escrow", lambda d, w, p, b: d.edge_escrow(w["edge"], b)),
     ("POST", "/edge/incident", lambda d, w, p, b: d.edge_incident(w["edge"], b)),
@@ -313,12 +314,12 @@ def handler(desk: Desk, auth, allowed_hosts: set[str], api_clients: tuple[str, .
                     if "Authorization" in self.headers or COOKIE in cookies:
                         raise ApiError(401, "unauthenticated", "an edge signs with KeyClerk-Edge only")
                     try:
-                        eid = _edge.check_request(self.headers.get("KeyClerk-Edge") or "", method, self.path, raw,
-                                                  desk.edge_public_of, edge_replay)
+                        eid, node = _edge.check_request_node(self.headers.get("KeyClerk-Edge") or "", method, self.path,
+                                                             raw, desk.edge_keys_of, edge_replay)
                     except ValueError as e:
                         raise ApiError(401, "unauthenticated", str(e)) from None
                     hdr = (self.headers.get("KeyClerk-Edge") or "").split(";")
-                    who, browser = {"edge": eid, "request": (hdr[1], hdr[2]),
+                    who, browser = {"edge": eid, "node": _edge.key_id(node), "request": (hdr[1], hdr[2]),
                                     "quote": (self.headers.get("KeyClerk-Quote") or None)}, False
                     ended = desk.edge_ended(eid)
                     if ended is not None:                    # told once it is over: revocation, not an outage
@@ -625,7 +626,8 @@ def _follow(store) -> None:
             print(f"following the signer: {guard.safe_for_log(e, 300)}", flush=True)
 
 
-def main(argv: list[str]) -> int:
+def parser() -> argparse.ArgumentParser:
+    """The command line, without starting anything: what the deployer contract and the preflight read."""
     ap = argparse.ArgumentParser(prog="keyclerk.api")
     ap.add_argument("--config", required=True)
     ap.add_argument("--store", required=True)
@@ -647,6 +649,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--mgmt-host", default="127.0.0.1", help="the management listener (metrics, readiness detail)")
     ap.add_argument("--mgmt-port", type=int, help="off unless given (decision 0018)")
     ap.add_argument("--mgmt-token-file", help="the management listener's bearer token, at least 32 characters")
+    return ap
+
+
+def main(argv: list[str]) -> int:
+    ap = parser()
     a = ap.parse_args(argv)
     if not 1 <= a.port <= 65535:
         ap.error("bad port")

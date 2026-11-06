@@ -187,9 +187,11 @@ def _t(x):
 
 
 def check_confirmations(doc: dict, realm: str, mark: int, records_sha256: str, proofs: dict[str, str], verify,
-                        at: datetime) -> list[str]:
+                        at: datetime, nonce=None, what: str = "the mark") -> list[str]:
     """Problems with the two confirmations; [] when the officer and a root trust owner, two different people, each
-    proved the statement for this mark. verify(token, nonce, by) raises when a proof does not hold."""
+    proved the statement for this mark. verify(token, nonce, by) raises when a proof does not hold. nonce(by), when
+    given, is another statement two people confirm the same way (an HA change, decision 0031)."""
+    nonce = nonce or (lambda by: statement(realm, by, mark, records_sha256))
     officer, roots = confirmers(doc, at)
     problems, ok = [], set()
     for by, token in proofs.items():
@@ -197,14 +199,14 @@ def check_confirmations(doc: dict, realm: str, mark: int, records_sha256: str, p
             problems.append(f"{by} is neither the security officer nor a root trust owner")
             continue
         try:
-            verify(token, statement(realm, by, mark, records_sha256), by)
+            verify(token, nonce(by), by)
             ok.add(by)
         except Exception as e:   # noqa: BLE001 - any failure: this confirmation does not count
             problems.append(f"the proof of {by} does not hold: {type(e).__name__}")
     if officer not in ok:
-        problems.append("the security officer has not confirmed the mark")
+        problems.append(f"the security officer has not confirmed {what}")
     if not (ok - {officer}) & roots:
-        problems.append("a root trust owner other than the officer has not confirmed the mark")
+        problems.append(f"a root trust owner other than the officer has not confirmed {what}")
     return problems
 
 

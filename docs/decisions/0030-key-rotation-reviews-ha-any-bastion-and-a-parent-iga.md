@@ -39,7 +39,9 @@
    the core: a standby (for the core, a follower that holds the log) becomes active only by a witness grant or a
    two-person break-glass, and reports how; never on a timeout, so a network split cannot produce two histories. A
    core outage never cuts access (edges run on their horizons); it blocks new signed changes, a leaver's revocation
-   among them, which is why the core is covered. Built once (0022 point 6).
+   among them, which is why the core is covered. Built once (0022 point 6). For the core, "a witness grant" is
+   superseded by decision 0031 (2026-11-04): the commit witness's compare-and-swap is the commit point, and a standby
+   takes over by appending, with no grant, lease or term.
 7. **Any bastion (P7).** KeyClerk never talks to a bastion; the edge's adapter does. The edge protocol gains a
    capability vocabulary (ends sessions at lease end, assigns roles, injects credentials, records sessions, matches
    sign-in by subject, enforces time windows, a second key at session start) and an optional declaration in the edge's

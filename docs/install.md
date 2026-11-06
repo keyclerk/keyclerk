@@ -93,6 +93,13 @@ When approval proofs are required (`approvals.proofs: required`), a seed's high-
 proof, as every high-risk change does: the root signs the seed at the identity provider with a fresh sign-in, through
 the desk's approval flow, before the first revision applies.
 
+### Check a deployment before it starts
+`python -m keyclerk.init check --config keyclerk.yaml --for signer,desk,reconciler,witness` validates the configuration
+whole and names, for each service, the settings it needs; give a service's planned command line too
+(`--reconciler-args "--keycloak ... --state ..."`) and it names every missing flag, missing file and rule between flags
+at once, instead of one refusal per start. docs/deployer-contract.md lists what each service needs; it is generated
+from `keyclerk/contract.py`, which a test keeps in step with each service's own command line.
+
 ### The sign-in level of an approval
 From 0.27.0 the configuration names the sign-in level every approval proof must carry, `approvals.acr` (the broker's
 `acr` claim); a configuration without it is refused. Let init propose it from the realm:
@@ -101,6 +108,20 @@ realm publishes, proposes the strongest, and writes only the value you confirm. 
 the realm has a level-of-authentication flow; bind the level you require to a passkey there (Authentication, a flow
 with Condition - Level of Authentication) so that an approval needs one. `acr: none` is accepted when written, and the
 desk and the signer report it as a finding at every start: a password-only sign-in then approves as well as a passkey.
+
+#### A Keycloak realm without a level-of-authentication flow
+A fresh realm publishes only `0` and `1`, and its first sign-in with a temporary password reaches `1` as well. So
+`approvals.acr: "1"` would let a password-only session approve; name the passkey sign-in as a level of its own
+instead. The order matters: Keycloak refuses a default level its realm does not map yet (seen on 26.8.1).
+1. Map a name to the level: in the realm settings, "ACR to LoA mapping" (the realm attribute `acr.loa.map`), add
+   `passkey` -> `1`.
+2. In the browser flow, put the passkey step (WebAuthn passwordless) in a conditional sub-flow whose condition is
+   "Condition - Level of Authentication" with level `1`, so only a passkey sign-in reaches it.
+3. Then, on every client people sign in through (the desk's and any approval client), set "Default ACR values" (the
+   client attribute `default.acr.values`) to `passkey`.
+4. In `keyclerk.yaml`, `approvals.acr: passkey`. `python -m keyclerk.init acr` now proposes it, and an approval from a
+   password-only session is refused.
+An installer or a realm managed as code does these steps in this order.
 
 ## Where the desk keeps the records
 The desk keeps the records in the folder `--store` names. The configuration's `store` section chooses how: `kind:
@@ -313,6 +334,69 @@ officers confirmed (above), the witness still holds the newer history and the si
 owner then resets the log there, with the witness stopped: `python -m keyclerk.witness reset --state DIR --origin
 ORIGIN --by NAME --reason TEXT`. The reset is kept in the witness's `evidence.jsonl` with the checkpoint it forgot, as
 is every checkpoint the records key signed that the witness refused.
+
+## Two signer nodes (high availability)
+From 0.28.0 two to four signer nodes can hold the records key, one active at a time, with no cluster software (decision
+0031). One more process makes it safe: the commit witness, a witness that also keeps the log's links. A change counts
+only once the commit witness has taken it, and it takes one change per position, so two nodes that both believe they
+are active can never both commit: the second is told the log moved on, steps down and rebuilds from the committed
+links. A standby takes over by itself when the committed head has not moved for its hold time (30 seconds by default),
+and it goes back the other way the same way. Clocks play no part in the safety, only in how soon a takeover happens.
+Without the `ha` record nothing of this runs: one signer, as before.
+
+The layout: each signer node runs on its own host with a desk next to it. The signer listens on loopback only, as
+always; a desk is given its own node first and the other node second (`--signer tcp:127.0.0.1:PORT,tcp:127.0.0.1:PEER`),
+the peer's loopback port reached over a link you secure (WireGuard, or an mTLS tunnel). A standby signs and serves
+nothing, so a desk always reaches the active node, wherever it runs. Put the commit witness on a third machine, owned by
+someone else than the signer hosts. A desk only ever follows links the commit witness took.
+
+1. Name the commit witness and the nodes in the realm's `ha` record, in the seed records of a new realm:
+
+   ```yaml
+   ha:
+     origin: keyclerk.example.org/realm            # the log's name in its checkpoints
+     commit_witness: witness.example.org/commit+... # the commit witness's vkey (python -m keyclerk.witness vkey)
+     nodes: [signer-a, signer-b]
+   ```
+
+   The record is signed into the log, so HA cannot be switched off by leaving a flag out, and a new commit witness is
+   named the same way. For an existing realm, the security officer and a root trust owner switch it on together (see
+   below) instead.
+2. Stop the signer and export the seed: `python -m keyclerk.commit_witness seed --signer-state DIR --key RECORDS_KEY
+   --origin ORIGIN --out SEED`. It writes every link and the records key's checkpoint of them.
+3. On the witness host, with the witness stopped: `python -m keyclerk.witness reseed --state DIR --origin ORIGIN --pin
+   RECORDS_PUBLIC_HEX --links SEED/links.jsonl --checkpoint SEED/checkpoint.note --key witness.key --name
+   witness.example.org/commit --by NAME --reason TEXT`. Then run it with `serve --commit` (and TLS in front). A commit
+   witness never starts from nothing: a signer refuses an empty one as an outage, and after losing the witness host you
+   seed a new one the same way, from the newest log you hold.
+4. Copy the stopped signer's state to the second node's host. Start each signer with `--ha-node NAME --commit-witness
+   URL` (and `--ha-hold SECONDS`, at least 5). Both start as standbys; the first whose hold time passes takes over.
+   `head` names the node's role, and stderr says each change of role.
+
+An active node that cannot reach the commit witness for its hold time steps down, so desks move to its peer. While the
+commit witness is away, nothing is committed and nobody takes over: the desks read on from their replicas and
+proposing waits. A change whose answer was lost is answered when it is asked again, from whichever node is active.
+
+### Switching HA on, off or to another commit witness, and break-glass
+After the realm's seed, only a link the security officer and a root trust owner both confirmed puts or removes the `ha`
+record; a desk's change is refused if it tries (operator 2026-11-05). Stop every signer node, then on one of them:
+
+1. Each of the two runs `python -m keyclerk.ha nonce --signer-state DIR --key RECORDS_KEY --config FILE --by BROKER_ID`
+   with the change: `--set ha.yaml` (the record as above), `--off`, or `--break-glass NODE`. It prints the statement to
+   sign in with at the broker; the statement names the change and the head it is made on, so it is good for that once.
+2. `python -m keyclerk.ha sign` with the same change, `--proof BROKER_ID=TOKEN_FILE` for each of the two, and the
+   broker options as for a restore link. It signs the HA change link once both proofs hold.
+
+While HA is on, give `--commit-witness URL` too. A planned change (`--set`, `--off`) is signed only on the head the
+commit witness committed, so run it on the node that was active last. After `--set`, seed the commit witness from this
+node's log (steps 2 and 3) and copy the state to the other nodes (step 4); after `--off`, start one signer without the
+HA options.
+
+Break-glass is for when the commit witness is lost and nothing can commit. Stop the commit witness first: the change
+is refused while it still answers. The statement names the one node that signs on and its base, the head it holds;
+check that this is the newest head the desks saw. That node then signs alone, without a witness, from that base, and
+the change is in the log as `ha_break_glass`: treat it as an incident. A node whose history parted below the base is
+refused by every desk that follows the base. HA comes back with `--set`, a commit witness seeded from that node's log.
 
 ## The reconciler's high-water mark
 The reconciler keeps the newest records revision it applied in the identity broker (the `keyclerk-state` group), so a

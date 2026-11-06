@@ -220,12 +220,13 @@ def _anchors_of_person(ix: StoreIx, person: str) -> set[str]:
 def _people(ix: StoreIx, doc: dict, reach: set[str]) -> None:
     """Every person listing an anchor any loaded record names, the owners and directors of those, and the leases of
     each such anchor (a lease makes its holder external to the identity checks)."""
+    from keyclerk import records as R
     anchors: set[str] = set()
-    for recs in doc.values():
-        if isinstance(recs, list):
+    for kind, recs in doc.items():               # by the kind's anchor paths too: an edge's officer and custodians, a
+        if isinstance(recs, list):               # visit lease's person, a place's steward (the 0028 re-keying's list)
             for r in recs:
                 if isinstance(r, dict):
-                    anchors |= scope._people_fields(r)
+                    anchors |= scope._people_fields(r) | {v for _, v in R.anchor_values(kind, r)}
     root = doc.get("root") or {}
     anchors |= {h.get("anchor") for h in root.get("holders", [])} | {root.get("officer")}
     anchors |= {c.get("by") for g in doc.get("groups", []) for c in g.get("carries", [])}

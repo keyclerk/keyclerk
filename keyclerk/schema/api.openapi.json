@@ -4625,6 +4625,51 @@
     ]
    }
   },
+  "/edge/time": {
+   "get": {
+    "summary": "The desk's time for this signed request (edge protocol 1.5): after a reboot the edge anchors its trusted time on it",
+    "tags": [
+     "edge"
+    ],
+    "security": [
+     {
+      "edge": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/edges/{edge_id}/unlock": {
    "post": {
     "summary": "Read a phoned-unlock code (an unlock approver of the edge, never the person)",

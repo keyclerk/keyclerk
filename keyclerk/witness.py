@@ -200,15 +200,23 @@ def serve(w: Witness, host: str, port: int) -> ThreadingHTTPServer:
 
         def do_POST(self):   # noqa: N802 - http.server's name
             n = self.headers.get("Content-Length", "")
-            if self.path != "/add-checkpoint":
+            commit = self.path == "/commit" and hasattr(w, "commit")          # a commit witness (decision 0031)
+            if self.path != "/add-checkpoint" and not commit:
                 return self._answer(404, "text/plain", b"not found\n")
-            if not n.isdigit() or int(n) > MAX_BODY:
+            limit = (64 * 1024 * 1024) if commit else MAX_BODY
+            if not n.isdigit() or int(n) > limit:
                 return self._answer(413 if n.isdigit() else 411, "text/plain", b"a bounded Content-Length\n")
-            self._answer(*w.add_checkpoint(self.rfile.read(int(n))))
+            body = self.rfile.read(int(n))
+            self._answer(*(w.commit(body) if commit else w.add_checkpoint(body)))
 
         def do_GET(self):   # noqa: N802
             m = re.fullmatch(r"/([0-9a-f]{64})/checkpoint", self.path)
-            self._answer(*w.checkpoint(m.group(1))) if m else self._answer(404, "text/plain", b"not found\n")
+            k = re.fullmatch(r"/([0-9a-f]{64})/links\?start=(\d{1,12})&limit=(\d{1,4})", self.path)
+            if m:
+                return self._answer(*w.checkpoint(m.group(1)))
+            if k and hasattr(w, "links"):
+                return self._answer(*w.links(k.group(1), int(k.group(2)), int(k.group(3))))
+            self._answer(404, "text/plain", b"not found\n")
 
         def log_message(self, *a):   # the answers say enough; no request log of addresses
             pass
@@ -217,13 +225,18 @@ def serve(w: Witness, host: str, port: int) -> ThreadingHTTPServer:
 
 # --- the signer's side --------------------------------------------------------------------------------------------
 
-def http(method: str, url: str, body: bytes | None, timeout: float) -> tuple[int, str, bytes]:
+def http(method: str, url: str, body: bytes | None, timeout: float, cap: int = MAX_BODY) -> tuple[int, str, bytes]:
+    """One request to a witness. An answer longer than cap is refused, never cut and parsed: a cut answer read as
+    JSON or as a note fails far from its cause (the commit witness's link pages are larger than a note)."""
     req = urllib.request.Request(url, data=body, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:   # noqa: S310 - the configured witness URL
-            return r.status, r.headers.get("Content-Type", ""), r.read(MAX_BODY + 1)
+            out = r.status, r.headers.get("Content-Type", ""), r.read(cap + 1)
     except urllib.error.HTTPError as e:
-        return e.code, e.headers.get("Content-Type", ""), e.read(MAX_BODY + 1)
+        out = e.code, e.headers.get("Content-Type", ""), e.read(cap + 1)
+    if len(out[2]) > cap:
+        raise OSError(f"the witness's answer to {method} {url.split('?')[0]} is over {cap} bytes")
+    return out
 
 
 class Cosigner:
@@ -307,7 +320,8 @@ def _key(path: str) -> Ed25519PrivateKey:
     return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(guard.read_bounded(Path(path), 200).strip()))
 
 
-def main(argv: list[str] | None = None) -> int:
+def parser() -> argparse.ArgumentParser:
+    """The command line, without starting anything: what the deployer contract and the preflight read."""
     ap = argparse.ArgumentParser(prog="python -m keyclerk.witness", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("serve")
@@ -316,6 +330,17 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--state", required=True)
     s.add_argument("--log", action="append", required=True, help="a log's vkey (python -m keyclerk.witness vkey)")
     s.add_argument("--listen", default="127.0.0.1:8098")
+    s.add_argument("--commit", action="store_true", help="the realm's commit witness: keeps the links (decision 0031)")
+    rs = sub.add_parser("reseed", help="a commit witness starts again from checked links, never from nothing")
+    rs.add_argument("--state", required=True)
+    rs.add_argument("--origin", required=True)
+    rs.add_argument("--pin", required=True, help="the records public key (hex)")
+    rs.add_argument("--links", required=True, help="one sealed link per line, from the genesis to the seed head")
+    rs.add_argument("--by", required=True)
+    rs.add_argument("--reason", required=True)
+    rs.add_argument("--checkpoint", required=True, help="the records key's checkpoint note of the seed head")
+    rs.add_argument("--key", required=True, help="this witness's key, to countersign it")
+    rs.add_argument("--name", required=True, help="this witness's cosigner name")
     v = sub.add_parser("vkey")
     v.add_argument("--name", required=True)
     v.add_argument("--type", choices=("log", "cosigner"), required=True)
@@ -327,6 +352,11 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--origin", required=True)
     r.add_argument("--by", required=True)
     r.add_argument("--reason", required=True)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = parser()
     a = ap.parse_args(argv)
     if a.cmd == "vkey":
         pub = N.raw_public(_key(a.key)) if a.key else bytes.fromhex(a.pub)
@@ -338,6 +368,16 @@ def main(argv: list[str] | None = None) -> int:
         held = hold(Path(a.state) / "witness.lock", f"another witness holds {a.state}: stop it first")
     except StoreRefused as e:
         raise SystemExit(f"keyclerk.witness: {e}") from None
+    if a.cmd == "reseed":
+        from keyclerk import commit_witness
+        try:
+            out = commit_witness.reseed(Path(a.state), a.origin, a.pin, Path(a.links), a.by, a.reason, time.time,
+                                        Path(a.checkpoint).read_text(encoding="utf-8"), _key(a.key), a.name)
+        except (ValueError, StoreRefused) as e:
+            held.close()
+            raise SystemExit(f"keyclerk.witness: not reseeded: {e}") from None
+        sys.stderr.write(f"keyclerk.witness: reseeded {out['origin']} at {out['size']} links\n")
+        return 0
     if a.cmd == "reset":
         f = Path(a.state) / "logs" / f"{origin_hash(a.origin)}.json"
         if not f.exists():
@@ -351,7 +391,11 @@ def main(argv: list[str] | None = None) -> int:
         f.unlink()
         sys.stderr.write(f"keyclerk.witness: forgot the newest checkpoint of {a.origin}; kept in evidence.jsonl\n")
         return 0
-    w = Witness(_key(a.key), a.name, Path(a.state), a.log)
+    if a.commit:
+        from keyclerk import commit_witness
+        w = commit_witness.CommitWitness(_key(a.key), a.name, Path(a.state), a.log)
+    else:
+        w = Witness(_key(a.key), a.name, Path(a.state), a.log)
     host, _, port = a.listen.rpartition(":")
     srv = serve(w, host or "127.0.0.1", int(port))
     sys.stderr.write(f"keyclerk.witness: {w.vkey} witnessing {len(w.logs)} log(s) on {a.listen}\n")
