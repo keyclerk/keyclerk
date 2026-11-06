@@ -1309,7 +1309,7 @@ class Desk:
             return None
         e = next((x for x in doc.get("edges", []) if x["edge_id"] == edge_id), None)
         at = D._ts(r["at"])
-        keys = [edge_records.current(doc, e, at)["enrolment_key"]] if e else []    # bound to its keys
+        keys = edge_records.node_keys(edge_records.current(doc, e, at)) if e else []   # bound to every node's key
         return E.ended_notice(self.bundle_key, edge_id, at, r.get("reason", ""), keys)
 
     def _unlock_private(self):
@@ -1958,15 +1958,26 @@ class Desk:
         doc, now = self.store.load(), self.clock()
         e = self._edge(doc, guard.ident(edge_id, "edge"), now)
         a = who.get("anchor")
-        if not isinstance(body, dict) or set(body) != {"person", "target", "key_fingerprint", "nonce", "minutes"}:
-            raise guard.InputRejected("send {person, target, key_fingerprint, nonce, minutes}")
+        base = {"person", "target", "key_fingerprint", "nonce", "minutes"}
+        if not isinstance(body, dict) or not base <= set(body) <= base | {"node"}:
+            raise guard.InputRejected("send {person, target, key_fingerprint, nonce, minutes, node?}")
         person = self._anchor(body["person"], "person")
         if not a or not any(D.same(doc, a, x) for x in e.get("unlock_approvers", [])):
             raise PermissionError("only an unlock approver of this edge reads an unlock code")
         if D.same(doc, a, person):
             raise Refusal("an unlock approver never unlocks themselves: a second person reads the code")
-        if not e.get("unlock_key"):
-            raise Refusal("this edge has no unlock key: enrol one first")
+        nodes = {E.key_id(e["enrolment_key"]): e.get("unlock_key")}          # kc-unlock-v2 binds the node
+        if e.get("node2"):
+            nodes[E.key_id(e["node2"]["enrolment_key"])] = e["node2"].get("unlock_key")
+        node_id = body.get("node")
+        if node_id is None:
+            if len(nodes) > 1:
+                raise Refusal("this edge has two nodes: name the node (its id, which the node shows) the code is for")
+            node_id = next(iter(nodes))
+        elif not isinstance(node_id, str) or node_id not in nodes:
+            raise Refusal(f"{str(node_id)[:20]} is not a node of {edge_id}")
+        if not nodes[node_id]:
+            raise Refusal("this node has no unlock key: enrol one first")
         target = guard.ident(body["target"], "target")
         if target not in {t["target"] for t in e["targets"]}:
             raise Refusal(f"{target} is not a target of {edge_id}")
@@ -1982,9 +1993,8 @@ class Desk:
                 raise Refusal(f"at most {settings['unlock_per_hour']} unlocks an hour for this edge (edge.rego)")
             self.edge_store.update_state(edge_id, unlocks=recent + [_iso(now)])
         own = self._unlock_private()
-        node_id = E.key_id(e["enrolment_key"])                 # kc-unlock-v2 binds the node (one of up to two)
         try:
-            code = E.unlock_code(E.unlock_secret(own, E.unlock_public(own), e["unlock_key"], edge_id, node_id),
+            code = E.unlock_code(E.unlock_secret(own, E.unlock_public(own), nodes[node_id], edge_id, node_id),
                                  edge_id, node_id, person, fp, target, nonce, minutes)
         except ValueError as x:
             raise Refusal(f"unlock: {x}") from None

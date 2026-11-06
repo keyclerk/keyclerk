@@ -19,7 +19,7 @@ files:
   .github/workflows/release.yml  sha256 7caeb4233a9c432c13ee56471f8ad5a287f3db82e18742eb4f1b66cdba7ac59a
   .github/workflows/scorecard.yml  sha256 0cf17ddfdfc913e415a80f8c0c14f23e584fe375930d00a53b9787b8a6cd8566
   .gitignore  sha256 ef1ccfcc955004643e7245693d7354008f0ba91f74780ca9d68212a99b8827fc
-  CHANGELOG.md  sha256 3bd43be4153882dba85c74894a7de999db153995c7ac2848cb069abfb7a8b9ef
+  CHANGELOG.md  sha256 953fbe67f404e3b343014bd640a21258559288ab342f614d75e4345d235bc3de
   CLA.md  sha256 e3c71aa14f1afa369eb41d86db6ad16475cb76e89c45497896a91557173e310f
   CODE_OF_CONDUCT.md  sha256 ef45f8b74bed9f725eba033667af8893b1c2c352d910ef3efc2478874eb5ba29
   CONTRIBUTING.md  sha256 bde2f3c5ba92ec36494f104f34e8145e67e72e7f98dcdccf37086bf3ef2d2fc4
@@ -156,7 +156,7 @@ files:
   keyclerk/console.py  sha256 e6712dd6d72b44b1bdb57080943eea12f6ff4a5a82fae9ecb4191b0ffe0b316a
   keyclerk/contract.py  sha256 2f1d55a82de566e63be1890e409abcb514321b3daf981fe7ae4683fccabab289
   keyclerk/delegation.py  sha256 db0cc6c0be5399bbee0c9e38fe436eee52e6b3560c47522e7769f3c6660a9153
-  keyclerk/desk.py  sha256 f97a05598f87bf738b5c4ddf2b1bf56a05361edebded47ba90ce4d1a90fdff31
+  keyclerk/desk.py  sha256 63f70fd68b907140e4853e2e0d8838f064b303b5619b50138f6d616bcfc11b33
   keyclerk/dpop.py  sha256 badaffb54c4cf07fd55c8bca6c0597fdf87b3c90b512d7cdd9510633564baa32
   keyclerk/edge.py  sha256 f7de7ba970cb0304ef1a3f9fc0391ee60bf4ddcebbbb6556b22409e0cf76fa9e
   keyclerk/edge_cli.py  sha256 2805cd6492bc689cd1aa980345a276b396cf0edb0484d20a4153b6544dca30e3
@@ -362,6 +362,7 @@ files:
   tests/test_edge_report_14.py  sha256 9bcad2eb365e0190c12ed52db10bf9dcc7c741970b1094792bc0061e6f8688e5
   tests/test_edge_rotation_keys.py  sha256 e0b4d4d97c41db3214aa5c23efc7403f59b852f48b752090a5bee2964f8a63c7
   tests/test_edge_slice_d.py  sha256 61ecb7a1503f083f96dd5364b01051bed2eccfbdb4e6e9f397e76032d7c12efc
+  tests/test_edge_two_node_end_unlock.py  sha256 dab204c89009b6d48479882128c084d2363bd47c1383066bb15a89674572ac86
   tests/test_edge_two_nodes.py  sha256 a6630a41f50b649fa39e5db647fc932002037c6bf6ec1ecb86a850fb26faaad1
   tests/test_edges.py  sha256 7b3e155c3bf653aa6126498fd4145a551a94585a6c692c1bef55b791d07832e2
   tests/test_edges_log_backed.py  sha256 0dae8da3923ecb034e602e72411b40b0e49a1e543cd8631677563928d1a45307

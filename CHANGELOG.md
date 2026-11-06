@@ -109,6 +109,11 @@ the decision records (docs/decisions) hold the reasoning.
 - An active signer node whose own commit answer was lost (the witness took the change, the answer did not arrive)
   marked itself deposed, so for a whole hold time nobody beat and a takeover added a link. It now sees that the
   committed links are its own and stays active. A beat that gets no answer is not retried at every tick.
+- An ended high-availability edge was told so for its first node only: the ended notice named node 1's enrolment key,
+  so node 2 took the end for an outage and kept its leases to their horizons. The notice now names every node's key.
+- A phoned unlock code was always computed for node 1, so node 2 of a high-availability edge could never verify one.
+  The request names the node (`node`, the id the node shows) when an edge has two, and the code uses that node's own
+  unlock key; a one-node edge needs no change. Both found by the edge implementation reviewing its two-node design.
 
 ## 0.27.0 (2026-11-04)
 - A restore no longer brings back what was erased: `keyclerk.backup take` writes a signed erasure journal (erased visit
