@@ -32,7 +32,8 @@ def test_every_runtime_dependency_is_constrained():
 def test_the_image_installs_with_hashes_only():
     cf = (ROOT / "Containerfile").read_text(encoding="utf-8")
     assert "--require-hashes" in cf and "--only-binary=:all:" in cf and "pip install --no-cache-dir ." not in cf
-    assert re.search(r"^FROM \S+@sha256:[0-9a-f]{64}$", cf, re.M)
+    assert re.search(r"^ARG BASE=\S+@sha256:[0-9a-f]{64}$", cf, re.M)          # the base pinned by digest (issue 49:
+    assert all(f.split()[1] == "${BASE}" for f in re.findall(r"^FROM .*$", cf, re.M))   # a daily rebuild may move it)
 
 
 def test_vendored_browser_code_is_the_file_its_record_names():

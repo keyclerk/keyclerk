@@ -84,13 +84,16 @@ ROUTES = [
     ("GET", "/relay", lambda d, w, p, b: d.relay_list(w)),
     ("POST", "/relay/{relay_id}/take", lambda d, w, p, b: d.relay_take(w, p["relay_id"])),
     ("POST", "/relay/{relay_id}/confirm", lambda d, w, p, b: d.relay_confirm(w, p["relay_id"])),
+    ("POST", "/relay/{relay_id}/confirm-sign-in", lambda d, w, p, b: d.relay_confirm_statement(w, p["relay_id"])),
     ("GET", "/edge/evidence", lambda d, w, p, b: d.edge_evidence_head(w["edge"])),
     ("GET", "/edge/escrow/{item_id}", lambda d, w, p, b: d.edge_escrow_status(w["edge"], p["item_id"])),
     ("GET", "/edges", lambda d, w, p, b: d.edges(w)),
     ("POST", "/edges/{edge_id}/unlock", lambda d, w, p, b: d.phoned_unlock(w, p["edge_id"], b)),
+    ("POST", "/edges/{edge_id}/unlock-sign-in", lambda d, w, p, b: d.unlock_statement(w, p["edge_id"], b)),
     ("POST", "/edges/{edge_id}/incidents/{incident_id}/close", lambda d, w, p, b: d.close_incident(w, p["edge_id"], p["incident_id"], b)),
     ("GET", "/me/visit-leases", lambda d, w, p, b: d.my_visit_leases(w)),
     ("POST", "/me/visit-leases/{lease_id}/carried", lambda d, w, p, b: d.carried_lease(w, p["lease_id"])),
+    ("POST", "/me/visit-leases/{lease_id}/carry-sign-in", lambda d, w, p, b: d.carried_statement(w, p["lease_id"])),
     ("POST", "/edges/{edge_id}/ceiling", lambda d, w, p, b: d.set_ceiling(w, p["edge_id"], b)),
     ("GET", "/edge-key", lambda d, w, p, b: d.edge_key()),                       # public, served before sign-in (below)
     # decision 0014: what an edge agent calls, signed with its enrolment key (KeyClerk-Edge header), never a session
@@ -294,7 +297,8 @@ def handler(desk: Desk, auth, allowed_hosts: set[str], api_clients: tuple[str, .
                 if method == "GET" and (u.path.startswith("/api/v1/scan/") or u.path == "/api/v1/qr-key"):
                     return self._public_visit(u)
                 if method == "GET" and u.path == "/api/v1/edge-key":
-                    return self._json(200, desk.edge_key())
+                    edge = (parse_qs(u.query).get("edge") or [None])[0]
+                    return self._json(200, desk.edge_key(edge))
                 if not u.path.startswith("/api/v1/"):
                     raise ApiError(404, "not_found", "no such page")
                 call, params = _match(method, u.path[len("/api/v1"):])
@@ -344,6 +348,27 @@ def handler(desk: Desk, auth, allowed_hosts: set[str], api_clients: tuple[str, .
                 if (u.path.startswith("/api/v1/relay/") or u.path.endswith("/carried")) and not browser:
                     raise ApiError(403, "forbidden", "a relayed secret is handed over to a browser session only")
                 result = call(desk, who, params, body)
+                if u.path.endswith("/carry-sign-in"):           # S1: the person's sign-in signs one carried lease
+                    if not browser or auth is None:
+                        raise ApiError(403, "forbidden", "this carries a visit lease for a browser session on this desk")
+                    url, flow = auth.login(nonce=result["nonce"], purpose={"carry": result["lease_id"],
+                                                                         "anchor": result["by"]})
+                    return self._send(200, json.dumps({"redirect": url}).encode(), "application/json",
+                                      (("Set-Cookie", f"{FLOW_COOKIE}={flow}; Max-Age=300; {flags}"),))
+                if u.path.endswith("/confirm-sign-in"):         # S2: a custodian's sign-in confirms an escrow half
+                    if not browser or auth is None:
+                        raise ApiError(403, "forbidden", "this confirms an escrow half for a browser session on this desk")
+                    url, flow = auth.login(nonce=result["nonce"], purpose={"escrow": result["relay_id"],
+                                                                         "anchor": result["by"]})
+                    return self._send(200, json.dumps({"redirect": url}).encode(), "application/json",
+                                      (("Set-Cookie", f"{FLOW_COOKIE}={flow}; Max-Age=300; {flags}"),))
+                if u.path.endswith("/unlock-sign-in"):          # 0021 step 4b: the approver's sign-in signs one unlock
+                    if not browser or auth is None:
+                        raise ApiError(403, "forbidden", "this starts an unlock for a browser session on this desk")
+                    url, flow = auth.login(nonce=result["nonce"], purpose={"unlock": result["edge"], "body": body,
+                                                                         "anchor": result["by"]})
+                    return self._send(200, json.dumps({"redirect": url}).encode(), "application/json",
+                                      (("Set-Cookie", f"{FLOW_COOKIE}={flow}; Max-Age=300; {flags}"),))
                 if u.path.endswith("/approval-sign-in"):        # a browser approval: the sign-in that signs (decision 0006)
                     if not browser or auth is None:
                         raise ApiError(403, "forbidden", "this starts an approval for a browser session on this desk; another "
@@ -465,6 +490,42 @@ def handler(desk: Desk, auth, allowed_hosts: set[str], api_clients: tuple[str, .
                 if who is None or who.get("anchor") != purpose.get("anchor"):
                     return self._send(400, b"Approval not recorded: sign in as the person who approves.",
                                       "text/plain; charset=utf-8", (clear,))
+                if purpose.get("carry"):                  # S1: the carried lease, saved as a file, never in a URL
+                    try:
+                        r = desk.carried_lease(who, purpose["carry"], value["id_token"])
+                    except (Refusal, guard.InputRejected, PermissionError, LookupError) as e:
+                        return self._send(422, f"Not carried: {guard.safe_for_log(e, 300)}.".encode(),
+                                          "text/plain; charset=utf-8", (clear,))
+                    name = "carried-" + re.sub(r"[^A-Za-z0-9_-]", "", str(purpose["carry"]))[:64] + ".json"
+                    return self._send(200, json.dumps(r, indent=1).encode(), "application/json",
+                                      (clear, ("Cache-Control", "no-store"),
+                                       ("Content-Disposition", f'attachment; filename="{name}"')))
+                if purpose.get("escrow"):                 # S2: the custodian's own confirmation, counted by the signer
+                    try:
+                        r = desk.relay_confirm(who, purpose["escrow"], value["id_token"])
+                    except (Refusal, guard.InputRejected, PermissionError, LookupError) as e:
+                        return self._send(422, f"Not confirmed: {guard.safe_for_log(e, 300)}.".encode(),
+                                          "text/plain; charset=utf-8", (clear,))
+                    n = int(r.get("custodians_confirmed") or 0)
+                    return self._send(200, (f"Confirmed: your half is counted ({n} of 2 custodians). The edge forgets "
+                                            "the value once both are. Back to the desk: /#/secrets").encode(),
+                                      "text/plain; charset=utf-8", (clear,))
+                if purpose.get("unlock"):                 # the code, shown once on this page, never in a URL
+                    import html
+                    try:
+                        r = desk.phoned_unlock(who, purpose["unlock"], purpose["body"], value["id_token"])
+                    except (Refusal, guard.InputRejected, PermissionError) as e:
+                        return self._send(422, f"Unlock not read: {guard.safe_for_log(e, 300)}.".encode(),
+                                          "text/plain; charset=utf-8", (clear,))
+                    page = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
+                            f'content="width=device-width,initial-scale=1"><title>Unlock code</title>'
+                            f'<link rel="stylesheet" href="/app.css"></head><body><main class="card"><h1>Unlock code</h1>'
+                            f'<p class="code"><code>{html.escape(r["code"])}</code></p><p>Read it to the person on their '
+                            f'registered number. It unlocks that key on this edge for {int(r["minutes"])} minutes, until '
+                            f'{html.escape(r["expires"])}.</p><p><a href="/#/edges">Back to the desk</a></p></main></body>'
+                            f'</html>')
+                    return self._send(200, page.encode(), "text/html; charset=utf-8",
+                                      (clear, ("Cache-Control", "no-store")))
                 try:
                     r = desk.approve(who, purpose["approve"], value["id_token"])
                 except (Refusal, guard.InputRejected, PermissionError) as e:

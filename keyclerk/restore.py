@@ -138,6 +138,10 @@ def witness_mark(url: str, vkey: str, origin: str, records_key: str) -> dict:
         raise RestoreMode(f"the witness serves no checkpoint of {origin} ({status})")
     text, sigs = N.split(body.decode("utf-8"))
     o, size, _ = N.parse_checkpoint(text)
+    from keyclerk import records_keys as RK
+    h = RK.pinned()                               # after a rotation each origin has its own key (#41)
+    if h is not None:
+        records_key = next((w["key"] for w in h.doc["keys"] if w["origin"] == origin), records_key)
     if o != origin or N.verify(text, sigs, (origin, N.LOG, bytes.fromhex(records_key))) is None \
             or N.verify(text, sigs, c.key) is None:
         raise RestoreMode("the witness's checkpoint is not signed by the records key and countersigned by the witness")
@@ -261,12 +265,15 @@ def recover_log(signer_state: Path, follower, pinned: str) -> dict:
     mark = json.loads(mark_file.read_text(encoding="utf-8"))
     realm = mark["realm"]
     restored = SqliteStore(state / "replica.db", pinned, realm)
+    pinned = restored.pinned                      # the restored state's history, or the pinned one (#41)
     try:
         try:
             replay.verify(restored, pinned, realm)
             replay.verify(follower, pinned, realm)
         except L.StoreRefused as e:
-            raise RestoreMode(f"a chain does not verify: {e}") from None
+            raise RestoreMode(f"a chain does not verify: {e}. After a records-key recovery a follower that still holds "
+                              "links the stolen key signed is refused: use one that adopted the recovery, or the "
+                              "restore link") from None
         have, more = restored.size(), follower.size()
         for i in range(min(have, more)):                 # a fork shows at any length, so it is looked for first
             if follower.link(i) != restored.link(i):
@@ -319,6 +326,10 @@ def _log_command(a) -> int:
         head = store.head().hex()
         if a.cmd == "log-nonce":
             print(statement(store.realm, inward(a.by), a.mark, head))
+            if a.trustee_statement:
+                from keyclerk.store import link as L
+                Path(a.trustee_statement).write_bytes(
+                    b"kc-restore-v1\n" + L.restore_statement(store.realm, store.size(), head, a.mark))
             return 0
         from keyclerk import approvals
         verify = approvals.BrokerProofs(a.approval_issuer, a.approval_audience, a.max_age,
@@ -329,7 +340,8 @@ def _log_command(a) -> int:
             who, _, f = p.partition("=")
             confirmations.append((inward(who), Path(f).read_text(encoding="utf-8").strip()))
         try:
-            out = signer.restore_link(a.mark, confirmations, verify)
+            from keyclerk.ha import trustee_sigs
+            out = signer.restore_link(a.mark, confirmations, verify, trustee_sigs(a.trustee_sig))
         except SignerRefused as e:
             print(f"no restore link: {e}", file=sys.stderr)
             return 1
@@ -354,8 +366,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--mark", type=int, required=True)
         if name == "log-nonce":
             p.add_argument("--by", required=True, help="the person's broker id; mapped to the log's anchor")
+            p.add_argument("--trustee-statement", help="write the bytes two trustees sign to this file (#41, F1)")
         else:
             p.add_argument("--proof", action="append", default=[], help="BROKER_ID=FILE holding that person's ID token")
+            p.add_argument("--trustee-sig", action="append", default=[],
+                           help="TRUSTEE_ID=FILE holding that trustee's signature over the trustee statement")
             p.add_argument("--approval-issuer", action="append", default=[])
             p.add_argument("--approval-audience", action="append", default=[])
             p.add_argument("--keycloak", required=True)

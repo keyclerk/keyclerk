@@ -10,7 +10,7 @@ from tests.test_edge_api import ceiling
 def test_a_replaced_officers_ceiling_no_longer_governs(desk):
     assert desk.approve(W(INGRID), enrol(desk)["change_id"])["outcome"] == "applied"
     desk.set_ceiling(W(EVA), "plant-a", {"ceiling": E.seal_ceiling(OFFICER_KEY, ceiling())})
-    before = E.unseal(desk.edge_bundle("plant-a"), E.public_hex(desk.bundle_key), E.BUNDLE_FORMAT)
+    before = E.unseal(desk.edge_bundle("plant-a"), desk.edge_key()["key"], E.BUNDLE_FORMAT)
     assert before["leases"]                                                    # leases under Eva's ceiling
     new_officer_key = Ed25519PrivateKey.generate()                             # Eva replaced by Finn
     st = statement("plant-a", FINN, new_officer_key, edge_key=EDGE_KEY, purpose="rotation")
@@ -18,7 +18,7 @@ def test_a_replaced_officers_ceiling_no_longer_governs(desk):
                                 "officer": FINN, "officer_key": E.public_hex(new_officer_key),
                                 "statement": cosigned(st, new_officer_key, EDGE_KEY)})
     assert desk.approve(W(INGRID), r["change_id"])["outcome"] == "applied"
-    after = E.unseal(desk.edge_bundle("plant-a"), E.public_hex(desk.bundle_key), E.BUNDLE_FORMAT)
+    after = E.unseal(desk.edge_bundle("plant-a"), desk.edge_key()["key"], E.BUNDLE_FORMAT)
     c = after["ceiling"]
     assert c is None or c["key"] == E.public_hex(new_officer_key), \
         f"bundle still carries the replaced officer's ceiling and {len(after['leases'])} lease(s) under it"

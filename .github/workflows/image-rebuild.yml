@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: EUPL-1.2
+# A fixed base image reaches a newly signed KeyClerk image within a day (issue 49): every morning, if the base the
+# latest release's Containerfile names has a new digest under its tag and the published image is not yet on it, the
+# release is rebuilt from its tag on that base (image.yml: reproduced, tested, scanned, attested, signed) and pushed as
+# the version, latest, and VERSION-base.DATE. The image's label org.opencontainers.image.base.name says its base. The
+# custodian's image has an empty base and is rebuilt with releases only.
+name: image-rebuild
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      ref: ${{ steps.base.outputs.ref }}
+      base: ${{ steps.base.outputs.base }}
+      tag: ${{ steps.base.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: The latest release, its base, and the base's digest now
+        id: base
+        run: |
+          ref="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          pinned="$(git show "${ref}:Containerfile" | sed -n 's/^ARG BASE=//p')"
+          name="${pinned%@*}"
+          now="sha256:$(docker buildx imagetools inspect --raw "$name" | sha256sum | cut -d' ' -f1)"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/keyclerk:${ref#v}"
+          on="$(docker buildx imagetools inspect "$image" --format '{{ index .Image.Config.Labels "org.opencontainers.image.base.name" }}' || true)"
+          echo "release ${ref}; base ${name}; now ${now}; the image is on ${on:-unknown}"
+          if [ "$on" = "${name}@${now}" ]; then
+            echo "the published image is on the current base: nothing to rebuild"
+            exit 0
+          fi
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          echo "base=${name}@${now}" >> "$GITHUB_OUTPUT"
+          echo "tag=${ref#v}-base.$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+  rebuild:
+    needs: check
+    if: needs.check.outputs.ref != ''
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/image.yml
+    with:
+      name: keyclerk
+      context: .
+      ref: ${{ needs.check.outputs.ref }}
+      base: ${{ needs.check.outputs.base }}
+      extra_tag: ${{ needs.check.outputs.tag }}

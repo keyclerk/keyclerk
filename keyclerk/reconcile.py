@@ -250,6 +250,14 @@ class State:
     def save_applied(self, doc: dict) -> None:
         self._write("last-applied.json", doc)
 
+    def history_version(self) -> int:
+        """The records-key history version the last applied records came under (#41 F8); 1 before any rotation."""
+        v = self._read("history-version.json")
+        return int(v.get("version", 1)) if isinstance(v, dict) and isinstance(v.get("version"), int) else 1
+
+    def save_history_version(self, version: int) -> None:
+        self._write("history-version.json", {"version": int(version)})
+
     def logouts(self) -> dict:
         v = self._read("logout-queue.json")
         return v if isinstance(v, dict) else {}
@@ -291,6 +299,10 @@ class State:
         """Anchor -> the broker's username, for edge leases (Warpgate and the facade know people by it)."""
         self._write("usernames.json", dict(sorted(names.items())))
 
+    def identity_map(self, sealed: dict) -> None:
+        """The sealed identity map (keyclerk.identity_map): what the signer checks a lease's username and e-mail against."""
+        self._write("identity-map.json", sealed)
+
     def console_cursor(self, at: datetime) -> int:
         """The newest admin event time read for console grants (ms); a first run looks back a day."""
         v = self._read("console-grants.json")
@@ -317,6 +329,22 @@ def _history_errors(last: dict | None, new: dict) -> list[str]:
 MARK_FORMAT = "kc-mark-v1"
 
 
+def recovery_base(store, seen: int, last: dict | None) -> tuple[dict | None, int, int | None, dict | None]:
+    """(the last applied records still a base, the history version held, the revision at its switch when that
+    version is newer than the one last applied under, what was reset) (#41 F8, TUF's fast-forward attack): after a
+    recovery the records a stolen key signed past the switch are no base, and the high-water mark counts only to the
+    switch. A planned rotation's switch lies past everything applied, so nothing changes then."""
+    from keyclerk.store import replay
+    hv = 1 if isinstance(store.pinned, str) else store.pinned.version
+    if hv <= seen:
+        return last, hv, None, None
+    back = replay.revision_at(store, store.pinned.switch)
+    if back is not None and last and isinstance(last.get("revision"), int) and last["revision"] > back:
+        return None, hv, back, {"history": hv, "switch": store.pinned.switch, "revision": back,
+                                "dropped_applied": last["revision"]}
+    return last, hv, back, None
+
+
 def _remove_intruders_only(args, state, target, run: dict, problem: str, mark, rev) -> None:
     """The revision is refused, but memberships the records never required are still taken out of managed groups:
     otherwise whoever can write the mark could freeze every removal (review 2026-10-26 E4). They are judged against
@@ -341,8 +369,13 @@ def _remove_intruders_only(args, state, target, run: dict, problem: str, mark, r
 UNSIGNED = "the broker's high-water mark is unsigned"
 
 
-def _mark_bytes(realm: str, revision: int) -> bytes:
-    return f"{MARK_FORMAT}|{realm}|{revision}".encode()
+MARK_FORMAT_V2 = "kc-mark-v2"                 # #41 F8: the mark names the records-key history version it holds under
+
+
+def _mark_bytes(realm: str, revision: int, history: int | None = None) -> bytes:
+    if history is None:
+        return f"{MARK_FORMAT}|{realm}|{revision}".encode()
+    return f"{MARK_FORMAT_V2}|{realm}|{revision}|{history}".encode()
 
 
 def mark_key(args):
@@ -358,8 +391,17 @@ def mark_key(args):
         raise Refused(f"--mark-key {path}: not a readable Ed25519 private key (64 hex digits)") from None
 
 
-def sign_mark(key, realm: str, revision: int) -> str:
-    return f"{MARK_FORMAT}:{revision}:{key.sign(_mark_bytes(realm, revision)).hex()}"
+def sign_mark(key, realm: str, revision: int, history: int | None = None) -> str:
+    """kc-mark-v1 for a log never rotated; kc-mark-v2 with the history version after a rotation (#41 F8)."""
+    if history is None or history <= 1:
+        return f"{MARK_FORMAT}:{revision}:{key.sign(_mark_bytes(realm, revision)).hex()}"
+    return f"{MARK_FORMAT_V2}:{revision}:{history}:{key.sign(_mark_bytes(realm, revision, history)).hex()}"
+
+
+def mark_history(raw) -> int:
+    """The history version a mark names: 1 for kc-mark-v1 (and anything unsigned)."""
+    parts = str(raw or "").split(":")
+    return int(parts[2]) if len(parts) == 4 and parts[0] == MARK_FORMAT_V2 and parts[2].isdigit() else 1
 
 
 def read_mark(raw, key, realm: str) -> tuple[int | None, str | None]:
@@ -371,6 +413,14 @@ def read_mark(raw, key, realm: str) -> tuple[int | None, str | None]:
         revision = int(parts[1])
         try:
             key.public_key().verify(bytes.fromhex(parts[2]), _mark_bytes(realm, revision))
+            return revision, None
+        except Exception:   # noqa: BLE001 - malformed or by another key: not this reconciler's mark
+            return revision, "the broker's high-water mark does not verify with this reconciler's key"
+    if len(parts) == 4 and parts[0] == MARK_FORMAT_V2 and parts[1].isdigit() and len(parts[1]) <= 18 \
+            and parts[2].isdigit() and len(parts[2]) <= 9:
+        revision, history = int(parts[1]), int(parts[2])
+        try:
+            key.public_key().verify(bytes.fromhex(parts[3]), _mark_bytes(realm, revision, history))
             return revision, None
         except Exception:   # noqa: BLE001 - malformed or by another key: not this reconciler's mark
             return revision, "the broker's high-water mark does not verify with this reconciler's key"
@@ -437,7 +487,12 @@ def run_once(args, at: datetime | None = None, target: KeycloakTarget | None = N
         errs = check_records(doc, log_backed=log_ids is not None)
         if errs:
             raise Refused(f"records refused by {len(errs)} checks: {guard.safe_for_log(errs[0], 200)}")
-        hist = _history_errors(state.last_applied(), doc)
+        last, hv, back = state.last_applied(), 1, None
+        if log_ids is not None:                           # #41 F8: a recovery resets what a stolen key pushed forward
+            last, hv, back, rec = recovery_base(log_ids["store"], state.history_version(), last)
+            if rec:
+                run["recovery"] = rec
+        hist = _history_errors(last, doc)
         if hist:
             raise Refused(f"records rewrite history: {guard.safe_for_log(hist[0], 200)}")
         # the serial is signed with the records; the newest applied is kept in the broker too, so a lost or wiped
@@ -448,11 +503,17 @@ def run_once(args, at: datetime | None = None, target: KeycloakTarget | None = N
         if keeps_mark and mkey is None:
             raise Refused("the reconciler signs the broker's high-water mark: pass --mark-key, a file with an Ed25519 "
                           "private key (64 hex digits) that only the reconciler reads")
-        mark, problem = read_mark(target.high_water(), mkey, args.realm) if keeps_mark else (None, None)
+        raw_mark = target.high_water() if keeps_mark else None
+        mark, problem = read_mark(raw_mark, mkey, args.realm) if keeps_mark else (None, None)
+        if back is not None and not problem and isinstance(mark, int) and mark > back and mark_history(raw_mark) < hv:
+            run.setdefault("recovery", {"history": hv, "revision": back})["mark_was"] = mark
+            mark = back                                   # F8: the mark under the older history counts to the switch
+            run["incident"] = {"kind": "records_key_recovery", "why": f"the records key was recovered (history "
+                               f"version {hv}): the high-water mark goes back to revision {back}, the switch"}
         resign = problem == UNSIGNED
         if resign and getattr(args, "adopt_mark", False) and isinstance(rev, int) and mark <= rev:
             problem = None                               # an upgrade: the unsigned mark is signed at this run's apply
-        floor = max([x for x in (mark, (state.last_applied() or {}).get("revision")) if isinstance(x, int)], default=None)
+        floor = max([x for x in (mark, (last or {}).get("revision")) if isinstance(x, int)], default=None)
         if not problem and floor is not None and not (isinstance(rev, int) and rev >= floor):
             problem = f"records revision {rev} is older than revision {floor} already applied: never replayed"
         if problem:                                      # the revision waits; what the records never required still goes
@@ -508,13 +569,21 @@ def run_once(args, at: datetime | None = None, target: KeycloakTarget | None = N
             if not run.get("refused"):
                 state.save_applied(doc)
                 state.save_desired(want)
-                if isinstance(rev, int) and (rev != mark or resign) and hasattr(target, "set_high_water"):
-                    target.set_high_water(sign_mark(mkey, args.realm, rev))
+                if log_ids is not None:
+                    state.save_history_version(hv)
+                if isinstance(rev, int) and (rev != mark or resign or mark_history(raw_mark) < hv) \
+                        and hasattr(target, "set_high_water"):
+                    target.set_high_water(sign_mark(mkey, args.realm, rev, hv))
         state.observed(target.read_full() if args.apply else have)
         if log_ids is not None and args.apply:            # phase 2: people seen through their attribute get linked
             run["findings"] = run.get("findings", []) + target.link_subjects(log_ids["signer"], want)   # never on a dry run
-        state.usernames(getattr(target, "usernames", {}) or {})
-        state.emails(getattr(target, "emails", {}) or {})
+        names, mails = getattr(target, "usernames", {}) or {}, getattr(target, "emails", {}) or {}
+        state.usernames(names)
+        state.emails(mails)
+        if mkey is not None:                          # sealed with the mark's key, for the checking signer (0021 point 2)
+            from keyclerk import identity_map
+            state.identity_map(identity_map.seal(mkey, args.realm, (state.last_applied() or {}).get("revision"), at,
+                                                 names, mails))
     except (Refused, guard.InputRejected, LogRefused) as e:
         run["refused"] = guard.safe_for_log(e)
     except Exception as e:   # noqa: BLE001 - recorded, retried next run, never widens anything

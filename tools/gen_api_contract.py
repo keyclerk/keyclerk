@@ -133,7 +133,8 @@ S = {
     "Membership": obj({"membership_id": ID, "kind": {"enum": ["anchor", "group", "rule"]}, "member": ID,
                        "member_name": NULLS(TEXT), "by": ANCHOR, "by_name": NULLS(TEXT), "under": ID, "chain": arr(ID),
                        "approved_by": arr(ANCHOR), "start": TIME, "end": TIME,
-                       "status": {"enum": ["active", "pending", "ended", "revoked", "void", "lapsed", "invalid", "standby"]},
+                       "status": {"enum": ["active", "pending", "ended", "revoked", "void", "lapsed", "invalid", "standby",
+                                           "unreviewed"]},
                        "can_end": {"type": "boolean"}}),
     "Manager": obj({"anchor": NULLS(ANCHOR), "name": NULLS(TEXT), "delegation_id": ID, "over": ID, "powers": arr(POWER, 5),
                     "status": {"enum": ["ok", "grace", "dead"]}, "chain": arr(ID)}),
@@ -183,7 +184,9 @@ S = {
                                        "the bundle carries these bytes as they are (amendment 0014d)")}, ["ceiling"]),
     "ChangeResult": obj({"change_id": ID, "outcome": {"enum": ["applied", "pending", "refused", "withdrawn"]},
                          "summary": TEXT, "reasons": arr(TEXT, 50), "records": {"type": "object"},
-                         "revision": {"type": "integer"}, "next": NEXT}, ["change_id", "outcome", "summary", "reasons", "records", "revision"]),
+                         "revision": {"type": "integer"}, "next": NEXT,
+                         "warnings": d(arr(TEXT, 20), "what the change will not do as one may expect (issue 52: an edge's ceiling)")},
+                        ["change_id", "outcome", "summary", "reasons", "records", "revision"]),
     "SignIn": obj({"redirect": d({"type": "string", "pattern": "^https?://", "maxLength": 4096}, "go here to sign in and approve")}),
     "Statement": obj({"change_id": ID, "nonce": d({"type": "string", "maxLength": 64}, "the OIDC nonce to sign in with"),
                       "summary": TEXT,
@@ -417,9 +420,22 @@ doc = {
                               arr({"type": "object"}))},
         "/edges/{edge_id}/ceiling": {"post": op("Set an edge's ceiling: the officer's signed data (decision 0014 point 4)",
                                                    {"type": "object"}, ["edge_id"], body=ref("SignedCeiling"), codes=W, tag="change")},
-        "/relay/{relay_id}/confirm": {"post": op("Confirm you opened it: a credential is deleted, an escrow half recorded",
+        "/relay/{relay_id}/confirm": {"post": op("Confirm you opened it: a credential is deleted; an escrow half leaves "
+                                                 "your inbox but counts only with a fresh sign-in (confirm-sign-in)",
                                                  {"type": "object"}, ["relay_id"], codes=("401", "403", "404", "429"), tag="change")},
-        "/edge/escrow/{item_id}": {"get": {**op("Whether both custodians opened their halves; forget the value only then",
+        "/me/visit-leases/{lease_id}/carry-sign-in": {"post": op("Start the fresh sign-in that signs one carried visit "
+                                                                 "lease (where approval proofs are required): the "
+                                                                 "broker URL; the lease file is saved when it returns",
+                                                                 {"type": "object"}, ["lease_id"],
+                                                                 codes=("401", "403", "404", "422", "429"),
+                                                                 tag="change")},
+        "/relay/{relay_id}/confirm-sign-in": {"post": op("Start the fresh sign-in that confirms your escrow half (where "
+                                                         "approval proofs are required): the broker URL to go to; the "
+                                                         "checking signer counts it (0.29 review S2)",
+                                                         {"type": "object"}, ["relay_id"], codes=("401", "403", "404", "422", "429"),
+                                                         tag="change")},
+        "/edge/escrow/{item_id}": {"get": {**op("Whether the checking signer counted both custodians' own sign-ins; forget "
+                                                "the value only then",
                                                 {"type": "object"}, ["item_id"]), "security": [{"edge": []}], "tags": ["edge"]}},
         "/edge/lease/{lease_id}/email": {"get": {**op("The verified address of a live lease's person, sealed for this "
                                                       "request (edge protocol 1.3); the edge keeps it nowhere",
@@ -430,6 +446,10 @@ doc = {
                                "security": [{"edge": []}], "tags": ["edge"]}},
         "/edges/{edge_id}/unlock": {"post": op("Read a phoned-unlock code (an unlock approver of the edge, never the person)",
                                                {"type": "object"}, ["edge_id"], body={"type": "object"}, codes=W, tag="change")},
+        "/edges/{edge_id}/unlock-sign-in": {"post": op("Start the fresh sign-in that signs one phoned unlock (where approval "
+                                                       "proofs are required): the broker URL to go to; the code is shown "
+                                                       "after it", {"type": "object"}, ["edge_id"], body={"type": "object"},
+                                                       codes=W, tag="change")},
         "/edges/{edge_id}/incidents/{incident_id}/close": {"post": op("Close an edge incident (its officer or the security officer)",
                                                                       {"type": "object"}, ["edge_id", "incident_id"], body={"type": "object"},
                                                                       codes=W, tag="change")},

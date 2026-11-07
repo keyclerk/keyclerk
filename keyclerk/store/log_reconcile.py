@@ -57,6 +57,9 @@ class LogRecords:
             raise LogRefused(f"the replica could not follow the signer: {str(e)[:200]}") from None
         if self.follower.alarms:
             raise LogRefused(f"the replica could not follow the signer: {self.follower.alarms[-1]}")
+        why = self.follower.snapshot_pending()           # D1: no grant applied from a state not yet checked
+        if why:
+            raise LogRefused(why)
         try:
             RP.verify(self.store, self.pinned, self.realm)
         except Exception as e:   # noqa: BLE001 - StoreRefused or a broken store: either way nothing is applied

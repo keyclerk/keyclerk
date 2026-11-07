@@ -16,9 +16,11 @@ from keyclerk.store.link import StoreRefused
 
 
 class MemoryStore:
-    def __init__(self, pinned: str, realm: str):
-        E.load_public(pinned)
-        self.pinned, self.realm = pinned, realm
+    def __init__(self, pinned, realm: str):
+        from keyclerk.store import link as L
+        self.genesis = L.key_at(pinned, 0)        # pinned may be a records-key history (#41)
+        E.load_public(self.genesis)
+        self.pinned, self.realm = pinned if not isinstance(pinned, str) else L.held_history([], 0, self.genesis), realm
         self._links: list[dict] = []
         self._hashes: list[bytes] = []
         self._fence = 1
@@ -44,6 +46,7 @@ class MemoryStore:
             for kind, key, rec in side:
                 check_side(kind, key, rec)
             body, h = L.check_next(sealed, self.pinned, self.realm, len(self._links), self.head(), self._fence)
+            L.check_switch_root(self.pinned, self._frontier, h)   # review N6: the root at a key switch is vouched for
             return self._apply(body, side, None, lambda: (sealed, h))[1]
 
     def append_checked(self, body: dict, seal, side: list[tuple[str, str, dict]] = (), check=None) -> tuple[dict, bytes]:
@@ -124,6 +127,15 @@ class MemoryStore:
             self._fence, self._frontier, self._records = body["fence"], frontier, recs
             self._parts, self._migration = body["parts"], body["migration"]
             self._restore = tuple(body["restore"]) if body["restore"] else None
+            self._snapshot_check = {"size": body["size"], "sha256": body["state"]["sha256"], "status": "pending"}
+
+    def snapshot_check(self) -> dict | None:
+        """{size, sha256, status} of the snapshot this store started from, or None (D1, 2026-11-07)."""
+        return dict(self._snapshot_check) if getattr(self, "_snapshot_check", None) else None
+
+    def set_snapshot_check(self, status: str, why: str = "") -> None:
+        if getattr(self, "_snapshot_check", None):
+            self._snapshot_check = {**self._snapshot_check, "status": status, **({"why": why[:300]} if why else {})}
 
     def restore_point(self) -> tuple[int, int] | None:
         return self._restore
@@ -165,6 +177,11 @@ class MemoryStore:
         pass
 
     # --- read -------------------------------------------------------------------------------------------------------
+
+    def adopt_history(self, history) -> None:
+        """Move to a newer records-key history (#41), verified by the caller against the pinned trustees."""
+        from keyclerk.store import link as L
+        self.pinned = L.adopt_history(self.pinned, history, self.size(), self.genesis)
 
     def size(self) -> int:
         return len(self._links)

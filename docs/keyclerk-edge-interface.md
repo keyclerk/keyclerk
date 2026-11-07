@@ -107,7 +107,8 @@ visit_leases [{lease_id, person, username, key_id, public_key, ssh_key, targets,
 ceiling (the officer's sealed kc-edge-ceiling-v2, exactly as sealed) | null,
 policy {modules {edge, ceiling: {sha256}}, release (sealed manifest) | null, entrypoints},
 governed_roles [{displayName, externalId?}] (optional, version 1.1),
-records_head {revision, head, size?} (optional, version 1.4)
+records_head {revision, head, size?} (optional, version 1.4),
+dropped [{lease_id | null, why [text]}] (optional, version 1.6)
 ```
 
 The newest bundle is complete: anything the edge holds that is not in it has ended. Verification
@@ -122,6 +123,13 @@ passes the ceiling policy, and the bundle is younger than `min(horizon of its cl
 visit lease lives in its own window, passes the ceiling policy too
 (kind visit: its window within `ceiling.max_offline_hours`, and an edge assured by its ceiling and its own
 attestation), and is not revoked. The ceiling policy judges a lease or visit lease by its `hours`: the time from its `from` to its `until` in whole hours rounded up, at least one (version 1.4; earlier versions rounded down, so a lease up to 59 minutes over `max_lease_hours` passed). A lost answer: `GET /api/v1/edge/bundle?serial=N` returns the same bundle.
+
+`dropped` (version 1.6) says what the signer left out of this bundle and why: each entry names a lease, or `null`
+for a reason that holds for the whole edge (a refused ceiling, an officer who is not independent of the core), with
+one to four reasons of at most 200 characters; at most 100 entries. It informs, it never grants: an edge shows it
+(why a person has no access here) and never derives a lease from it. A verifier refuses a bundle whose `dropped` is
+present but malformed or null. Before 1.6 the reasons were only in the desk's view of the edge, taken at the edge's
+last pull, so an edge could not say why it held no lease.
 
 Waiting for the next bundle (version 1.2, decision 0026): `GET /api/v1/edge/bundle?after=<serial>&wait=<seconds>`, both in
 the signed path. `after` is the serial of the newest bundle the edge accepted, `wait` whole seconds from 1, held to
@@ -316,9 +324,15 @@ A relay between the desk and the edges of a site tightens, never grants (KeyCler
   Anything else is refused whole.
 - **What no relay can do.** No operation adds a lease, widens a window, lifts a suspension or ends an edge. A parent
   bundle lifts a suspension; only the officer's ended notice ends an edge.
-- **The site key.** One physical key per site, pinned in each of its edges' enrolment, signs `kc-edge-site-v1` with the
-  node it names, both keys over the same bytes: `{purpose, edge, site_key, node_key, at, reason}`. `purpose` is
-  `provisional` (a replacement that runs on a dead edge's cached bundle until the officer confirms or ends it) or
-  `promotion` (a node made active by hand, section 7.3). The purpose is inside the signed bytes, so a statement made for
-  one never serves as the other.
+- **The site key.** One physical key per site, pinned in each of its edges' enrolment, signs a statement with the node
+  it names, both keys over the same bytes. `purpose` is `provisional` (a replacement that runs on a dead edge's cached
+  bundle until the officer confirms or ends it), signed as `kc-edge-site-v1`: `{purpose, edge, site_key, node_key, at,
+  reason}`; or `promotion` (a node made active by hand, section 7.3), signed as `kc-edge-site-v2` (version 1.6), which
+  adds `not_after`: after `at` and at most 24 hours later. The purpose and the format are inside the signed bytes, so a
+  statement made for one never serves as the other.
+- **A promotion promotes once (version 1.6).** An edge does not act on a promotion after its `not_after`, and the desk
+  refuses one then, and refuses a new activation whose statement's `at` is not after the node's last recorded
+  activation: a spare that is promoted, repaired back and promoted again needs a fresh statement each time. A
+  `kc-edge-site-v1` promotion (version 1.5) is refused from 1.6: it has no expiry, so a copy found later could promote
+  the node again.
 

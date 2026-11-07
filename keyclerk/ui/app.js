@@ -31,12 +31,15 @@ const CALLS = {
   relay: ["GET", "/relay"],
   relaytake: ["POST", "/relay/{relay_id}/take"],
   relayconfirm: ["POST", "/relay/{relay_id}/confirm"],
+  relayconfirmsignin: ["POST", "/relay/{relay_id}/confirm-sign-in"],
   edges: ["GET", "/edges"],
   setceiling: ["POST", "/edges/{edge_id}/ceiling"],
   unlock: ["POST", "/edges/{edge_id}/unlock"],
+  unlocksignin: ["POST", "/edges/{edge_id}/unlock-sign-in"],
   closeincident: ["POST", "/edges/{edge_id}/incidents/{incident_id}/close"],
   myvisits: ["GET", "/me/visit-leases"],
   carried: ["POST", "/me/visit-leases/{lease_id}/carried"],
+  carrysignin: ["POST", "/me/visit-leases/{lease_id}/carry-sign-in"],
   contract: ["GET", "/openapi.json"],
 };
 
@@ -96,7 +99,7 @@ const STATUS = {
   expired: ["Expired unsigned", ""], recovered: ["Recovered", "plum"], unreadable: ["Unreadable", "bad"], error: ["Not done", "bad"],
   active: ["In force", "ok"], ok: ["In force", "ok"], starts: ["Starts later", ""], grace: ["Ending, grace period", "warn"],
   standby: ["On standby", "warn"], ended: ["Ended", ""], dead: ["Ended: a link above ended", ""], revoked: ["Revoked for cause", "bad"],
-  void: ["Void", "bad"], lapsed: ["Lapsed", "warn"], invalid: ["Not valid", "bad"] };
+  void: ["Void", "bad"], lapsed: ["Lapsed", "warn"], invalid: ["Not valid", "bad"], unreviewed: ["Review overdue", "warn"] };
 const status = s => { const [word, tone] = STATUS[s] || [String(s), ""]; return pill(word, "st " + (tone || "neutral")); };
 const grantStatus = s => status(s === "pending" ? "starts" : s);
 const link = (href, text, cls) => h("a", { href, class: cls }, text);
@@ -233,6 +236,8 @@ function outcome(r, opts) {
     nextSteps(r.next, kind !== "applied" ? reasons : []),
     reasons.length && kind !== "applied" ? h("div", { class: "whylist" }, h("h4", {}, "Why"),
       h("ul", {}, reasons.map(x => h("li", {}, plain(x))))) : null,
+    (r.warnings || []).length ? h("div", { class: "whylist" }, h("h4", {}, "Note"),
+      h("ul", {}, r.warnings.map(x => h("li", {}, plain(x))))) : null,
     reasons.some(x => plain(x) !== String(x)) ? h("details", { class: "small" }, h("summary", {}, "Details for the security officer"),
       h("ul", { class: "mono" }, reasons.map(x => h("li", {}, String(x))))) : null,
     o.actions || null);
@@ -839,6 +844,11 @@ async function viewKeys() {
   const carry = async (v, btn) => {
     btn.setAttribute("aria-disabled", "true");
     try {
+      if (ME.approval_sign_in) {                                          // S1: the person's own sign-in signs it
+        const r = await call("carrysignin", { lease_id: v.lease_id });   // the file is saved when the sign-in returns
+        if (/^https?:\/\//.test(r.redirect)) location.assign(r.redirect);
+        return;
+      }
       const sealed = await call("carried", { lease_id: v.lease_id });
       const a = h("a", { href: "data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(sealed)),
         download: "carried-" + v.lease_id + ".json", class: "button sm" }, "Save the carried lease");
@@ -896,11 +906,24 @@ async function viewSecrets() {
       fill(show, h("p", { class: "muted small", role: "status" }, "Touch your key to open it..."));
       const k = keys.find(x => x.key_id === got.key_id) || key;          // the key it was sent to, not just the current one
       const plain = await PK.openWithKey(k.credential_id, k.public_key, got.envelope);
-      await call("relayconfirm", { relay_id: it.relay_id });             // only now may the desk forget it
+      const escrow = got.envelope.context.startsWith("escrow:");
+      if (!escrow) await call("relayconfirm", { relay_id: it.relay_id });  // only now may the desk forget it
       const text = new TextDecoder().decode(plain);
       const box = h("input", { type: "text", readonly: true, value: text, class: "secret", "aria-label": "the secret" });
+      const stored = escrow ? h("button", { type: "button", class: "primary" }, "I stored it: confirm with a fresh sign-in") : null;
+      if (stored) stored.addEventListener("click", async () => {         // S2: the custodian's own confirmation counts
+        try {
+          const r = await call("relayconfirmsignin", { relay_id: it.relay_id });
+          if (/^https?:\/\//.test(r.redirect)) location.assign(r.redirect);
+        } catch (e) {
+          await call("relayconfirm", { relay_id: it.relay_id });
+          fill(show, outcome({ outcome: "error", reasons: [e.message || String(e)], next: [] }, { title: "Not counted", focus: true }));
+        }
+      });
       fill(show, h("div", { class: "outcome applied", role: "status" }, h("h3", { tabindex: "-1" }, got.envelope.context),
-        h("p", { class: "small" }, "Shown once: the desk no longer holds it. Use it now; it is rotated after its first use."), box));
+        h("p", { class: "small" }, escrow ? "Your half of a break-glass value. Store it where your organisation keeps them, then "
+          + "confirm: the edge forgets the value only once both custodians have."
+          : "Shown once: the desk no longer holds it. Use it now; it is rotated after its first use."), box, stored));
       box.focus(); box.select();
       route();
     } catch (e) {
@@ -984,13 +1007,21 @@ function visitForm(e) {
 function unlockForm(e) {
   const f = { person: h("input", { placeholder: "idp:..." }), target: h("input", { value: e.targets[0] || "" }),
     key_fingerprint: h("input", { placeholder: "SHA256:... as the edge shows it" }), nonce: h("input", { placeholder: "as the edge shows it" }),
-    minutes: h("input", { type: "number", min: 1, max: 60, value: 30 }) };
+    minutes: h("input", { type: "number", min: 1, max: 60, value: 30 }),
+    node: h("input", { placeholder: "only for a two-node edge: the id the node shows" }) };
   const out = h("div", {});
-  const b = h("button", { type: "button" }, "Read the unlock code");
+  const b = h("button", { type: "button" }, ME.approval_sign_in ? "Sign in and read the unlock code" : "Read the unlock code");
   b.addEventListener("click", async () => {
+    const body = { person: f.person.value.trim(), target: f.target.value.trim(), key_fingerprint: f.key_fingerprint.value.trim(),
+      nonce: f.nonce.value.trim(), minutes: Number(f.minutes.value) };
+    if (f.node.value.trim()) body.node = f.node.value.trim();
     try {
-      const r = await call("unlock", { edge_id: e.edge_id }, { person: f.person.value.trim(), target: f.target.value.trim(),
-        key_fingerprint: f.key_fingerprint.value.trim(), nonce: f.nonce.value.trim(), minutes: Number(f.minutes.value) });
+      if (ME.approval_sign_in) {              // an unlock is the approver's own signature: a fresh sign-in signs this one code
+        const s = await call("unlocksignin", { edge_id: e.edge_id }, body);
+        if (/^https?:\/\//.test(s.redirect)) location.assign(s.redirect);
+        return;
+      }
+      const r = await call("unlock", { edge_id: e.edge_id }, body);
       fill(out, h("div", { class: "outcome applied", role: "status" }, h("h3", { tabindex: "-1" }, h("code", { class: "secret" }, r.code)),
         h("p", { class: "small" }, "Call the person back on their registered number and read it out. It unlocks that key on this edge for "
           + r.minutes + " minutes.")));
@@ -1001,7 +1032,7 @@ function unlockForm(e) {
   return h("details", { class: "small" }, h("summary", {}, "Phoned unlock"),
     h("p", { class: "muted small" }, "You are a second person: never read a code for yourself. Copy what the edge shows."),
     field("Person", f.person), field("Target", f.target), field("Key fingerprint", f.key_fingerprint, null, true),
-    field("Nonce", f.nonce), field("Minutes", f.minutes), b, out);
+    field("Nonce", f.nonce), field("Minutes", f.minutes), field("Node", f.node), b, out);
 }
 
 function preparedForm() {

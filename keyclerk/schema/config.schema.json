@@ -1347,6 +1347,40 @@
           }
         }
       }
+    },
+    "trustees": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "set"
+      ],
+      "description": "the trustee set this process pins (#41, F1): from link `since` on, HA change links and restore links hold only with one officer's and one root trust owner's signatures",
+      "properties": {
+        "set": {
+          "type": "string",
+          "description": "a kc-trustees-v1 file, delivered out of band"
+        },
+        "since": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "the log position from which the set is required (the size when pinned)"
+        }
+      }
+    },
+    "records_keys": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "history"
+      ],
+      "description": "the records-key history this process pins (#41): a kc-records-keys-v1 document delivered out of band; a store opened here adopts it when it starts from the store's key and is newer",
+      "properties": {
+        "history": {
+          "type": "string",
+          "description": "the history file"
+        }
+      }
     }
   }
 }

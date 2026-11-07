@@ -43,7 +43,7 @@ from keyclerk import delegation as D, guard, records, remedies
 from keyclerk import qr as qr_mod
 
 ACTIONS = ("add_member", "include_group", "end_membership", "create_group", "delegate", "end_delegation",
-           "appoint_approver", "end_approver",
+           "appoint_approver", "end_approver", "review_membership", "exclude_edges",                       # 0.29
            "register_visit", "record_entry", "acknowledge_arrival", "confirm_guest", "record_departure",  # decision 0009
            "issue_qr", "issue_badge", "return_badge", "add_attendee", "register_on_site",
            "enrol_edge", "enrol_person_key", "grant_visit_lease", "end_edge_record", "rotate_edge")       # decision 0014
@@ -196,12 +196,35 @@ class DeskFiles:
         if not self._lockf.closed:
             self._lockf.close()                               # the operating system drops the lock with the file
 
-    def _signed(self, e: dict) -> bool:
-        try:
-            self._pub.verify(bytes.fromhex(e["signature"]), e["sha256"].encode())
-            return True
-        except Exception:   # noqa: BLE001 - absent, malformed or wrong: not signed by this desk
-            return False
+    def _line_keys(self) -> list:
+        """The keys that signed this desk's lines, oldest first: after a records-key rotation (#41) the keys of the
+        history this desk's own store verified against the pins (review N4: never what the signer offers); otherwise
+        the one key."""
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        st = getattr(getattr(self, "follower", None), "store", None)
+        h = getattr(st, "pinned", None)
+        if h is None or isinstance(h, str):
+            return [self._pub]
+        return [Ed25519PublicKey.from_public_bytes(bytes.fromhex(w["key"])) for w in h.doc["keys"]]
+
+    def _key_floor_file(self):
+        return self.path / "log-key-floor"
+
+    def _signed(self, e: dict, floor: int | None = None) -> int | None:
+        """The index of the key that signed this line (the newest key is the last); None when none did. With floor,
+        only that key or a later one counts: once a newer key signs, an older one never signs again (#41)."""
+        keys = getattr(self, "_keys_cache", None)
+        if not keys:
+            keys = self._keys_cache = self._line_keys()
+        for i, k in enumerate(keys):
+            if floor is not None and i < floor:
+                continue
+            try:
+                k.verify(bytes.fromhex(e["signature"]), e["sha256"].encode())
+                return i
+            except Exception:   # noqa: BLE001 - absent, malformed or wrong: not signed by this key
+                continue
+        return None
 
     def _lines(self, start: int = 0):
         """(end offset, line bytes) of every complete line from start on, streamed."""
@@ -286,11 +309,16 @@ class DeskFiles:
         if size < start or time.monotonic() - full_at > FULL_VERIFY_SECONDS:
             start, prev, errs, n, full_at = 0, "0" * 64, [], 0, time.monotonic()
         errs = list(errs)
+        self._keys_cache = self._line_keys()
+        full = start == 0                          # a full verify, from the first line
+        floor = 0 if full else getattr(self, "_key_floor", 0)
         for end, line in self._lines(start):
             n += 1
             try:
                 e = json.loads(line)
-                signed = self._signed(e)
+                got = self._signed(e, floor)
+                signed = got is not None
+                floor = got if signed else floor
                 e.pop("signature", None)
                 sha = e.pop("sha256")
                 ok = signed and e["prev"] == prev and hashlib.sha256(json.dumps(e, sort_keys=True).encode()).hexdigest() == sha
@@ -299,7 +327,23 @@ class DeskFiles:
             if not ok:
                 errs.append(f"log line {n} does not chain or is not signed by this desk")
             prev, start = sha, end
+        held = 0                                   # the newest key a line was ever seen signed by (review N4)
+        try:
+            held = int(self._key_floor_file().read_text(encoding="utf-8").strip() or 0)
+        except (OSError, ValueError):
+            held = 0
+        if full and floor < held:
+            errs.append(f"the activity log no longer holds a line signed by records key {held + 1} of the history: it was "
+                        "rewritten with an older key; restore the desk's state from a backup")
+        elif floor > held:
+            tmp = self._key_floor_file().with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8", newline="\n") as h:
+                h.write(str(floor))
+                h.flush()
+                os.fsync(h.fileno())
+            os.replace(tmp, self._key_floor_file())
         self._verified = (start, prev, errs[:100], n, full_at)
+        self._key_floor = floor
         return errs[:100]
 
     def pending(self) -> dict:
@@ -709,9 +753,9 @@ class YamlStore(DeskFiles):
             except (ValueError, KeyError, TypeError):
                 self._head = ((self._head or (0, ""))[0] + 1, "broken")
                 continue
-            if e.get("records_sha256") and isinstance(e.get("revision"), int) and self._signed(e):
+            if e.get("records_sha256") and isinstance(e.get("revision"), int) and self._signed(e) is not None:
                 last = e
-            if isinstance(e.get("visits"), dict) and e["visits"] and self._signed(e):
+            if isinstance(e.get("visits"), dict) and e["visits"] and self._signed(e) is not None:
                 for vid, sha in e["visits"].items():
                     if sha is None:
                         self._visits.pop(vid, None)
@@ -932,7 +976,8 @@ class Desk:
         tail about keys that do not count removed; None when a kind has no per-record check here (then every candidate
         goes to the full evaluation)."""
         from keyclerk import edge_records, policy_wasm
-        per_kind = {"memberships", "delegations", "approvers", "edges", "person_keys", "edge_visit_leases", "edge_rotations"}
+        per_kind = {"memberships", "delegations", "approvers", "edges", "person_keys", "edge_visit_leases", "edge_rotations",
+                    "review_decisions"}
         if any(add.get(k) for k in add if k not in per_kind):
             return None
         cand = {**doc}
@@ -957,6 +1002,9 @@ class Desk:
                     errs += edge_records.visit_lease_errors(cand, v, hours)
             for r in add.get("edge_rotations", []):
                 errs += edge_records.rotation_errors(cand, r)
+            if add.get("review_decisions"):
+                ids = {r["decision_id"] for r in add["review_decisions"]}
+                errs += [e for e in D.review_errors(cand) if e.split(":", 1)[0] in ids]
         return _bare(e for e in errs if any(k in e for k in KEY_ERRORS))
 
     def _managers(self, doc: dict, gid: str | None, power: str, actor: str | None) -> list[str]:
@@ -1250,24 +1298,77 @@ class Desk:
             self._edge_store = EdgeStore(self.store.path)
         return self._edge_store
 
-    @property
-    def bundle_key(self):
-        """The bundle key: its own file beside the store, separate from the records key (decision 0014)."""
-        from keyclerk import edge as E
-        if getattr(self, "_bundle_key", None) is None:
-            pulled = any(int(self.edge_store.state(d.name).get("serial", 0)) for d in (self.store.path / "edges").glob("*") if d.is_dir())
-            self._bundle_key = E.load_or_make_key(self.store.path / "bundle.key", allow_create=not pulled)
-        return self._bundle_key
+    def _edge_signer(self):
+        """The checking signer: it holds the bundle key and builds every object an edge verifies under it (decision
+        0021), so a desk serves no edge without one, and keeps no bundle key of its own."""
+        signer = getattr(self.store, "_signer", None)
+        if signer is None:
+            raise Refusal("edges need the checking signer (--signer): it holds the bundle key and builds every bundle "
+                          "(0.29.0)")
+        for name in ("bundle.key", "unlock-v2.key"):
+            old = self.store.path / name
+            if old.exists():
+                raise Refusal(f"a {name} still lies beside the desk's store ({old}): move it into the signer once "
+                              "(python -m keyclerk.signer import-bundle-key --state DIR --from bundle.key "
+                              "--unlock-from unlock-v2.key), then delete it here; enrolled edges keep their pins")
+        return signer
 
-    def edge_key(self) -> dict:
-        """The public half of the bundle key, which an edge pins at enrolment (public)."""
+    def _identity_map(self):
+        """The reconciler's sealed identity map (0021 point 2), as it wrote it: read whole within a size bound (its
+        signed bytes are one long string, beyond the guard's limit for strings); the signer checks it, the desk never."""
+        f = (self.broker_state / "identity-map.json") if self.broker_state else None
+        if not f or not f.exists():
+            return None
+        try:
+            raw = guard.read_bounded(f, 32 * 1024 * 1024)
+            v = json.loads(raw)
+        except (OSError, ValueError):
+            return None                                  # the signer then refuses, when it pins a reconciler key
+        return v if isinstance(v, dict) else None
+
+    def _push_identity(self) -> None:
+        """Pass the reconciler's identity map on to the signer when it changed (a 26,000-person map is megabytes: never
+        with every pull). A map the signer refuses is an incident once, and the signer keeps the one it holds."""
+        from keyclerk.signer import SignerRefused
+        sealed = self._identity_map()
+        if sealed is None:
+            return
+        sha = hashlib.sha256(json.dumps(sealed, sort_keys=True).encode()).hexdigest()
+        if getattr(self, "_identity_sha", None) == sha:
+            return
+        try:
+            out = self._edge_signer().identity_map({"sealed": sealed})
+            refused = out.get("refused") if isinstance(out, dict) and len(out) == 1 else None
+        except SignerRefused as e:
+            refused = str(e)
+        if refused:
+            self.store.note({"change_id": "C-" + secrets.token_hex(6), "action": "identity_map_refused", "actor": "desk",
+                             "summary": f"the checking signer refused the reconciler's identity map: {refused}"[:300],
+                             "records": {}, "outcome": "refused", "reasons": [refused[:300]]})
+        self._identity_sha = sha
+
+    def _seal(self, kind: str, edge_id: str, **fields) -> dict:
+        from keyclerk.signer import SignerRefused
+        req = {"kind": kind, "edge_id": edge_id, "fields": fields}
+        if kind in ("email", "carried"):
+            self._push_identity()
+        try:
+            out = self._edge_signer().seal_edge(req)
+        except SignerRefused as e:
+            raise Refusal(f"the checking signer refused: {e}") from None
+        if isinstance(out, dict) and "refused" in out and len(out) == 1:
+            raise Refusal(f"the checking signer refused: {out['refused']}")
+        return out
+
+    def edge_key(self, edge_id: str | None = None) -> dict:
+        """The public half of the bundle key, which an edge pins at enrolment (public); with edge_id, that edge's own
+        rollover (kc-edge-key-rollover-v2, signed by the old key and the edge's officer, #41 F6), never a list."""
         from keyclerk import edge as E
-        pub = E.public_hex(self.bundle_key)
-        unlock = E.unlock_public(self._unlock_private())
-        rf = self.store.path / "bundle-rollover.json"
+        signer = self._edge_signer()
+        keys = signer.bundle_public(guard.ident(edge_id, "edge")) if edge_id else signer.bundle_public()
+        pub, unlock = keys["key"], keys["unlock_key"]
         return {"key": pub, "key_id": E.key_id(pub), "format": E.BUNDLE_FORMAT, "unlock_key": unlock,
-                "unlock_format": E.UNLOCK_CONTEXT,
-                "rollover": json.loads(rf.read_text(encoding="utf-8")) if rf.exists() else None,
+                "unlock_format": E.UNLOCK_CONTEXT, "rollover": keys.get("rollover"),
                 "note": "pin this key on the edge only after comparing its key_id with the one the desk's operator reads out"}
 
     def _edge(self, doc: dict, edge_id: str, now: datetime) -> dict:
@@ -1301,27 +1402,11 @@ class Desk:
 
     def edge_ended(self, edge_id: str) -> dict | None:
         """A sealed notice for an ended edge, so its agent tells revocation from an outage (decision 0014c)."""
-        from keyclerk import edge as E
-        from keyclerk import edge_records
         doc, now = self.store.load(), self.clock()
         r = next((r for r in doc.get("admin_revocations", []) if r["id"] == edge_id and D._ts(r["at"]) <= now), None)
         if r is None:
             return None
-        e = next((x for x in doc.get("edges", []) if x["edge_id"] == edge_id), None)
-        at = D._ts(r["at"])
-        keys = edge_records.node_keys(edge_records.current(doc, e, at)) if e else []   # bound to every node's key
-        return E.ended_notice(self.bundle_key, edge_id, at, r.get("reason", ""), keys)
-
-    def _unlock_private(self):
-        """The desk's P-256 key for phoned unlock (kc-unlock-v2): its own file, 0600, the scalar in hex,
-        created before any edge pulled. A kc-unlock-v1 unlock.key beside it is ignored (no migration, 0014d)."""
-        from keyclerk import edge as E
-        f = self.store.path / "unlock-v2.key"
-        if not f.exists():
-            fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as h:
-                h.write(E.new_unlock_private())
-        return E.unlock_private(f.read_text(encoding="utf-8").strip())
+        return self._seal("ended", edge_id)             # bound to every node's key, from the signer's records
 
     def _emails(self) -> dict:
         """Anchor -> verified e-mail, as the reconciler read it from the broker, so an edge can match a single sign-on login by it."""
@@ -1338,30 +1423,9 @@ class Desk:
             return {}
 
     def _edge_leases(self, doc: dict, e: dict, now: datetime, horizons: dict, first_seen: dict | None = None) -> list[dict]:
-        """Leases for an edge's targets, with ids that stay the same while the grant stays, and a "from"
-        that stays too (the desk's clock at bundle time made a lease not yet live on an edge a few seconds
-        behind): the earliest start of its direct memberships, or for a derived lease the first time it was issued."""
-        from keyclerk import edge as E
-        out = []
-        seen = first_seen if first_seen is not None else {}
-        groups = D._groups(doc)
-        for t in e["targets"]:
-            for g in groups.values():
-                if not any(c.get("entitlement") == t["entitlement"] for c in g.get("carries", [])):
-                    continue
-                cls = D.effective_risk(doc, g["group_id"])
-                for a in sorted(D.effective_members(doc, g["group_id"], now)):
-                    direct = [m for m in doc.get("memberships", []) if m["group"] == g["group_id"]
-                              and D.same(doc, (m["member"] or {}).get("anchor"), a) and D.membership_status(doc, m, now) == "active"]
-                    end = min([D._ts(m["end"]) for m in direct], default=now + timedelta(hours=int(horizons.get(cls, 1))))
-                    source = ",".join(sorted(m["membership_id"] for m in direct)) or "derived"
-                    lid = "L-" + E.sha256(f"{e['edge_id']}|{t['target']}|{a}|{g['group_id']}|{source}".encode())[:16]
-                    start = min([D._ts(m["start"]) for m in direct], default=None)
-                    frm = E._iso(start) if start else seen.setdefault(lid, E._iso(now))
-                    out.append({"lease_id": lid, "person": a, "target": t["target"], "role": t["role"], "class": cls,
-                                "roles": [g["group_id"]], "from": frm, "until": E._iso(end),
-                                "target_session_hours": t.get("max_session_hours")})
-        return out
+        """Leases for an edge's targets (keyclerk.edge_grants, which the signer derives from too)."""
+        from keyclerk import edge_grants
+        return edge_grants.leases(doc, e, now, horizons, first_seen)
 
     ATTEST_CHALLENGE_MINUTES = 10
 
@@ -1382,52 +1446,36 @@ class Desk:
         return t, ek, A.parse_public(base64.b64decode(t["ak_public"]))
 
     def edge_attest_challenge(self, edge_id: str) -> dict:
-        """Credential activation, step one (decision 0016): check the EK (the officer's pin, and the manufacturer chain
-        where there is a certificate), then encrypt a challenge to it, bound to the AK's name."""
-        import base64
-        from keyclerk import attest as A
+        """Credential activation, step one (decision 0016), made by the checking signer (0.29 D3): the EK checked, a
+        challenge encrypted to it and bound to the AK's name; the desk only passes it on."""
         doc, now = self.store.load(), self.clock()
-        e = self._edge(doc, edge_id, now)
-        t, ek, ak = self._tpm(e)
-        if t is None:
-            raise Refusal("this edge was enrolled without a TPM: it is a basic edge (decision 0016)")
-        roots, inter = self._ek_trust()
+        self._edge(doc, edge_id, now)
         try:
-            facts = A.check_ek(ek, t["ek_sha256"], base64.b64decode(t["ek_cert"]) if t.get("ek_cert") else None, roots, inter, at=now)
-        except A.AttestError as x:
-            self.edge_store.incident(edge_id, {"kind": "attestation_failed", "detail": f"endorsement key: {x}"[:900]}, core=True)
-            raise Refusal(f"the TPM's endorsement key does not hold: {x}") from None
-        secret = secrets.token_bytes(32)
-        idobj, encsec = A.make_credential(A.Public(b"", A.ALG_RSA, A.ALG_SHA256, 0, ek), ak.name, secret)
-        self.edge_store.update_state(edge_id, ek_facts=facts, attest_challenge={
-            "sha256": hashlib.sha256(secret).hexdigest(), "at": _iso(now), "ak_name": ak.name.hex()})
-        b = lambda x: base64.b64encode(x).decode()   # noqa: E731
-        return {"edge": edge_id, "id_object": b(idobj), "encrypted_secret": b(encsec),
-                "credential": b(A.credential_file(idobj, encsec)),
-                "expires_at": _iso(now + timedelta(minutes=self.ATTEST_CHALLENGE_MINUTES))}
+            out = self._seal("attest_challenge", edge_id)
+        except Refusal as e:
+            if "endorsement key" in str(e):
+                self.edge_store.incident(edge_id, {"kind": "attestation_failed", "detail": str(e)[:900]}, core=True)
+            raise
+        out = {k: v for k, v in out.items() if k != "minutes"}
+        return {**out, "expires_at": _iso(now + timedelta(minutes=self.ATTEST_CHALLENGE_MINUTES))}
 
     def edge_attest_activate(self, edge_id: str, body: dict) -> dict:
-        """Credential activation, step two: only the TPM holding the pinned EK and this AK recovers the challenge."""
-        import base64
-        import binascii
-        import hmac as _hmac
+        """Credential activation, step two, judged by the checking signer: only the TPM holding the pinned EK and this
+        AK recovers the challenge (0.29 D3)."""
         if not isinstance(body, dict) or set(body) != {"secret"} or not isinstance(body["secret"], str) or len(body["secret"]) > 200:
             raise guard.InputRejected("an activation is {secret}: the recovered challenge, base64")
-        now = self.clock()
-        ch = self.edge_store.state(edge_id).get("attest_challenge")
-        if not ch or guard.timestamp(ch["at"]) < now - timedelta(minutes=self.ATTEST_CHALLENGE_MINUTES):
-            raise Refusal("no challenge waits for this edge: ask for one first (GET /edge/attest/challenge)")
         try:
-            got = base64.b64decode(body["secret"], validate=True)
-        except (binascii.Error, ValueError):
-            raise guard.InputRejected("secret: base64") from None
-        if not _hmac.compare_digest(hashlib.sha256(got).hexdigest(), ch["sha256"]):
-            self.edge_store.update_state(edge_id, attest_challenge=None)
-            self.edge_store.incident(edge_id, {"kind": "attestation_failed", "detail": "a wrong answer to the activation "
-                                               "challenge: the attestation key is not in the TPM the officer pinned"}, core=True)
-            raise Refusal("a wrong answer: the attestation key is not in the TPM the officer pinned; ask for a new challenge")
-        self.edge_store.update_state(edge_id, attest_challenge=None, attest_activated={"ak_name": ch["ak_name"], "at": _iso(now)})
-        return {"edge": edge_id, "activated": True}
+            out = self._seal("attest_activate", edge_id, secret=body["secret"])
+        except Refusal as e:
+            if "wrong answer" in str(e):
+                self.edge_store.incident(edge_id, {"kind": "attestation_failed", "detail": "a wrong answer to the "
+                                                   "activation challenge: the attestation key is not in the TPM the "
+                                                   "officer pinned"}, core=True)
+            raise
+        doc, now = self.store.load(), self.clock()
+        _, _, ak = self._tpm(self._edge(doc, edge_id, now))
+        self.edge_store.update_state(edge_id, attest_activated={"ak_name": ak.name.hex(), "at": _iso(now)})
+        return out
 
     def _attested(self, e: dict, edge_id: str, quote: str | None, request: tuple | None) -> tuple[str, list[str]]:
         """The profile an edge has proved on this pull: assured only with an activated AK, a quote bound to this signed
@@ -1535,24 +1583,19 @@ class Desk:
         import json as _json
         from keyclerk import edge as E
         from keyclerk import edge_records
-        from keyclerk import policy_wasm
-        key = self.bundle_key                       # before any serial moves: the key may be made only before the first pull
+        signer = self._edge_signer()
         if serial is not None:                      # a retry after a lost answer: the same bundle, no serial burnt
             last = self.edge_store.state(edge_id).get("last_bundle")
             if last and str(self.edge_store.state(edge_id).get("serial")) == str(serial):
                 self._edge(self.store.load(), edge_id, self.clock())
                 return last
             raise LookupError("no bundle by that serial: pull without one")
-        with self.edge_store.lock:
-            head = self.store.records_head()            # before load(): the bundle is cut from this head or a newer one
+        with self.edge_store.lock:                   # the records head is the signer's: it cuts from its own records
             doc, now = self.store.load(), self.clock()
             e = self._edge(doc, edge_id, now)
-            settings = policy_wasm.edge("settings", {})
-            horizons = settings["horizons"]
             ceiling, sealed_ceiling = self._current_ceiling(doc, e, edge_id, now)
             state = self.edge_store.state(edge_id)
             attested, _ = self._attested(e, edge_id, quote, request)   # proved on this pull, never claimed (0016)
-            leases, visits, dropped = [], [], []
             not_independent = edge_records.officer_errors(doc, e, now)
             if not_independent:
                 if not state.get("officer_frozen"):
@@ -1561,50 +1604,7 @@ class Desk:
                 ceiling, sealed_ceiling = None, None
             elif state.get("officer_frozen"):
                 self.edge_store.update_state(edge_id, officer_frozen=False)
-            keys = [k for k in doc.get("person_keys", []) if not D._revs(doc, k["key_id"], now)]
-            names = self._usernames()
-            caps = settings.get("session_max_hours", {})
-
-            def who_fields(anchor):                    # what the agent needs to act for this person (0014b)
-                k = next((k for k in keys if D.same(doc, k["anchor"], anchor)), None)
-                return {"username": names.get(anchor), "key_id": k["key_id"] if k else None,
-                        "public_key": k["public_key"] if k else None}
-            if ceiling:
-                seen = dict(state.get("lease_first_seen") or {})          # a derived lease keeps its first issue time
-                current = self._edge_leases(doc, e, now, horizons, seen)
-                self.edge_store.update_state(edge_id, lease_first_seen={x["lease_id"]: seen[x["lease_id"]]
-                                                                        for x in current if x["lease_id"] in seen})
-                for lease in current:
-                    hours = E.ceiling_hours(now, D._ts(lease["until"]))
-                    d = policy_wasm.ceiling({"ceiling": ceiling, "entry": {"kind": "lease", "person": lease["person"], "roles": lease["roles"],
-                                                                           "targets": [lease["target"]], "class": lease["class"], "hours": hours}})
-                    if d["allow"]:
-                        cap = int(caps.get(lease["class"], 1))
-                        if lease.pop("target_session_hours", None):
-                            cap = min(cap, int(next(t["max_session_hours"] for t in e["targets"] if t["target"] == lease["target"])))
-                        leases.append({**lease, **who_fields(lease["person"]), "email": None,   # fetched by request, 1.3
-                                       "max_session_hours": cap})
-                    else:
-                        lease.pop("target_session_hours", None)
-                        dropped.append({"lease_id": lease["lease_id"], "why": sorted(d["refusals"])})
-                for v in doc.get("edge_visit_leases", []):
-                    if v["edge"] != edge_id or D._revs(doc, v["lease_id"], now) or D._ts(v["until"]) <= now:
-                        continue
-                    if not any(D.same(doc, k["anchor"], v["person"]) and k.get("ssh_key") == v["ssh_key"] for k in keys):
-                        dropped.append({"lease_id": v["lease_id"], "why": ["the person's hardware key was ended"]})
-                        continue                       # a lost hardware key ends its visit leases
-                    hours = E.ceiling_hours(D._ts(v["from"]), D._ts(v["until"]))
-                    d = policy_wasm.ceiling({"ceiling": ceiling, "entry": {"kind": "visit", "person": v["person"], "targets": v["targets"],
-                                                                           "hours": hours, "attested_profile": attested}})
-                    if d["allow"]:
-                        role = next((t["role"] for t in e["targets"] if t["target"] in v["targets"]), None)
-                        visits.append({"lease_id": v["lease_id"], "person": v["person"], "ssh_key": v["ssh_key"], "role": role,
-                                       **who_fields(v["person"]),
-                                       "targets": v["targets"], "from": E._iso(D._ts(v["from"])), "until": E._iso(D._ts(v["until"]))})
-                    else:
-                        dropped.append({"lease_id": v["lease_id"], "why": sorted(d["refusals"])})
-            revoked = sorted({v["lease_id"] for v in doc.get("edge_visit_leases", []) if v["edge"] == edge_id
-                              and D._revs(doc, v["lease_id"], now) and D._ts(v["until"]) > now})
+            seen = dict(state.get("lease_first_seen") or {})              # a derived lease keeps its first issue time
             mods = self._edge_modules()                # by hash only: an agent fetches what it lacks (GET /edge/module)
             release = None
             rf = self.store.path / "policy-release.json"
@@ -1613,19 +1613,41 @@ class Desk:
             policy = {"modules": E.module_refs(mods), "release": release,
                       "entrypoints": ["keyclerk/edge/settings", "keyclerk/edge/admit", "keyclerk/edge/visit_window",
                                     "keyclerk/edge/attestation", "keyclerk/ceiling/decision"]}
-            serial = self.edge_store.next_serial(edge_id)
+            want = self.edge_store.next_serial(edge_id)
             if state.get("silent"):
                 self.edge_store.update_state(edge_id, silent=False)
-            for lease in [x for x in leases if x["class"] not in horizons]:    # no horizon, never live
-                leases.remove(lease)
-                dropped.append({"lease_id": lease["lease_id"], "why": [f"class {lease['class']} has no horizon in edge.rego"]})
-            out = E.build_bundle(edge_id, serial, now, horizons, leases, visits, revoked, sealed_ceiling, policy, key,
-                                 governed_roles=[t["role"] for t in e["targets"]],   # 0025: the roles its targets map to
-                                 records_head=head)
+            from keyclerk.signer import SignerRefused
+            self._push_identity()
+            try:                                         # the signer derives every entry from its own records (0021)
+                got = signer.seal_bundle({"edge_id": edge_id, "serial": want, "ceiling": sealed_ceiling,
+                                          "policy": policy, "attested": attested, "first_seen": seen,
+                                          "quote": quote, "request": list(request) if request else None})
+            except SignerRefused as x:
+                raise Refusal(f"the checking signer refused the bundle: {x}") from None
+            if "refused" in got and len(got) == 1:
+                raise Refusal(f"the checking signer refused the bundle: {got['refused']}")
+            out, serial = got["bundle"], got["serial"]
+            old_names = bool(self.broker_state) and (self.broker_state / "usernames.json").exists()
+            if old_names and self._identity_map() is None and not state.get("identity_map_missing"):
+                # an upgrade from 0.28: said once per edge, until the map is set
+                self.edge_store.incident(edge_id, {"kind": "identity_map_missing", "detail": (
+                    "the reconciler's usernames are here but no sealed identity map: leases name no bastion account. "
+                    "Run the reconciler with --mark-key (it writes identity-map.json), then start the signer with "
+                    "--identity-key (python -m keyclerk.init identity-key)")}, core=True)
+                self.edge_store.update_state(edge_id, identity_map_missing=True)
+            leases, visits, dropped = got["leases"], got["visits"], got["dropped"]
+            for why in got.get("why") or []:
+                dropped.append({"lease_id": None, "why": [why]})
+            update = {"serial": serial}
+            if ceiling:
+                ids = {x["lease_id"] for x in leases} | {x["lease_id"] for x in dropped}
+                update["lease_first_seen"] = {k: v for k, v in got["first_seen"].items() if k in ids}
+            self.edge_store.update_state(edge_id, **update)
             holders = sorted({x["person"] for x in leases + visits})
             digests = dict(list((state.get("digests") or {}).items())[-15:])   # 0026: what recent serials said
             digests[str(serial)] = E.bundle_digest(out)
-            self.edge_store.update_state(edge_id, last_dropped=dropped[:100], last_bundle=out, holders=holders, digests=digests,
+            self.edge_store.update_state(edge_id, last_dropped=dropped[:100], last_dropped_at=E.opened(out)["issued"],
+                                         last_bundle=out, holders=holders, digests=digests,
                                          lease_ids=sorted({x["lease_id"]: x["until"] for x in leases + visits}.items()),
                                          lease_holders={x["lease_id"]: x["person"] for x in leases + visits})
             return out
@@ -1753,11 +1775,23 @@ class Desk:
                 raise Refusal("a break-glass promotion needs the edge's site key on record (edges[].site_key): the "
                               "promotion cannot be verified, so it is not accepted")
             try:
-                st = edge_relay.verify_site(a["statement"], e["site_key"], edge_id, "promotion")
+                st = edge_relay.verify_site(a["statement"], e["site_key"], edge_id, "promotion", now)
             except ValueError as x:
                 raise guard.InputRejected(f"activation.statement: {x}") from None
             if st["node_key"] != keys[node]:
                 raise guard.InputRejected("activation.statement promotes another node")
+            try:
+                at = E._ts(a["at"])
+            except (ValueError, TypeError):
+                raise guard.InputRejected("activation.at: a time such as 2026-11-04T09:30:00Z") from None
+            if not E._ts(st["at"]) <= at <= E._ts(st["not_after"]):   # S10: the activation inside its statement
+                raise guard.InputRejected("activation.at lies outside its promotion statement (from its at to its "
+                                          "not_after): a promotion is activated within the window it was signed for")
+            last = ((self.edge_store.state(edge_id).get("nodes") or {}).get(node) or {}).get("activation") or {}
+            seen = last.get("statement_at") or last.get("at")
+            if seen and last.get("at") != a["at"] and E._ts(st["at"]) <= E._ts(seen):
+                raise guard.InputRejected("activation.statement is not newer than the one this node's last activation "
+                                          "used: a promotion needs a fresh statement each time (edge protocol 1.6)")
             a = {**a, "statement_at": st["at"], "reason": st["reason"]}
         st_ = self.edge_store.state(edge_id)
         was = st_.get("active_node")
@@ -1847,6 +1881,10 @@ class Desk:
             relay.check(x.get("envelope"))
             if x["envelope"]["context"] != f"escrow:{system}:{item_id}":
                 raise Refusal(f"each envelope's context is escrow:{system}:{item_id}")
+        if not self.edge_store.relay_room(edge_id, [k["anchor"] for k in keys]):
+            raise Refusal("a custodian's inbox from this edge is full: nothing was stored")
+        ack = self._seal("escrow", edge_id, system=system, item_id=item_id,     # S2: the signer records it first
+                         envelopes=[{"key_id": x["key_id"], "envelope": x["envelope"]} for x in envs])
         with self.edge_store.lock:
             if not self.edge_store.relay_room(edge_id, [k["anchor"] for k in keys]):
                 raise Refusal("a custodian's inbox from this edge is full: nothing was stored")   # both halves or none
@@ -1855,8 +1893,7 @@ class Desk:
         digest = E.sha256(E.canonical(envs))
         self.edge_store.escrow_put(edge_id, {"item_id": item_id, "system": system, "sha256": digest, "relay_ids": rids,
                                              "custodians": [k["anchor"] for k in keys], "received": _iso(now)})
-        return E.seal(self.bundle_key, {"edge": edge_id, "item_id": item_id, "sha256": digest, "received": _iso(now)},
-                      "kc-edge-escrow-ack-v1")
+        return ack
 
     def edge_incident(self, edge_id: str, body: dict) -> dict:
         from keyclerk.edge_store import INCIDENT_KINDS
@@ -1897,7 +1934,6 @@ class Desk:
 
     def edge_evidence(self, edge_id: str, body: dict) -> dict:
         """Recordings as a hash chain; acknowledged signed up to a sequence (decision 0014 point 10)."""
-        from keyclerk import edge as E
         from keyclerk.edge_store import EVIDENCE_BATCH
         if not isinstance(body, dict) or set(body) != {"entries"} or not isinstance(body["entries"], list):
             raise guard.InputRejected("evidence is {entries: [...]}")
@@ -1916,43 +1952,69 @@ class Desk:
                 self.edge_store.incident(edge_id, {"kind": "evidence_fork", "detail": str(e)[:300]}, core=True)
                 self.edge_store.update_state(edge_id, fork_reported=head)
             raise Refusal(str(e)) from None
-        return E.seal(self.bundle_key, {"edge": edge_id, "up_to_seq": seq, "head": head, "at": _iso(self.clock())},
-                      "kc-edge-evidence-ack-v1")
+        return self._evidence_ack(edge_id, seq, entries)
 
-    def carried_lease(self, who: dict, lease_id: str) -> dict:
-        """A visit lease the person carries to the edge: sealed for that edge, at most carried_max_hours
-        and inside the visit lease's window, with a per-person serial (a newer one replaces an older one)."""
-        import time as _time
+    def _evidence_ack(self, edge_id: str, upto: int, entries: list | None = None) -> dict:
+        """The signer's acknowledgement (0.29 review S2): it continues the chain it holds with these entries or, when
+        it holds less, with the desk's own lines from where it stands (an upgrade, a new or failed-over signer), in
+        batches. The edge forgets only what this acknowledges."""
         from keyclerk import edge as E
-        from keyclerk import policy_wasm
+        from keyclerk.edge_sealer import EVIDENCE_BATCH
+        if entries:
+            try:
+                return self._seal("evidence", edge_id, entries=entries)
+            except Refusal:
+                pass                                       # the signer holds less: catch it up below
+        ack = self._seal("evidence", edge_id, entries=[])
+        for _ in range(8):                                 # bounded per request; the next upload continues
+            held = int(E.opened(ack)["up_to_seq"])
+            if held >= upto:
+                break
+            ack = self._seal("evidence", edge_id,
+                             entries=self.edge_store.evidence_lines(edge_id, held + 1, min(upto, held + EVIDENCE_BATCH)))
+        return ack
+
+    def carried_statement(self, who: dict, lease_id: str) -> dict:
+        """What a person's fresh sign-in signs to carry one visit lease (0.29 review S1): the nonce for it."""
+        from keyclerk.approvals import carried_statement
+        doc, now = self.store.load(), self.clock()
+        a = who.get("anchor")
+        v = next((x for x in doc.get("edge_visit_leases", []) if x["lease_id"] == guard.ident(lease_id, "lease")), None)
+        if v is None or not a or not D.same(doc, a, v["person"]) or D._revs(doc, v["lease_id"], now):
+            raise LookupError("no visit lease of yours by that id")
+        return {"lease_id": v["lease_id"], "by": v["person"],
+                "nonce": carried_statement(doc["realm"], v["edge"], v["lease_id"], v["person"])}
+
+    def carried_lease(self, who: dict, lease_id: str, proof: str | None = None) -> dict:
+        """A visit lease the person carries to the edge: sealed for that edge, at most carried_max_hours
+        and inside the visit lease's window, with a per-person serial (a newer one replaces an older one). Where
+        approval proofs are required, the person's own fresh sign-in signs it (carried_statement), checked by the
+        signer (0.29 review S1)."""
+        import time as _time
         a = who.get("anchor")
         if not isinstance(who.get("auth_time"), (int, float)) or _time.time() - who["auth_time"] > self.RELAY_FRESH_SECONDS:
             raise PermissionError("sign in again first: a carried lease is issued within 10 minutes of a fresh sign-in")
+        if self.proofs_required() and not proof:
+            raise Refusal("a carried lease is your own signature: sign in again for it (POST "
+                          "/me/visit-leases/{lease_id}/carry-sign-in starts the sign-in that signs it)")
         doc, now = self.store.load(), self.clock()
         v = next((x for x in doc.get("edge_visit_leases", []) if x["lease_id"] == guard.ident(lease_id, "lease")), None)
         if v is None or not a or not D.same(doc, a, v["person"]) or D._revs(doc, v["lease_id"], now):
             raise LookupError("no visit lease of yours by that id")
         if D._ts(v["until"]) <= now:
             raise Refusal("that visit lease has ended")
-        e = self._edge(doc, v["edge"], now)
-        hours = int(policy_wasm.edge("settings", {})["carried_max_hours"])
-        start = max(now, D._ts(v["from"]))
+        self._edge(doc, v["edge"], now)                      # an ended edge carries nothing
         with self.edge_store.lock:
             st = self.edge_store.state(v["edge"])
             carried = dict(st.get("carried") or {})
             carried[v["person"]] = int(carried.get(v["person"], 0)) + 1
             self.edge_store.update_state(v["edge"], carried=carried)
-        role = next((t["role"] for t in e["targets"] if t["target"] in v["targets"]), None)
-        body = {"edge": v["edge"], "lease_id": v["lease_id"], "person": v["person"], "username": self._usernames().get(v["person"]),
-                "ssh_key": v["ssh_key"], "targets": v["targets"], "role": role, "from": _iso(start),
-                "until": _iso(min(D._ts(v["until"]), start + timedelta(hours=hours))), "carried_serial": carried[v["person"]],
-                "nonce": secrets.token_hex(8)}
         self.edge_store.incident(v["edge"], {"kind": "carried_lease", "detail": f"{v['lease_id']} carried by {a}"}, core=True)
-        return E.seal(self.bundle_key, body, E.CARRIED_FORMAT)
+        return self._seal("carried", v["edge"], lease_id=v["lease_id"], carried_serial=carried[v["person"]],
+                          **({"proof": proof} if proof else {}))
 
-    def phoned_unlock(self, who: dict, edge_id: str, body: dict) -> dict:
-        """A code a second person reads to someone on site: only an unlock approver of that edge, never
-        the person; within edge.rego's limits; bound to edge, person, key fingerprint, target, nonce and minutes."""
+    def _unlock_request(self, who: dict, edge_id: str, body: dict) -> dict:
+        """One phoned unlock, checked: the desk's own refusals, said clearly; the signer checks again (0021)."""
         from keyclerk import edge as E
         from keyclerk import policy_wasm
         doc, now = self.store.load(), self.clock()
@@ -1986,18 +2048,48 @@ class Desk:
         if not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= int(settings["unlock_max_minutes"]):
             raise Refusal(f"minutes: 1 to {settings['unlock_max_minutes']} (edge.rego)")
         fp, nonce = guard.text(body["key_fingerprint"], "key_fingerprint", 120), guard.text(body["nonce"], "nonce", 64)
+        return {"doc": doc, "now": now, "e": e, "a": a, "person": person, "node": node_id, "target": target,
+                "minutes": minutes, "fp": fp, "nonce": nonce, "settings": settings}
+
+    def unlock_statement(self, who: dict, edge_id: str, body: dict) -> dict:
+        """What an unlock approver signs with a fresh sign-in (0021, step 4b): the nonce for exactly this code."""
+        from keyclerk.approvals import unlock_statement
+        r = self._unlock_request(who, edge_id, body)
+        return {"edge": edge_id, "by": r["a"], "nonce": unlock_statement(
+            r["doc"]["realm"], edge_id, r["node"], r["a"], r["person"], r["target"], r["fp"], r["nonce"], r["minutes"])}
+
+    def phoned_unlock(self, who: dict, edge_id: str, body: dict, proof: str | None = None) -> dict:
+        """A code a second person reads to someone on site: only an unlock approver of that edge, never
+        the person; within edge.rego's limits; bound to edge, person, key fingerprint, target, nonce and minutes.
+        Where approval proofs are required, the approver's fresh sign-in signs this one unlock (unlock_statement)."""
+        if not self.proofs_required():
+            raise Refusal("phoned unlock needs approval proofs (approvals.proofs: required, decision 0006): the "
+                          "approver's own fresh sign-in signs each code (0.29 review S3)")
+        r = self._unlock_request(who, edge_id, body)       # who may unlock, before anyone is asked to sign in
+        if not proof:
+            raise Refusal("an unlock is the approver's own signature: sign in again for it (POST "
+                          "/edges/{edge_id}/unlock-sign-in starts the sign-in that signs it)")
+        doc, now, a, person, node_id = r["doc"], r["now"], r["a"], r["person"], r["node"]
+        target, minutes, fp, nonce, settings = r["target"], r["minutes"], r["fp"], r["nonce"], r["settings"]
         with self.edge_store.lock:
             st = self.edge_store.state(edge_id)
             recent = [x for x in st.get("unlocks", []) if x > _iso(now - timedelta(hours=1))]
             if len(recent) >= int(settings["unlock_per_hour"]):
                 raise Refusal(f"at most {settings['unlock_per_hour']} unlocks an hour for this edge (edge.rego)")
+        from keyclerk.signer import SignerRefused
+        try:                                             # computed in the signer, after its own records allow it (0021)
+            got = self._edge_signer().unlock({"edge_id": edge_id, "fields": {
+                "approver": a, "person": person, "target": target, "key_fingerprint": fp, "nonce": nonce,
+                "minutes": minutes, "node": node_id, **({"proof": proof} if proof else {})}})
+        except SignerRefused as x:
+            raise Refusal(f"the checking signer refused the unlock: {x}") from None
+        if "refused" in got and len(got) == 1:
+            raise Refusal(f"the checking signer refused the unlock: {got['refused']}")
+        code = got["code"]
+        with self.edge_store.lock:                       # counted once computed: a refused request uses up nothing
+            st = self.edge_store.state(edge_id)
+            recent = [x for x in st.get("unlocks", []) if x > _iso(now - timedelta(hours=1))]
             self.edge_store.update_state(edge_id, unlocks=recent + [_iso(now)])
-        own = self._unlock_private()
-        try:
-            code = E.unlock_code(E.unlock_secret(own, E.unlock_public(own), nodes[node_id], edge_id, node_id),
-                                 edge_id, node_id, person, fp, target, nonce, minutes)
-        except ValueError as x:
-            raise Refusal(f"unlock: {x}") from None
         self.edge_store.incident(edge_id, {"kind": "phoned_unlock", "detail": f"{a} read an unlock for {person} on {target}, "
                                            f"{minutes} min, key {fp[:24]}"}, core=True)
         self.store.note({"change_id": "C-" + secrets.token_hex(6), "action": "phoned_unlock", "actor": a,
@@ -2037,15 +2129,10 @@ class Desk:
 
     def edge_escrow_status(self, edge_id: str, item_id: str) -> dict:
         """Whether both custodians have opened their halves: only then may the edge forget the value (0014b)."""
-        from keyclerk import edge as E
         item = self.edge_store.escrow_get(edge_id, guard.ident(item_id, "item"))
         if item is None:
             raise LookupError("no escrow by that id from this edge")
-        done = [self.edge_store.confirmed(r) for r in item.get("relay_ids", [])]
-        confirmed = bool(done) and all(done)
-        return E.seal(self.bundle_key, {"edge": edge_id, "item_id": item["item_id"], "sha256": item["sha256"],
-                                        "confirmed": confirmed, "custodians_confirmed": sum(1 for x in done if x)},
-                      "kc-edge-escrow-status-v1")
+        return self._seal("escrow_status", edge_id, item_id=item["item_id"])   # S2: counted by the signer
 
     EMAIL_PER_LEASE = (6, 60)                     # answers per lease in seconds: a gateway sets a credential, it does not poll
 
@@ -2070,12 +2157,11 @@ class Desk:
         """The desk's time for one signed request of this edge (edge protocol 1.5, section 1): after a reboot an edge
         re-anchors its trusted time on this answer, never on its own clock, so a bundle held back and delivered with
         the clock set back cannot keep a lease alive (decision 0032, second adversarial review M1)."""
-        from keyclerk import edge as E
         nonce = (request or (None, None))[1]
         if not nonce:
             raise Refusal("the time answers an edge's signed request only")
         self._node_seen(edge_id, None)
-        return E.time_answer(self.bundle_key, edge_id, nonce, self.clock())
+        return self._seal("time", edge_id, nonce=nonce)
 
     def edge_email(self, edge_id: str, lease_id: str, request: tuple | None) -> dict:
         """The verified address of a lease's person (decision 0028 point 5, edge protocol 1.3): for a lease in the last
@@ -2115,14 +2201,10 @@ class Desk:
             if len(times) >= self.EMAIL_PER_LEASE[0]:
                 raise Throttled("too many address requests for this lease: try again in a minute")
             times.append(time.monotonic())
-        return E.email_answer(self.bundle_key, edge_id, lease_id, live["person"], self._emails().get(live["person"]),
-                              nonce, now)
+        return self._seal("email", edge_id, lease_id=lease_id, nonce=nonce)
 
     def edge_evidence_head(self, edge_id: str) -> dict:
-        from keyclerk import edge as E
-        seq, head = self.edge_store.evidence_head(edge_id)
-        return E.seal(self.bundle_key, {"edge": edge_id, "up_to_seq": seq, "head": head, "at": _iso(self.clock())},
-                      "kc-edge-evidence-ack-v1")
+        return self._evidence_ack(edge_id, self.edge_store.evidence_head(edge_id)[0])
 
     def edges(self, who: dict) -> list[dict]:
         """Edges with their state, for a viewer, the root, the security officer, or an edge's own officer."""
@@ -2148,6 +2230,7 @@ class Desk:
                                                             for f in ("last_pull", "last_report")}}
                                   for k in edge_records.node_keys(edge_records.current(doc, e, now))],
                         "incidents": self.edge_store.incidents(e["edge_id"])[-20:], "dropped": st.get("last_dropped", [])[:20],
+                        "dropped_at": st.get("last_dropped_at"),    # the bundle the list is from: it changes at a pull
                         "silent": bool(st.get("silent")), "unlock": bool(e.get("unlock_key")),
                         "unlock_approver": bool(a and any(D.same(doc, a, x) for x in e.get("unlock_approvers", []))),
                         "may_close": bool(a and (D.same(doc, a, e["officer"]) or D.same(doc, a, officer))),
@@ -2191,15 +2274,41 @@ class Desk:
                             "summary": f"{item['purpose']} handed over", "records": {}, "outcome": "applied", "reasons": []})
         return {"relay_id": item["relay_id"], "key_id": item["key_id"], "purpose": item["purpose"], "envelope": item["envelope"]}
 
-    def relay_confirm(self, who: dict, rid: str) -> dict:
-        """The browser opened it: a credential is deleted; an escrow half is recorded as confirmed (0014b)."""
+    def _relay_mine(self, who: dict, rid: str) -> tuple[dict, str, dict]:
         a = who.get("anchor")
         doc = self.store.load()
         x = next((i for i in self.edge_store.relay_items() if i["relay_id"] == guard.ident(rid, "relay")), None)
         if x is None or not a or not D.same(doc, a, x["anchor"]) or not x.get("taken"):
             raise LookupError("nothing by that id waits for your confirmation")
+        return x, a, doc
+
+    def relay_confirm_statement(self, who: dict, rid: str) -> dict:
+        """What a custodian's fresh sign-in signs to confirm an escrow half (0.29 review S2): the item's digest."""
+        from keyclerk.approvals import escrow_statement
+        x, a, doc = self._relay_mine(who, rid)
+        if not str(x.get("purpose", "")).startswith("escrow:"):
+            raise Refusal("only an escrow half is confirmed with a fresh sign-in; a lease credential is confirmed as it "
+                          "is opened")
+        if not self.proofs_required():
+            raise Refusal("an escrow half is confirmed by the custodian's own fresh sign-in, which needs approval proofs "
+                          "(approvals.proofs: required); until then the edge keeps the value")
+        item = self.edge_store.escrow_get(x["edge"], x["purpose"].split(":", 2)[2]) or {}
+        return {"relay_id": x["relay_id"], "by": a, "nonce": escrow_statement(doc["realm"], x["edge"],
+                                                                             item.get("item_id", ""),
+                                                                             item.get("sha256", ""), a)}
+
+    def relay_confirm(self, who: dict, rid: str, proof: str | None = None) -> dict:
+        """The browser opened it: a credential is deleted. An escrow half counts towards the edge forgetting its value
+        only with the custodian's own fresh sign-in (proof), counted by the signer (0.29 review S2); without one it
+        leaves the custodian's inbox and the edge keeps the value."""
+        x, a, _ = self._relay_mine(who, rid)
+        counted = None
+        if str(x.get("purpose", "")).startswith("escrow:") and proof:
+            item_id = x["purpose"].split(":", 2)[2]
+            counted = self._seal("escrow_confirm", x["edge"], item_id=item_id, custodian=a, proof=proof)
         self.edge_store.relay_confirm(x["relay_id"])
-        return {"relay_id": x["relay_id"], "confirmed": True}
+        return {"relay_id": x["relay_id"], "confirmed": True,
+                **({"custodians_confirmed": counted["custodians_confirmed"]} if counted else {})}
 
     def my_visit_leases(self, who: dict) -> list[dict]:
         doc, now = self.store.load(), self.clock()
@@ -2316,6 +2425,8 @@ class Desk:
             if not isinstance(hours, int) or isinstance(hours, bool) or not 1 <= hours <= 24 * 30:
                 raise Refusal("hours: a whole number of hours, 1 or more")
             start = guard.timestamp(body["from"]) if body.get("from") else now
+            if start < now - timedelta(minutes=5):       # 0.29 review X4: a backdated start wins no tie-break
+                raise Refusal("from: a visit lease starts now or later, never in the past")
             rec = {"lease_id": self._next_id(doc, "edge_visit_leases", "VL", "lease_id", self._reserved()), "edge": edge_id,
                    "person": person, "ssh_key": guard.text(body.get("ssh_key", ""), "ssh_key", 900).strip(),
                    "targets": [guard.ident(x, "target") for x in targets], "from": start, "until": start + timedelta(hours=hours),
@@ -2338,7 +2449,8 @@ class Desk:
             return {"edge_rotations": [rec]}, f"rotate the keys of edge {eid}"
         # end_edge_record: an edge, a person key or a visit lease, ended for good
         rid = guard.ident(body.get("id"), "record")
-        kinds = {r[k]: (kind, r) for kind, k in (("edges", "edge_id"), ("person_keys", "key_id"), ("edge_visit_leases", "lease_id"))
+        kinds = {r[k]: (kind, r) for kind, k in (("edges", "edge_id"), ("person_keys", "key_id"), ("edge_visit_leases", "lease_id"),
+                                                 ("edge_exclusions", "exclusion_id"))
                  for r in doc.get(kind, [])}
         if rid not in kinds:
             if self._sees_all(doc, actor, now):
@@ -2379,8 +2491,10 @@ class Desk:
                 what = f"include {sub} in {gid}"
             days = self._days(body, lim["max_membership_days"])
             if any(m["group"] == gid and m["member"] == member
-                   and D.membership_status(doc, m, now) in ("active", "pending", "standby") for m in doc.get("memberships", [])):
-                raise Refusal(f"{what}: that membership already holds")
+                   and D.membership_status(doc, m, now) in ("active", "pending", "standby", "unreviewed")
+                   for m in doc.get("memberships", [])):                      # W6: overdue is kept by review, not re-added
+                raise Refusal(f"{what}: that membership already holds (one overdue for review is kept by its review, "
+                              "review_membership, or ended)")
             if any(p["action"] == action and any(r["group"] == gid and r["member"] == member
                                                  for r in p["records"].get("memberships", []))
                    for p in self._live_pending(now).values()):
@@ -2396,11 +2510,43 @@ class Desk:
                 if m is None and self._sees_all(doc, actor, now):
                     raise Refusal(f"there is no membership {mid}")
                 raise Refusal(f"you may end no membership {mid}: none under a group you manage has that id")
-            if D.membership_status(doc, m, now) not in ("active", "pending", "standby", "invalid"):
+            if D.membership_status(doc, m, now) not in ("active", "pending", "standby", "invalid", "unreviewed"):
                 raise Refusal(f"{mid} has already ended")
             self._under(doc, actor, m["group"], power, now)
             rec = {"id": mid, "at": now, "by": actor, "mode": "retire", "reason": self._reason(body)}
             return {"admin_revocations": [rec]}, f"end {mid} in {m['group']}"
+        if action == "exclude_edges":               # 0.29: one person, one of these edges at a time
+            root, officer = D.root_at(doc, now), (doc.get("root") or {}).get("officer")
+            if not (D.same(doc, actor, root) or D.same(doc, actor, officer)):
+                raise Refusal("the root or the security officer sets a cross-edge exclusion")
+            want = body.get("edges")
+            if not isinstance(want, list) or not 2 <= len(set(want)) == len(want) <= 20:
+                raise Refusal("edges: two to twenty different edge ids")
+            want = [guard.ident(x, "edge") for x in want]
+            known = {e["edge_id"] for e in doc.get("edges", [])}
+            if set(want) - known:
+                raise Refusal(f"there is no edge {', '.join(sorted(set(want) - known))}")
+            rec = {"exclusion_id": "EX-" + secrets.token_hex(6), "edges": want, "by": actor, "at": now,
+                   "reason": self._reason(body)}
+            return {"edge_exclusions": [rec]}, f"one person on one of {', '.join(want)} at a time"
+        if action == "review_membership":           # 0.29, #42: keep; a revoke is end_membership
+            mid = guard.ident(body.get("membership_id"), "membership")
+            m = next((x for x in doc.get("memberships", []) if x["membership_id"] == mid), None)
+            pol = doc.get("reviews")
+            if not pol:
+                raise Refusal("reviews are off in this realm: there is nothing to review (the records' reviews setting)")
+            if m is None or D._kind(m) != "anchor":
+                raise Refusal(f"there is no direct membership {mid} to review: a rule or an included group follows its "
+                              "source")
+            if D.membership_status(doc, m, now) not in ("active", "unreviewed"):
+                raise Refusal(f"{mid} is not in force: there is nothing to keep")
+            source = "parent" if any(D.same(doc, actor, a) for a in pol.get("parents") or []) else "owner"
+            rec = {"decision_id": "RV-" + secrets.token_hex(6), "membership": mid, "decision": "keep", "by": actor,
+                   "at": now, "source": source, "reason": self._reason(body)}
+            if not D.keep_counts(doc, m, rec):
+                raise Refusal(f"you may not review {mid}: its group's owner (members power over {m['group']}) or a "
+                              "named parent principal reviews it, never the member")
+            return {"review_decisions": [rec]}, f"keep {mid} in {m['group']} after review"
         if action == "create_group":
             parent = guard.ident(body.get("parent"), "parent group")
             under = self._under(doc, actor, parent, "subgroups", now)
@@ -2527,9 +2673,47 @@ class Desk:
                           "waiting_for": self._approvers(doc, add, [], actor), "waiting_rev": self.store.revision()}
                 self.store.save_pending(p)
                 self.store.note({**entry, "outcome": "pending"})
-            return {"change_id": cid, "outcome": outcome, "summary": what, "reasons": reasons,
-                    "records": _jsonable(add), "revision": self.store.revision(),
-                    "next": [] if outcome == "applied" else self._next(doc, actor, reasons, add)}
+            out = {"change_id": cid, "outcome": outcome, "summary": what, "reasons": reasons,
+                   "records": _jsonable(add), "revision": self.store.revision(),
+                   "next": [] if outcome == "applied" else self._next(doc, actor, reasons, add)}
+            if outcome != "refused":
+                warn = self._ceiling_warnings(cand, add, now)
+                if warn:
+                    out["warnings"] = warn
+            return out
+
+    def _ceiling_warnings(self, doc: dict, add: dict, now: datetime) -> list[str]:
+        """Issue 52: a membership longer than an edge's ceiling allows reaches that edge only in its last hours (a lease
+        longer than the ceiling is dropped, never shortened; rolling leases are for 0.30). Said at the grant, from the
+        membership's own window and the ceilings the officers sealed, for every edge whose targets the group carries
+        directly; it never stops a change."""
+        from keyclerk import edge as E
+        new = [m for m in add.get("memberships", []) if isinstance(m, dict) and m.get("end")]
+        if not new or self.edge_store is None:
+            return []
+        groups = D._groups(doc)
+        out = []
+        for e in doc.get("edges", []):
+            if D._revs(doc, e["edge_id"], now):
+                continue
+            try:
+                ceiling, _ = self._current_ceiling(doc, e, e["edge_id"], now)
+            except Exception:   # noqa: BLE001 - a warning, never a reason to refuse the change
+                continue
+            if not ceiling:
+                continue
+            cap = int(ceiling.get("max_lease_hours", 0))
+            ents = {t["entitlement"] for t in e.get("targets", [])}
+            for m in new:
+                carries = (groups.get(m.get("group")) or {}).get("carries", [])
+                if not any(c.get("entitlement") in ents for c in carries):
+                    continue
+                start = max(now, D._ts(m["start"])) if m.get("start") else now
+                if E.ceiling_hours(start, D._ts(m["end"])) > cap:
+                    out.append(f"edge {e['edge_id']}'s ceiling allows leases of at most {cap} hours: this membership "
+                               f"reaches that edge only in its last {cap} hours (until then its lease is dropped). Ask "
+                               "the edge's officer for a ceiling that fits, or grant a shorter membership")
+        return sorted(set(out))[:20]
 
     # --- a SOAR's protective proposals (decision 0018 H5, issue 30) ------------------------------------------------
 
@@ -2569,7 +2753,8 @@ class Desk:
         if action == "end_membership":
             mid = guard.ident(body.get("membership_id"), "membership")
             m = next((x for x in doc.get("memberships", []) if x["membership_id"] == mid), None)
-            if m is None or D.membership_status(doc, m, now) not in ("active", "pending", "standby", "invalid"):
+            if m is None or D.membership_status(doc, m, now) not in ("active", "pending", "standby", "invalid",
+                                                                      "unreviewed"):      # R5: overdue can be ended
                 raise Refusal(f"there is no live membership {mid}")
             rec = {"id": mid, "at": now, "by": actor, "mode": "retire", "reason": reason}
             return {"admin_revocations": [rec]}, f"end {mid} in {m['group']}", (m.get("member") or {}).get("anchor")
@@ -2879,7 +3064,8 @@ class Desk:
     @staticmethod
     def _with_approvals(recs: dict, approvers: list[str]) -> dict:
         add = copy.deepcopy(recs)
-        for kind in ("memberships", "delegations", "approvers", "badges", "edges", "person_keys", "edge_visit_leases", "edge_rotations"):
+        for kind in ("memberships", "delegations", "approvers", "badges", "edges", "person_keys", "edge_visit_leases", "edge_rotations",
+                     "review_decisions"):
             for r in add.get(kind, []):
                 r["approved_by"] = sorted(set(r.get("approved_by", [])) | set(approvers))
         return add
@@ -2985,7 +3171,8 @@ class Desk:
                          "by_name": self._name(doc, m["by"]), "under": m["under"],
                          "chain": [d["delegation_id"] for d in D.chain(doc, m["under"])] + ["root"] if m["under"] != "root" else ["root"],
                          "approved_by": m.get("approved_by", []), "start": _iso(m["start"]), "end": _iso(m["end"]),
-                         "status": status, "can_end": power in mine and status in ("active", "pending", "standby", "invalid")})
+                         "status": status, "can_end": power in mine and status in ("active", "pending", "standby", "invalid",
+                                                                                 "unreviewed")})
         members = sorted(D.effective_members(doc, gid, now))
         managers = []
         for d in doc.get("delegations", []):

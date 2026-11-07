@@ -201,13 +201,14 @@ def serve(w: Witness, host: str, port: int) -> ThreadingHTTPServer:
         def do_POST(self):   # noqa: N802 - http.server's name
             n = self.headers.get("Content-Length", "")
             commit = self.path == "/commit" and hasattr(w, "commit")          # a commit witness (decision 0031)
-            if self.path != "/add-checkpoint" and not commit:
+            keys = self.path == "/keys" and hasattr(w, "adopt_keys")           # a newer records-key history (#41)
+            if self.path != "/add-checkpoint" and not commit and not keys:
                 return self._answer(404, "text/plain", b"not found\n")
             limit = (64 * 1024 * 1024) if commit else MAX_BODY
             if not n.isdigit() or int(n) > limit:
                 return self._answer(413 if n.isdigit() else 411, "text/plain", b"a bounded Content-Length\n")
             body = self.rfile.read(int(n))
-            self._answer(*(w.commit(body) if commit else w.add_checkpoint(body)))
+            self._answer(*(w.commit(body) if commit else w.adopt_keys(body) if keys else w.add_checkpoint(body)))
 
         def do_GET(self):   # noqa: N802
             m = re.fullmatch(r"/([0-9a-f]{64})/checkpoint", self.path)
@@ -220,7 +221,8 @@ def serve(w: Witness, host: str, port: int) -> ThreadingHTTPServer:
 
         def log_message(self, *a):   # the answers say enough; no request log of addresses
             pass
-    return ThreadingHTTPServer((host, port), Handler)
+    from keyclerk.httpserve import DualStackHTTPServer
+    return DualStackHTTPServer((host, port), Handler)
 
 
 # --- the signer's side --------------------------------------------------------------------------------------------
@@ -331,6 +333,11 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--log", action="append", required=True, help="a log's vkey (python -m keyclerk.witness vkey)")
     s.add_argument("--listen", default="127.0.0.1:8098")
     s.add_argument("--commit", action="store_true", help="the realm's commit witness: keeps the links (decision 0031)")
+    s.add_argument("--trustees", help="with --commit: the trustee set (kc-trustees-v1) this witness pins (#41)")
+    s.add_argument("--trustees-since", type=int, default=0,
+                   help="with --trustees: the log size from which HA and restore links need trustee signatures")
+    s.add_argument("--records-keys", action="append", default=[],
+                   help="with --commit: a records-key history (kc-records-keys-v1) of a log, delivered out of band")
     rs = sub.add_parser("reseed", help="a commit witness starts again from checked links, never from nothing")
     rs.add_argument("--state", required=True)
     rs.add_argument("--origin", required=True)
@@ -341,6 +348,8 @@ def parser() -> argparse.ArgumentParser:
     rs.add_argument("--checkpoint", required=True, help="the records key's checkpoint note of the seed head")
     rs.add_argument("--key", required=True, help="this witness's key, to countersign it")
     rs.add_argument("--name", required=True, help="this witness's cosigner name")
+    rs.add_argument("--records-keys", help="the log's records-key history (kc-records-keys-v1), when its key was rotated")
+    rs.add_argument("--trustees", help="with --records-keys: the trustee set (kc-trustees-v1) the history holds against")
     v = sub.add_parser("vkey")
     v.add_argument("--name", required=True)
     v.add_argument("--type", choices=("log", "cosigner"), required=True)
@@ -371,8 +380,12 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "reseed":
         from keyclerk import commit_witness
         try:
+            from keyclerk import records_keys as RK
+            hist = RK.KeyHistory(json.loads(Path(a.records_keys).read_text(encoding="utf-8"))) if a.records_keys else None
+            ts = json.loads(Path(a.trustees).read_text(encoding="utf-8")) if a.trustees else None
             out = commit_witness.reseed(Path(a.state), a.origin, a.pin, Path(a.links), a.by, a.reason, time.time,
-                                        Path(a.checkpoint).read_text(encoding="utf-8"), _key(a.key), a.name)
+                                        Path(a.checkpoint).read_text(encoding="utf-8"), _key(a.key), a.name,
+                                        history=hist, trustees=ts)
         except (ValueError, StoreRefused) as e:
             held.close()
             raise SystemExit(f"keyclerk.witness: not reseeded: {e}") from None
@@ -393,7 +406,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.commit:
         from keyclerk import commit_witness
-        w = commit_witness.CommitWitness(_key(a.key), a.name, Path(a.state), a.log)
+        from keyclerk import records_keys as RK
+        ts = json.loads(Path(a.trustees).read_text(encoding="utf-8")) if a.trustees else None
+        hs = [RK.KeyHistory(json.loads(Path(f).read_text(encoding="utf-8"))) for f in a.records_keys]
+        w = commit_witness.CommitWitness(_key(a.key), a.name, Path(a.state), a.log, trustees=ts, histories=hs,
+                                         trustees_since=a.trustees_since)
     else:
         w = Witness(_key(a.key), a.name, Path(a.state), a.log)
     host, _, port = a.listen.rpartition(":")

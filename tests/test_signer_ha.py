@@ -13,6 +13,7 @@ from keyclerk import commit_witness as C
 from keyclerk.signer import Signer, SignerRefused
 from keyclerk.store import note as N
 from tests.test_signer_replica import ADD, change_ops, world  # noqa: F401 - the fixture
+from tests.test_trustees import pinned_set
 
 ORIGIN = "keyclerk.example/ha-test"
 
@@ -33,6 +34,18 @@ def confirm(s, mode, value, node=None, people=None):
     return [(by, json.dumps({"nonce": HA.statement("example", by, mode, size, head, value, node), "by": by}))
             for by in people]
 WKEY = Ed25519PrivateKey.from_private_bytes(b"w" * 32)
+
+
+@pytest.fixture(autouse=True)
+def _trustees_pinned(monkeypatch):
+    """HA mode needs a pinned trustee set (0.29 review N8); these tests are not about trustee signatures, so links
+    before a far-off position are taken as an upgraded deployment takes its older ones."""
+    from keyclerk import trustees as T
+    from tests.test_trustees import pinned_set
+    ts = pinned_set("example")
+    monkeypatch.setattr(T, "pinned", lambda: {"set": ts, "since": 10 ** 9})
+    yield
+    T.use(None)
 
 
 class Net:
@@ -66,7 +79,8 @@ def pair(world, tmp_path):  # noqa: F811
     C.reseed(tmp_path / "cw", ORIGIN, pub, tmp_path / "seed" / "links.jsonl", "operator", "HA switched on",
              lambda: 1_800_000_000, (tmp_path / "seed" / "checkpoint.note").read_text(encoding="utf-8"),
              WKEY, "witness.example/commit")
-    w = C.CommitWitness(WKEY, "witness.example/commit", tmp_path / "cw", [N.vkey(ORIGIN, N.LOG, N.raw_public(key))])
+    w = C.CommitWitness(WKEY, "witness.example/commit", tmp_path / "cw", [N.vkey(ORIGIN, N.LOG, N.raw_public(key))],
+                        trustees=pinned_set("example"), trustees_since=10 ** 9)
     shutil.copytree(tmp_path / "signer-state", tmp_path / "signer-b")
     a, b = Signer(key, tmp_path / "signer-state"), Signer(key, tmp_path / "signer-b")
     world["signer"] = a                                   # closed by the fixture
@@ -180,7 +194,8 @@ def test_an_entry_names_only_a_node_in_its_shape(world):  # noqa: F811
 def test_an_empty_commit_witness_is_an_outage_never_a_log_of_size_0(pair):
     a, tmp = pair["a"], pair["tmp"]
     empty = C.CommitWitness(WKEY, "witness.example/commit", tmp / "cw-empty",
-                            [N.vkey(ORIGIN, N.LOG, N.raw_public(a.key))])
+                            [N.vkey(ORIGIN, N.LOG, N.raw_public(a.key))], trustees=pinned_set("example"),
+                            trustees_since=10 ** 9)
     a.ha["client"] = C.CommitClient("http://cw", transport=C.in_process(empty))
     size = a.replica.size()
     assert _wait(pair, a) == "standby"                    # no takeover, and nothing forgotten
@@ -331,25 +346,59 @@ def test_a_deposed_node_stops_sending_to_detection_witnesses(pair):
     assert a.witness_check() is None                      # deposed: it remembers a committed size, and sends nothing
 
 
-def test_a_desk_adopts_a_break_glass_link_and_notes_it_as_an_incident(pair, world):  # noqa: F811
-    """Decision 0031 point 10 on the desk: the break-glass link is signed with the commit witness stopped, so no
-    countersignature covers it; the desk adopts it at the next position as an HA change link, follows on under HA off,
-    and notes one finding for the officer and the SIEM."""
+def _break_glass(pair, world, monkeypatch, pin: bool):
+    """Node a breaks the glass with the commit witness lost; the desk follows. With pin, the desk and the signer pin a
+    trustee set and two trustees sign the link (#41, F1)."""
+    from keyclerk import trustees as T
+    from keyclerk.store import link as L
     from keyclerk.store.log_desk import LogStore
+    from tests.test_trustees import pinned_set, trustee_sigs
     a = pair["a"]
     assert _wait(pair, a) == "active"
     _add(pair, a)
     desk = LogStore(pair["tmp"] / "desk", a)
+    assert desk.store.size() == a.replica.size()
+    a.close()
+    s = world["signer"] = Signer(world["key"], a.state)
+    down = Net(pair["w"])
+    down.down = True
+    sigs = None
+    if pin:
+        ts = pinned_set(s.replica.realm)
+        monkeypatch.setattr(T, "pinned", lambda: {"set": ts, "since": 0})
+        st = L.ha_statement(s.replica.realm, s.replica.size(), s.replica.head().hex(), "break_glass", "node-a", None)
+        sigs = trustee_sigs("kc-ha-change-v1", st)
+    s.ha_change("break_glass", None, "node-a", confirm(s, "break_glass", None, "node-a"), verify,
+                C.CommitClient("http://cw", transport=down), trustee_sigs=sigs)
+    desk._signer = s
+    desk.follower.client = s
+    return desk, s
+
+
+def test_without_a_pinned_trustee_set_a_desk_adopts_no_uncommitted_ha_link(pair, world, monkeypatch):  # noqa: F811
+    """#41 F1: whoever holds the records key could sign HA off with made-up confirmation hashes and every desk would
+    follow it past the commit witness. A desk that pins no trustee set now refuses to adopt it."""
+    from keyclerk import trustees as T
+    desk, s = _break_glass(pair, world, monkeypatch, pin=False)
+    monkeypatch.setattr(T, "pinned", lambda: None)                     # unpinned from here: the desk follows nothing
     try:
-        assert desk.store.size() == a.replica.size()
-        a.close()                                         # the commit witness is lost; node a breaks the glass
-        s = world["signer"] = Signer(world["key"], a.state)
-        down = Net(pair["w"])
-        down.down = True
-        s.ha_change("break_glass", None, "node-a", confirm(s, "break_glass", None, "node-a"), verify,
-                    C.CommitClient("http://cw", transport=down))
-        desk._signer = s
-        desk.follower.client = s
+        before = desk.store.size()
+        try:
+            desk.refresh()
+        except Exception as e:                           # noqa: BLE001 - either a refusal or a noted failure is fine
+            assert "trustee set" in str(e) or "countersignature" in str(e), e
+        assert desk.store.size() == before < s.replica.size()
+        assert desk.store.get("head", "ha") is not None   # HA stays on at the desk
+    finally:
+        desk.close()
+
+
+def test_a_desk_adopts_a_break_glass_link_and_notes_it_as_an_incident(pair, world, monkeypatch):  # noqa: F811
+    """Decision 0031 point 10 on the desk: the break-glass link is signed with the commit witness stopped, so no
+    countersignature covers it; a desk that pins the trustee set adopts it at the next position once two trustees'
+    signatures hold (#41, F1), follows on under HA off, and notes one finding for the officer and the SIEM."""
+    desk, s = _break_glass(pair, world, monkeypatch, pin=True)
+    try:
         desk.refresh()
         assert desk.store.size() == s.replica.size() and desk.store.get("head", "ha") is None
         found = [x for x in desk.log(20) if x.get("action") == "ha_break_glass"]

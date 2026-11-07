@@ -117,6 +117,7 @@ def chain(links: Iterable[dict], body: dict, pinned: str, realm: str,
         if size == body["size"]:
             raise StoreRefused(f"more links than the snapshot's {body['size']}: adopt with the links up to it only")
         lb, h = L.check_next(sealed, pinned, realm, size, head, fence)
+        L.check_switch_root(pinned, frontier, h)          # review N6
         k = L.parts(lb) if size == 0 else k
         L.check_migrate(lb, k)
         if "restore" in lb["change"]:

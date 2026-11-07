@@ -318,9 +318,19 @@ def load_or_make_key(path: Path, allow_create: bool) -> Ed25519PrivateKey:
         if not allow_create:
             raise RuntimeError(f"{path.name} is missing after edges pinned it: restore it from a backup")
         k = Ed25519PrivateKey.generate()
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        import secrets as _s                             # written whole and on disk before it has its name (S9)
+        tmp = path.with_name(f"{path.name}.{_s.token_hex(6)}.new")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as h:
             h.write(k.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex())
+            h.flush()
+            os.fsync(h.fileno())
+        try:
+            os.link(tmp, path)                           # never replaces a key another thread made meanwhile
+        except FileExistsError:
+            pass
+        finally:
+            tmp.unlink(missing_ok=True)
     return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(path.read_text(encoding="utf-8").strip()))
 
 
@@ -527,7 +537,8 @@ def verify_module(raw: bytes, expected_sha256: str) -> list[str]:
 
 def build_bundle(edge_id: str, serial: int, issued: datetime, horizons: dict, leases: list[dict], visit_leases: list[dict],
                  revoked: list[str], ceiling: dict | None, policy: dict, key: Ed25519PrivateKey,
-                 governed_roles: list[str] | None = None, records_head: dict | None = None) -> dict:
+                 governed_roles: list[str] | None = None, records_head: dict | None = None,
+                 dropped: list[dict] | None = None) -> dict:
     """One sealed bundle. The newest bundle is complete: whatever an edge holds that is not in it has ended.
     leases: [{lease_id, person, username, email, key_id, target, role, class, from, until, max_session_hours}];
     visit_leases: [{lease_id, person, username, ssh_key, targets, role, from, until}];
@@ -536,7 +547,10 @@ def build_bundle(edge_id: str, serial: int, issued: datetime, horizons: dict, le
     governed_roles (decision 0025): the edge roles KeyClerk governs here, carried as SCIM Group shapes
     [{displayName}]; None leaves the member out (no catalogue), an empty list is a signed "none governed";
     records_head (edge protocol 1.4): {revision, head, size?}, the records the bundle was cut from, which the edge
-    echoes in its report (edges as weak witnesses); None leaves the member out."""
+    echoes in its report (edges as weak witnesses); None leaves the member out;
+    dropped (edge protocol 1.6): [{lease_id | None, why [text]}], what the signer left out of this bundle and why, so
+    an edge can say why it holds no lease (a lease_id of None is a reason for the whole edge); bounded by
+    bundle_dropped; None leaves the member out. It informs, it never grants."""
     missing = sorted({x["class"] for x in leases} - set(horizons))
     if missing:                                             # a class without a horizon: refused at build time, never live anyway
         raise ValueError(f"leases of a class without a horizon: {', '.join(missing)}")
@@ -546,7 +560,34 @@ def build_bundle(edge_id: str, serial: int, issued: datetime, horizons: dict, le
         body["governed_roles"] = [{"displayName": r} for r in sorted(set(governed_roles))]
     if records_head is not None:
         body["records_head"] = records_head
+    if dropped is not None:
+        body["dropped"] = bundle_dropped(dropped)
     return seal(key, body, BUNDLE_FORMAT)
+
+
+DROPPED_MAX, DROPPED_WHY_MAX, DROPPED_TEXT_MAX = 100, 4, 200     # edge protocol 1.6: a few KB at most
+
+
+def bundle_dropped(dropped: list[dict]) -> list[dict]:
+    """The dropped leases as a bundle carries them: the first DROPPED_MAX, each with at most DROPPED_WHY_MAX reasons
+    of at most DROPPED_TEXT_MAX characters."""
+    out = []
+    for d in dropped[:DROPPED_MAX]:
+        lid = d.get("lease_id")
+        why = [str(w)[:DROPPED_TEXT_MAX] for w in (d.get("why") or [])][:DROPPED_WHY_MAX] or ["no reason given"]
+        out.append({"lease_id": lid if isinstance(lid, str) else None, "why": why})
+    return out
+
+
+def dropped_errors(d) -> list[str]:
+    """[{lease_id: text or null, why: [1 to 4 texts of at most 200 characters]}], at most 100 (edge protocol 1.6)."""
+    ok = isinstance(d, list) and len(d) <= DROPPED_MAX and all(
+        isinstance(x, dict) and set(x) == {"lease_id", "why"}
+        and (x["lease_id"] is None or (isinstance(x["lease_id"], str) and x["lease_id"]))
+        and isinstance(x["why"], list) and 1 <= len(x["why"]) <= DROPPED_WHY_MAX
+        and all(isinstance(w, str) and 0 < len(w) <= DROPPED_TEXT_MAX for w in x["why"]) for x in d)
+    return [] if ok else [f"dropped: at most {DROPPED_MAX} of {{lease_id (text or null), why [1 to {DROPPED_WHY_MAX} "
+                          f"texts of at most {DROPPED_TEXT_MAX} characters]}}"]
 
 
 def records_head_errors(h, member: str = "records_head") -> list[str]:
@@ -627,6 +668,8 @@ def _bundle_shape(b: dict) -> list[str]:
             errs.append("governed_roles: each role once")
     if "records_head" in b:                             # edge protocol 1.4; null is refused, never read as absent
         errs += records_head_errors(b["records_head"])
+    if "dropped" in b:                                  # edge protocol 1.6; null is refused, never read as absent
+        errs += dropped_errors(b["dropped"])
     return errs
 
 
@@ -705,6 +748,7 @@ def _verify_bundle(b: dict, pins: dict, state: dict, now: datetime, ceiling_chec
     return [], {"leases": live, "visit_leases": visits, "revoked": b["revoked"], "refused_by_ceiling": refused,
                 "governed_roles": [x["displayName"] for x in b["governed_roles"]] if "governed_roles" in b else None,
                 "records_head": b.get("records_head"),
+                "dropped": b.get("dropped", []),          # 1.6: why the signer left a lease out; informs, never grants
                 "state": {"serial": b["serial"], "newest": max(issued, newest or issued).strftime(ISO),   # signed times only
                           "ceiling_serial": int(doc["serial"]) if doc else floor}}
 
@@ -713,7 +757,8 @@ def _verify_bundle(b: dict, pins: dict, state: dict, now: datetime, ceiling_chec
 
 CARRIED_FORMAT = "kc-edge-carried-v1"
 ENDED_FORMAT = "kc-edge-ended-v2"            # bound to the enrolment keys it ends
-ROLLOVER_FORMAT = "kc-edge-key-rollover-v1"
+ROLLOVER_FORMAT = "kc-edge-key-rollover-v1"          # signed by the old key alone: refused from 1.6 (#41, F6)
+ROLLOVER_FORMAT_V2 = "kc-edge-key-rollover-v2"
 
 
 def verify_carried(sealed: dict, pins: dict, state: dict, now: datetime) -> tuple[list[str], dict]:
@@ -905,8 +950,25 @@ def unlock_code(secret: bytes, edge_id: str, node_key_id: str, person: str, key_
     return base64.b32encode(hmac.new(secret, msg, hashlib.sha256).digest()).decode("ascii")[:10]
 
 
-def accept_rollover(sealed: dict, pinned_hex: str) -> str:
-    """A bundle key rollover signed by the pinned (old) key names its successor; returns the new key to pin."""
-    r = unseal(sealed, pinned_hex, ROLLOVER_FORMAT)
+def rollover_statement(edge_id: str, old_key: str, new_key: str, at: str) -> dict:
+    """What the old bundle key and the edge's officer both sign to move one edge to a new bundle key (edge protocol
+    1.6, #41 F6): a compromised signer holds the old key, never the officer's."""
+    return {"format": ROLLOVER_FORMAT_V2, "edge": edge_id, "old_key": old_key, "new_key": new_key, "at": at}
+
+
+def accept_rollover(sealed: dict, pins: dict) -> str:
+    """The new bundle key to pin, from a kc-edge-key-rollover-v2 signed by both the pinned bundle key and the pinned
+    officer key, for this edge, from the pinned key (pins: {edge, bundle_key, officer_key}). A v1 rollover, signed by
+    the old key alone, is refused: whoever stole that key could otherwise move every edge to their own."""
+    if isinstance(sealed, dict) and "signature" in sealed and "signatures" not in sealed:
+        raise ValueError("a bundle-key rollover signed by the old key alone (kc-edge-key-rollover-v1) is refused: the "
+                         "edge's officer co-signs it (v2)")
+    r = unseal_multi(sealed, [pins["bundle_key"], pins["officer_key"]], ROLLOVER_FORMAT_V2)
+    if set(r) != {"format", "edge", "old_key", "new_key", "at"}:
+        raise ValueError("a rollover is {format, edge, old_key, new_key, at}")
+    if r["edge"] != pins["edge"] or r["old_key"] != pins["bundle_key"]:
+        raise ValueError("a rollover for another edge, or from another key than the pinned one")
     load_public(r["new_key"])
+    if r["new_key"] == r["old_key"]:
+        raise ValueError("a rollover to the same key")
     return r["new_key"]

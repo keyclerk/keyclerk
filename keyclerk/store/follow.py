@@ -9,6 +9,8 @@ desk cannot produce one.
     f.propose(change, tokens)             the signer's answer, applied; refusals come back as SignerRefused
     f.catch_up()                          the links the signer has and this store has not
     f.resync()                            a new store from the signer's links and tokens, verified, swapped in
+    f.follow_keys()                       newer records-key histories the signer offers, verified against the pinned
+                                          trustees and adopted; a recovery resyncs from its switch (#41)
 
 A resync keeps what only the desk holds (visits, their events and badges) from the old store while it still reads;
 the proof tokens come from the signer (op tokens). Wiring into the Desk, and the log-breaks metric, is decision 0022 S5.
@@ -18,6 +20,8 @@ commit witness's countersignature on it, both signatures checked here: never a l
 committed. Without that countersignature it adopts nothing and says why (NotCommitted); the desk reads on.
 """
 from __future__ import annotations
+
+import threading
 
 from pathlib import Path
 
@@ -75,14 +79,73 @@ class Follower:
 
     def catch_up(self) -> None:
         try:
+            self._snapshot_turn()
+            self.follow_keys()                    # a rotation first, so the new key's links are taken (#41)
             self._pull(self.store)
         except StoreRefused as e:
             self._alarm(f"catching up with the signer failed: {e}")
+
+    # --- a store started from a snapshot acts only once its records are the log's (D1, 2026-11-07) --------------
+    def snapshot_pending(self) -> str | None:
+        """Why this store may not act yet, or None: started from a snapshot whose records are still being replayed, or
+        were found not to be the log's. Reads go on meanwhile; proposals, approvals and a reconciler's apply wait."""
+        chk = getattr(self.store, "snapshot_check", lambda: None)()
+        if not chk or chk.get("status") == "verified":
+            return None
+        if chk.get("status") == "refused":
+            return ("this store started from a snapshot whose records are not the log's (" + chk.get("why", "") + "): "
+                    "refused, and resynced from the genesis; nothing acts until that is done")
+        return (f"this store started from a snapshot of {chk['size']} links and is replaying them to check its records: "
+                "it reads meanwhile, and acts (proposals, approvals, the reconciler's apply) once the check holds")
+
+    def _snapshot_turn(self) -> None:
+        """Start the check of an adopted snapshot if it is pending and not running; after a refusal, resync from the
+        genesis without a snapshot."""
+        chk = getattr(self.store, "snapshot_check", lambda: None)()
+        if not chk:
+            return
+        if chk.get("status") == "refused":
+            self.from_snapshot = False
+            self.resync()
+            return
+        t = getattr(self, "_checking", None)
+        if chk.get("status") == "pending" and (t is None or not t.is_alive()):
+            self._checking = threading.Thread(target=self.check_snapshot, args=(self.store,), daemon=True)
+            self._checking.start()
+
+    def check_snapshot(self, store) -> bool:
+        """Replay the links this store kept up to its snapshot into a store of their own, and compare the records they
+        make with the state the snapshot names: the signer's word on the state is never taken alone."""
+        import hashlib
+
+        from keyclerk.store import snapshot as S
+        from keyclerk.store.memory import MemoryStore
+        chk = store.snapshot_check()
+        if not chk or chk.get("status") != "pending":
+            return bool(chk) and chk.get("status") == "verified"
+        try:
+            scratch = MemoryStore(store.pinned, store.realm)
+            for seq in range(chk["size"]):
+                scratch.append(store.link(seq))
+            sha = hashlib.sha256()
+            for line in S.state_lines(scratch):
+                sha.update(line)
+            ok, why = sha.hexdigest() == chk["sha256"], "the replayed records differ from the snapshot's state"
+        except Exception as e:   # noqa: BLE001 - a link that does not replay is a refusal too
+            ok, why = False, f"the links do not replay: {str(e)[:200]}"
+        store.set_snapshot_check("verified" if ok else "refused", "" if ok else why)
+        if not ok:
+            self.alarms.append(f"the snapshot this store started from is not the log's: {why}; refused, resyncing from "
+                               "the genesis")
+        return ok
 
     def _pull(self, store) -> None:
         cfg = _ha(store)
         stop = root = None
         if cfg is not None:
+            from keyclerk import trustees as T
+            if T.pinned() is None:
+                raise StoreRefused("HA mode needs a pinned trustee set (configuration trustees, 0.29 review N8): without one the records key alone would decide HA changes and restore links")
             stop, root = self._committed(store, cfg)
         while stop is None or store.size() < stop:
             got = self.client.links(store.size(), PAGE if stop is None else min(PAGE, stop - store.size()))
@@ -129,6 +192,12 @@ class Follower:
             except StoreRefused:
                 body = None
             if body is not None and "ha" in body["change"] and body["seq"] == store.size():
+                from keyclerk import trustees as T
+                if T.pinned() is None:             # F1: a hash of a token is no confirmation a desk can check
+                    raise StoreRefused("an HA change link without the commit witness's countersignature is adopted only "
+                                       "by a desk that pins the trustee set (configuration trustees), whose signatures "
+                                       "it then checks; without one, wait for the commit witness or follow by hand")
+                L.check_trustees(body)
                 return store.size() + 1, None
         if why:
             raise StoreRefused(why)
@@ -168,7 +237,51 @@ class Follower:
                     break
         return got["snapshot"], path
 
-    def resync(self, snapshot=None):
+    def follow_keys(self) -> int:
+        """Adopt the newer records-key histories the signer offers (#41), each verified against this process's pinned
+        trustee set: a planned rotation is adopted in place; a recovery, whose switch lies inside the links this store
+        holds, resyncs from the signer at the switch and keeps the old store as evidence. Returns the version held."""
+        from keyclerk import records_keys as RK
+        from keyclerk import trustees as T
+        offer = getattr(self.client, "records_keys", None)
+        current = self.store.pinned
+        held = 0 if isinstance(current, str) else current.version
+        if offer is None:
+            return held
+        try:
+            got = offer() or {}
+        except Exception:   # noqa: BLE001 - a signer from before 0.29 knows no such op: nothing to adopt
+            return held
+        versions = [v for v in got.get("versions", []) if isinstance(v, dict)]
+        if not versions:
+            return held
+        trust = T.pinned()
+        if trust is None:
+            self.alarms.append("the signer offers a newer records-key history, but this process pins no trustee set: "
+                               "not adopted (configuration trustees)")
+            return held
+        if isinstance(current, str):
+            self.alarms.append("the signer offers a records-key history, but this store holds none to advance from: "
+                               "pin version 1 (configuration records_keys)")
+            return held
+        moved = True
+        while moved:                              # N10: offered in any order, each taken in turn
+            moved = False
+            for sealed in versions:
+                try:
+                    nxt = RK.advance(current, sealed, trust["set"])
+                except RK.HistoryRefused as e:
+                    if "does not follow" not in str(e):     # noted, no resync; a valid one after it is still taken
+                        self.alarms.append(f"a records-key history the signer offers does not hold: {e}")
+                    continue
+                if RK.dropped(current, nxt, self.store.size()):
+                    self.resync(cut=(nxt, nxt.switch))
+                else:
+                    self.store.adopt_history(nxt)
+                current, moved = self.store.pinned, True
+        return current.version
+
+    def resync(self, snapshot=None, cut=None):
         """A new store built from the signer's links and tokens, verified against the signer's head, swapped in, and
         only when it extends the history this store had verified: a signer restored from an older backup that signed
         a second history is refused, never followed (it would drop what the newer branch holds, revocations too).
@@ -176,10 +289,17 @@ class Follower:
         checked and kept, not applied; a snapshot that is not the signer's log is refused, as any break is."""
         try:
             kept = self.store.size()
+            if cut is not None:                   # a recovery (#41): only the links before the switch are ours to keep
+                kept = min(kept, cut[1])
             mine = self.store.link(kept - 1) if kept else None
         except Exception:   # noqa: BLE001 - a lost or broken store has no verified history left to keep
             kept, mine = 0, None
         new = self.fresh()
+        if cut is not None:
+            new.adopt_history(cut[0])
+        elif not isinstance(self.store.pinned, str) and (isinstance(new.pinned, str)
+                                                          or self.store.pinned.version > new.pinned.version):
+            new.adopt_history(self.store.pinned)  # a resync keeps the newest verified history this store held (N5)
         for kind in DESK_SIDE:                    # what only the desk holds, while the old store still reads
             try:
                 for key, rec in self.store.side_scan(kind):
@@ -222,8 +342,16 @@ class Follower:
                                "restored from an older backup, or a fork; not followed. Restore the signer's newest "
                                "state; the desk keeps its own until then")
         old, self.store = self.store, new
+        if snapshot is not None:                  # D1: checked before anything acts on it
+            self._snapshot_turn()
         try:
             old.close()
         except Exception:   # noqa: BLE001 - a lost store may not close cleanly
             pass
+        if cut is not None:                       # the stolen key's links stay, as evidence, beside the new store
+            src = getattr(old, "path", None)
+            if src is not None and Path(src).exists():
+                Path(src).replace(Path(f"{src}.evidence-v{cut[0].version}"))
+            self.alarms.append(f"records-key recovery to history version {cut[0].version}: the links from {cut[1]} on "
+                               "that the older key signed are dropped and kept as evidence")
         return new

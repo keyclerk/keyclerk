@@ -161,6 +161,19 @@ class EdgeStore:
             return None
         return _read(self._dir(edge_id) / "escrow" / f"{item_id}.json", None)
 
+    def evidence_lines(self, edge_id: str, first: int, last: int) -> list[dict]:
+        """Entries first..last of an edge's chain, read in one pass (the signer is caught up from them)."""
+        f = self._dir(edge_id) / "evidence.jsonl"
+        out = []
+        if f.exists():
+            with f.open(encoding="utf-8") as h:
+                for i, line in enumerate(h, 1):
+                    if i > last:
+                        break
+                    if i >= first:
+                        out.append(json.loads(line))
+        return out
+
     def evidence_line(self, edge_id: str, seq: int) -> dict | None:
         f = self._dir(edge_id) / "evidence.jsonl"
         if not f.exists() or seq < 1:

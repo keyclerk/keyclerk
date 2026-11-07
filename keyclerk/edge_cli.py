@@ -9,12 +9,15 @@ the officer and each node of the edge cosign one statement. `show` prints what a
     unlock-keygen OUT                  a P-256 phoned-unlock key (kc-unlock-v2), 0600, for an edge without a TPM (with
                                        one, the key is made inside the TPM); prints its public half
     statement --edge E --officer ANCHOR --officer-key HEX --enrolment-key HEX [HEX] [--unlock-key B64 ...]
+              [--account]           ANCHOR is the officer's anchor exactly as the edge record holds it (kc:...
+                                       on the change log, the identity provider's, such as op:..., on a signed-YAML
+                                       store); a name without a scheme is refused unless --account says it is meant
               [--tpm FILE ...] [--purpose enrolment|rotation]
                                        the kc-edge-officer-v2 statement (a node per enrolment key; two for HA)
     cosign FILE --key KEY              sign a statement (a document, or one others signed) over its bytes; prints the
                                        multi-signed object, and what it says on stderr
     ceiling --edge E --serial N [--persons A ...] [--roles G ...] --targets T ... [--classes C ...]
-            [--max-lease-hours H] [--max-offline-hours H] [--profile assured|basic] [--ports P ...]
+            [--max-lease-hours H (24)] [--max-offline-hours H] [--profile assured|basic] [--ports P ...]
                                        a ceiling document for the officer to seal
     seal FILE --key KEY                the officer seals a ceiling document (kc-edge-ceiling-v2); what it says on stderr
     show FILE                          what a sealed or multi-signed object says, and whose signatures verify
@@ -96,6 +99,19 @@ def _ceiling_check(doc, entry):
     return policy_wasm.ceiling({"ceiling": doc, "entry": entry})
 
 
+def _ceiling_warnings(persons: list, roles: list, classes: list, max_lease_hours: int) -> list[str]:
+    """What a ceiling as asked will quietly not do (issues 51, 52): said before the officer seals it."""
+    out = []
+    if not persons:
+        out.append("no --persons: this ceiling admits nobody by name" + (
+            f"; only leases by role ({', '.join(roles)}) of class {', '.join(classes) or 'none'}" if roles else
+            ", and with no --roles it admits no one at all"))
+    if max_lease_hours < 24:
+        out.append(f"--max-lease-hours {max_lease_hours}: memberships are granted in whole days, so a day-long lease is "
+                   f"dropped (\"longer than the ceiling's longest lease\") until its last {max_lease_hours} hours")
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m keyclerk.edge_cli", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -107,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
     for k in ("--edge", "--officer", "--officer-key"):
         s.add_argument(k, required=True)
     s.add_argument("--enrolment-key", nargs="+", required=True, help="one per node; two for the HA profile")
+    s.add_argument("--account", action="store_true",
+                   help="--officer is a name without an anchor scheme on purpose (a deployment whose anchors have none)")
     s.add_argument("--unlock-key", nargs="*", default=[], help="each node's kc-unlock-v2 public key, in node order")
     s.add_argument("--tpm", nargs="*", default=[],
                    help="JSON files with each node's tpm record (decision 0016), in node order: their commitments are signed")
@@ -124,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--days", type=int, default=31, help="at most 31")
     s = sub.add_parser("site-statement", help="decision 0027: what the site key and a node sign (provisional or promotion)")
     s.add_argument("--purpose", required=True, choices=("provisional", "promotion"))
+    s.add_argument("--hours", type=int, default=24, help="a promotion's validity (edge protocol 1.6): at most 24")
     for k in ("--edge", "--site-key", "--node-key", "--reason"):
         s.add_argument(k, required=True)
     s = sub.add_parser("seal")
@@ -142,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--roles", nargs="*", default=[])
     s.add_argument("--targets", nargs="+", required=True)
     s.add_argument("--classes", nargs="*", default=["low"])
-    s.add_argument("--max-lease-hours", type=int, default=8)
+    s.add_argument("--max-lease-hours", type=int, default=24,
+                   help="the longest lease the edge takes, in hours (24: memberships are granted in whole days)")
     s.add_argument("--max-offline-hours", type=int, default=24)
     s.add_argument("--profile", default="basic", choices=("assured", "basic"))
     s.add_argument("--remote-reach", default="off", choices=("off", "tunnel", "netbird"))
@@ -200,6 +220,13 @@ def main(argv: list[str] | None = None) -> int:
             h.write(scalar)
         _out({"unlock_key": E.unlock_public(E.unlock_private(scalar)), "format": E.UNLOCK_CONTEXT, "file": a.out})
     elif a.cmd == "statement":
+        if not a.account and ":" not in a.officer:      # issue 50: an account name, refused before anyone signs
+            print(f"--officer {a.officer!r} has no anchor scheme: it looks like an account name. The statement must name "
+                  "the officer exactly as the edge record does (kc:... on a desk with the change log, the identity "
+                  "provider's anchor such as op:... on a signed-YAML store; the desk's person page shows it), or the desk "
+                  "refuses it after the officer and the edge have both signed. Pass --account if this name is the "
+                  "anchor", file=sys.stderr)
+            return 2
         n = len(a.enrolment_key)
         if len(a.unlock_key) > n or len(a.tpm) > n:
             ap.error("at most one --unlock-key and one --tpm per --enrolment-key, in node order")
@@ -234,8 +261,15 @@ def main(argv: list[str] | None = None) -> int:
                                   now + timedelta(days=a.days)))
     elif a.cmd == "site-statement":
         from keyclerk import edge_relay as ER
-        _out(ER.site_statement(a.purpose, a.edge, a.site_key, a.node_key, datetime.now(timezone.utc), a.reason))
+        now = datetime.now(timezone.utc)
+        if a.purpose == "promotion" and not 1 <= a.hours <= ER.SITE_MAX_HOURS:
+            print(f"--hours: 1 to {ER.SITE_MAX_HOURS}", file=sys.stderr)
+            return 2
+        _out(ER.site_statement(a.purpose, a.edge, a.site_key, a.node_key, now, a.reason,
+                               now + timedelta(hours=a.hours) if a.purpose == "promotion" else None))
     elif a.cmd == "ceiling":
+        for why in _ceiling_warnings(a.persons, a.roles, a.classes, a.max_lease_hours):
+            print(f"warning: {why}", file=sys.stderr)
         _out({"format": E.CEILING_FORMAT, "edge": a.edge, "serial": a.serial, "persons": a.persons, "roles": a.roles,
               "targets": a.targets, "classes": a.classes, "max_lease_hours": a.max_lease_hours,
               "max_offline_hours": a.max_offline_hours, "profile": a.profile, "remote_reach": a.remote_reach,

@@ -31,12 +31,19 @@ KINDS = {"grants": "grant_id", "revocations": "grant_id", "leases": "lease_id", 
          "visits": "visit_id", "visit_events": "event_id", "badges": "badge_id",                      # decision 0009
          "accounts": "anchor",                                                                        # decision 0028
          "edges": "edge_id", "person_keys": "key_id", "edge_visit_leases": "lease_id",                 # decision 0014
-         "edge_rotations": "rotation_id"}
+         "edge_rotations": "rotation_id", "review_decisions": "decision_id",                          # 0.29, #42
+         "edge_exclusions": "exclusion_id",                                                             # 0.29
+         "edge_unlocks": "unlock_id", "edge_escrows": "escrow_id",                  # 0.29 D3: written by the signer only,
+         "edge_escrow_confirms": "confirm_id", "edge_activations": "activation_id",  # so both HA nodes judge alike
+         "custodian_recoveries": "statement"}                                       # 0033 Q6: the recovery's marker
 OPTIONAL = ("accounts", "leases", "catalogue", "sod", "groups", "delegations", "memberships", "admin_revocations", "situations",
             "surge_packages", "surge_grants", "approvers", "visits", "visit_events", "badges",
-            "edges", "person_keys", "edge_visit_leases", "edge_rotations")
+            "edges", "person_keys", "edge_visit_leases", "edge_rotations", "review_decisions", "edge_exclusions",
+            "edge_unlocks", "edge_escrows", "edge_escrow_confirms", "edge_activations", "custodian_recoveries")
+SIGNER_KINDS = ("edge_unlocks", "edge_escrows", "edge_escrow_confirms", "edge_activations",
+                "custodian_recoveries")                                                         # never from a desk
 HEAD = ("realm", "home", "connected_organisations", "root", "persons", "places", "org_units", "zones", "retired_places",
-        "situation_feeds", "ha", "revision", "approval_proofs", "proposal_proofs")   # every top-level kind is in HEAD or KINDS (a test holds it)
+        "situation_feeds", "ha", "revision", "approval_proofs", "proposal_proofs", "reviews")   # every top-level kind is in HEAD or KINDS (a test holds it)
 
 
 class _Plain(yaml.SafeDumper):
@@ -68,7 +75,7 @@ ID_FIELDS = {"grant_id", "anchor", "lease_id", "suspension_id", "entitlement", "
 ANCHOR_FIELDS = {"anchor", "requested_by", "by", "delegate", "coordinator"}
 TIME_FIELDS = {"start", "end", "at", "from", "to", "decided_at", "until", "valid_until", "issued_at", "review_by",
                "prepared_at", "valid_from", "requested_end", "checked_at",
-               "expiry", "contract_end", "opens", "closes", "expected"}   # every date-time in the records schema (a test holds it)
+               "expiry", "contract_end", "opens", "closes", "expected", "unit_since", "received"}   # every date-time in the records schema (a test holds it)
 
 
 # --- where a person's anchor sits in the records (decision 0028 point 1) --------------------------------------------
@@ -88,6 +95,13 @@ ANCHOR_PATHS: dict[str, tuple[str, ...]] = {
     "delegations": ("delegate", "by", "approved_by[]"),
     "memberships": ("member.anchor", "by", "approved_by[]"),
     "admin_revocations": ("by",),
+    "review_decisions": ("by", "approved_by[]"),
+    "edge_exclusions": ("by",),
+    "edge_unlocks": ("approver", "person"),
+    "edge_escrows": ("custodians[]",),
+    "edge_escrow_confirms": ("custodian",),
+    "edge_activations": (),
+    "custodian_recoveries": (),
     "suspensions": ("anchor", "by", "lifted.by[]"),
     "approvers": ("anchor", "appointed_by", "approved_by[]"),
     "situations": ("by", "approved_by[]"),
@@ -293,11 +307,51 @@ def duplicate_ids(doc: dict) -> list[str]:
     return errs
 
 
+def _unit_errors(old: dict, new: dict) -> list[str]:
+    """0.29 review R2: a person's unit changes only with a unit_since later than the one before, and unit_since never
+    goes back or goes away, so the mover's grace (delegation.review_due) cannot be skipped by whoever writes records."""
+    errs, before = [], {p.get("person"): p for p in old.get("persons", []) if isinstance(p, dict)}
+    for p in new.get("persons", []):
+        o = before.get(p.get("person")) if isinstance(p, dict) else None
+        if o is None:
+            continue
+        was, now = o.get("unit_since"), p.get("unit_since")
+        if was is not None and (now is None or str(now) < str(was)):
+            errs.append(f"{p['person']}: unit_since never goes back or goes away")
+        if p.get("unit") != o.get("unit") and (now is None or now == was):
+            errs.append(f"{p['person']}: a unit change records when the person joined the new unit (unit_since), so "
+                        "the access they had in the old unit is reviewed (the mover's grace)")
+    return errs
+
+
+def _reviews_errors(old: dict, new: dict) -> list[str]:
+    """The access-review setting only tightens in place (0.29 review W6): switching it off, a longer interval or
+    grace, a later start (a fresh clock for everyone) or another parent principal (whose keeps count) is refused, so
+    whoever writes one revision cannot quietly relax who reviews and how often. Relaxing it is the root trust
+    owners' re-establishment of the records, not an edit."""
+    a, b = old.get("reviews"), new.get("reviews")
+    if not a:
+        return []
+    if not b:
+        return ["reviews: the access-review setting is switched off: it only tightens in place"]
+    errs = []
+    for k in ("max_age_months", "grace_days"):
+        if isinstance(a.get(k), int) and isinstance(b.get(k), int) and b[k] > a[k]:
+            errs.append(f"reviews: {k} grows from {a[k]} to {b[k]}: the setting only tightens in place")
+    if b.get("from") and a.get("from") and str(b["from"]) > str(a["from"]):
+        errs.append("reviews: from moves later, a fresh clock for every membership: the setting only tightens in place")
+    added = sorted(set(b.get("parents") or []) - set(a.get("parents") or []))
+    if added:
+        errs.append(f"reviews: parent principal {', '.join(added)} added, whose keeps would count: the setting only "
+                    "tightens in place")
+    return errs
+
+
 def guard(old: dict, new: dict) -> list[str]:
     """Why a new head may not replace the old one: revocations only ever grow and never change, and a revoked grant
     id never returns as a new grant. Times are compared by meaning (canonical)."""
     old, new = canonical(old), canonical(new)
-    errs = []
+    errs = _unit_errors(old, new) + _reviews_errors(old, new)
     old_rev = {r["grant_id"]: r for r in old.get("revocations", [])}
     new_rev = {r["grant_id"]: r for r in new.get("revocations", [])}
     for gid, r in old_rev.items():
@@ -344,7 +398,11 @@ def _guard_admin(old: dict, new: dict) -> list[str]:
             errs.append(f"{k}: administrative revocation dropped")
         elif new_ar[k] != r:
             errs.append(f"{k}: administrative revocation changed")
-    for kind, key in (("visits", "visit_id"), ("visit_events", "event_id"), ("badges", "badge_id")):  # a visit, what happened
+    for kind, key in (("visits", "visit_id"), ("visit_events", "event_id"), ("badges", "badge_id"),  # a visit, what happened
+                      ("review_decisions", "decision_id"), ("edge_exclusions", "exclusion_id"),
+                      ("edge_unlocks", "unlock_id"), ("edge_escrows", "escrow_id"),
+                      ("edge_escrow_confirms", "confirm_id"), ("edge_activations", "activation_id"),
+                      ("custodian_recoveries", "statement")):
         now = {r[key]: r for r in new.get(kind, [])}                                # are never deleted or rewritten
         for r in old.get(kind, []):
             if r[key] not in now:

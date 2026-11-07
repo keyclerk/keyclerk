@@ -113,3 +113,61 @@ def test_a_fetched_state_that_was_changed_on_the_way_is_refused(world, tmp_path)
     s.snapshot_state = tampered
     with pytest.raises(StoreRefused):
         _follower(world).resync()
+
+
+def _snap(world, tmp_path, cid):
+    _change(world, tmp_path, cid)
+    path = world["signer"].take_snapshot()
+    return S.read_sealed(path), path.with_name(path.name.replace("snapshot.json", "state.jsonl"))
+
+
+def test_d1_a_store_from_a_snapshot_acts_only_once_its_records_replay(world, tmp_path, monkeypatch):
+    """The custodian review's decision D1 (2026-11-07): the state a snapshot names is the signer's word, so a store
+    started from one replays the links it kept, reads meanwhile, and acts only once the replayed records match."""
+    monkeypatch.setattr(Follower, "_snapshot_turn", lambda self: None)   # the check runs when the test says
+    f = _follower(world)
+    f.resync(snapshot=_snap(world, tmp_path, "C-d1a"))
+    assert "replaying" in f.snapshot_pending()
+    assert f.check_snapshot(f.store) and f.snapshot_pending() is None
+    assert f.store.snapshot_check()["status"] == "verified"
+
+
+def test_d1_a_false_state_behind_a_true_tree_is_found_and_refused(world, tmp_path, monkeypatch):
+    """A compromised signer seals a snapshot over the true tree but a false state (its hash matching the false file):
+    the adoption accepts it, the replay does not; the store is refused and resyncs from the genesis."""
+    import hashlib
+    import json
+    sealed, state = _snap(world, tmp_path, "C-d1b")
+    lines = state.read_bytes().splitlines(keepends=True)
+    doc = json.loads(lines[0])
+    doc["record"] = {**doc["record"], "forged": True} if isinstance(doc["record"], dict) else doc["record"]
+    lines[0] = E.canonical(doc) + b"\n"
+    false = tmp_path / "false.state.jsonl"
+    false.write_bytes(b"".join(lines))
+    body = E._parse(E._raw(sealed["bytes"]))
+    body["state"] = {"sha256": hashlib.sha256(false.read_bytes()).hexdigest(), "bytes": len(false.read_bytes()),
+                     "records": len(lines)}
+    resealed = L._seal(world["key"], S.FORMAT, body)                       # the records key, the true tree
+    monkeypatch.setattr(Follower, "_snapshot_turn", lambda self: None)
+    f = _follower(world)
+    f.resync(snapshot=(resealed, false))                                   # adopted: the hash matches the false file
+    assert not f.check_snapshot(f.store)
+    assert "not the log's" in f.snapshot_pending() and f.alarms
+    monkeypatch.undo()
+    f.alarms.clear()
+    f.catch_up()                                                           # refused: resynced from the genesis
+    assert f.store.snapshot_check() is None and RP.records(f.store) == RP.records(world["signer"].replica)
+
+
+def test_d1_the_desk_proposes_nothing_while_its_snapshot_is_unchecked(world, tmp_path, monkeypatch):
+    from keyclerk.desk import Desk, Refusal
+    from keyclerk.store.log_desk import LogStore
+    store = LogStore(tmp_path / "desk", world["signer"])
+    try:
+        monkeypatch.setattr(Follower, "snapshot_pending", lambda self: "this store started from a snapshot ... replaying")
+        a = {p["person"]: p["anchors"][0] for p in store.load()["persons"]}
+        with pytest.raises(Refusal, match="replaying"):
+            Desk(store).propose({"anchor": a["owner"], "roles": []}, {"action": "add_member", "group": "office-staff",
+                                                                      "anchor": a["finn"], "days": 30, "reason": "x"})
+    finally:
+        store.close()

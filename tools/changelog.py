@@ -25,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SECTIONS = ("security", "changed", "added", "deprecated", "removed", "fixed")   # what a deployer must read first
 NAME = re.compile(r"^(?P<id>[a-z0-9][a-z0-9-]*)\.(?P<section>[a-z]+)\.md$")
-VERSION = re.compile(r"^\d+\.\d+\.\d+$")
+VERSION = re.compile(r"^\d+\.\d+\.\d+(?:-rc\.\d+)?$")     # a release, or its candidate (0.29.0-rc.1)
 WIDTH = 120
 
 
@@ -88,12 +88,19 @@ def contract_changed(root: Path) -> bool:
 
 def release(root: Path, version: str, date: str) -> str:
     if not VERSION.match(version):
-        raise SystemExit(f"{version!r} is not X.Y.Z")
+        raise SystemExit(f"{version!r} is not X.Y.Z or X.Y.Z-rc.N")
     bad = check(root)
     if bad:
         raise SystemExit("fix the fragments first:\n" + "\n".join(bad))
     frags = fragments(root)
     if not frags:
+        path = root / "CHANGELOG.md"
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
+        top = re.search(r"^## (\S+) \(([^)]*)\)\n", text, re.M)
+        if top and re.fullmatch(rf"{re.escape(version)}-rc\.\d+", top.group(1)):   # the candidate becomes the release
+            section = f"## {version} ({date})\n"
+            path.write_text(text[:top.start()] + section + text[top.end():], encoding="utf-8", newline="\n")
+            return section + text[top.end():].split("\n## ", 1)[0]
         raise SystemExit("no fragments in changelog.d/: a release without notes fails at the tag")
     if contract_changed(root) and "**Upgrading:**" not in body(root):
         raise SystemExit("what a deployer must supply changed since the last release (docs/deployer-contract.md): "

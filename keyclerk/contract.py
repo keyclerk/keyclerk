@@ -50,10 +50,16 @@ def _proofs(cfg) -> bool:
 
 
 SERVICES = (
-    Service("signer", "keyclerk.signer", ("python", "-m", "keyclerk.signer"), ("--key", "--state", "--config"),
-            files=("--key", "--config", "--token", "--reconciler-token", "--approval-jwks"), dirs=("--state",),
+    Service("signer", "keyclerk.signer", ("python", "-m", "keyclerk.signer"), ("--state", "--config"),
+            files=("--key", "--config", "--token", "--reconciler-token", "--approval-jwks", "--identity-key",
+                   "--custodian-token"),
+            dirs=("--state",),
             config=("approvals.acr",),
-            rules=(Rule("--listen (unix:/path or tcp:127.0.0.1:port), unless --adopt",
+            rules=(Rule("the records key's holder: --custodian (production) or --key (development), one of them",
+                        lambda a, c: True, lambda a, c: bool(a.key) != bool(a.custodian)),
+                   Rule("--custodian-token for a custodian over TCP", lambda a, c: str(a.custodian or "").startswith("tcp:"),
+                        lambda a, c: bool(a.custodian_token)),
+                   Rule("--listen (unix:/path or tcp:127.0.0.1:port), unless --adopt",
                         lambda a, c: not a.adopt, lambda a, c: bool(a.listen)),
                    Rule("--token for a TCP listener", lambda a, c: str(a.listen or "").startswith("tcp:"),
                         lambda a, c: bool(a.token)),
@@ -64,7 +70,10 @@ SERVICES = (
                         lambda a, c: _proofs(c),
                         lambda a, c: bool(a.approval_issuer and a.approval_audience and a.approval_jwks)),
                    Rule("the reconciler's listener has its own --reconciler-token", lambda a, c: bool(a.reconciler_listen),
-                        lambda a, c: bool(a.reconciler_token) and a.reconciler_token != a.token))),
+                        lambda a, c: bool(a.reconciler_token) and a.reconciler_token != a.token),
+                   Rule("--identity-key, the reconciler's public key, where a reconciler is wired (0.29.0: leases name "
+                        "bastion accounts only from its sealed identity map; python -m keyclerk.init identity-key)",
+                        lambda a, c: bool(a.reconciler_listen), lambda a, c: bool(a.identity_key)))),
     Service("desk", "keyclerk.api", ("python", "-m", "keyclerk.api"),
             ("--config", "--store", "--oidc-public-issuer", "--oidc-redirect"),
             files=("--config", "--signer-token", "--signing-key", "--mgmt-token-file"), dirs=("--store",),

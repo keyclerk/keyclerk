@@ -430,10 +430,62 @@ def check_main(argv: list[str]) -> int:
     return 1 if problems else 0
 
 
+def identity_key_main(argv: list[str]) -> int:
+    """python -m keyclerk.init identity-key --mark-key FILE --out FILE
+
+    The reconciler's public key, for the checking signer's --identity-key (0021 point 2): derived from the reconciler's
+    own --mark-key, which seals the identity map. Only the public half is written; the private key never leaves the
+    reconciler's file."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from keyclerk import guard
+    ap = argparse.ArgumentParser(prog="python -m keyclerk.init identity-key",
+                                 description=identity_key_main.__doc__.splitlines()[0])
+    ap.add_argument("--mark-key", required=True, help="the reconciler's Ed25519 private key file (64 hex digits)")
+    ap.add_argument("--out", required=True, help="where to write the public key (the signer's --identity-key)")
+    a = ap.parse_args(argv)
+    try:
+        key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(guard.read_bounded(Path(a.mark_key), 200).strip()))
+    except (OSError, ValueError):
+        raise SystemExit(f"--mark-key {a.mark_key}: not a readable Ed25519 private key (64 hex digits)") from None
+    pub = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+    out = Path(a.out)
+    tmp = out.with_name(out.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as h:
+        h.write(pub + "\n")
+        h.flush()
+        os.fsync(h.fileno())
+    os.replace(tmp, out)
+    print(f"wrote {out}: start the signer with --identity-key {out}")
+    return 0
+
+
+def bundle_key_main(argv: list[str]) -> int:
+    """python -m keyclerk.init bundle-key --out FILE
+
+    A new bundle key for an HA core (0021): every signer node must seal edge objects with the one key the edges pin,
+    so the key is made once, here, and imported into each node (python -m keyclerk.signer import-bundle-key). A single
+    signer makes its own at its first bundle and needs none of this."""
+    from keyclerk import edge as E
+    ap = argparse.ArgumentParser(prog="python -m keyclerk.init bundle-key", description=bundle_key_main.__doc__.splitlines()[0])
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args(argv)
+    out = Path(a.out)
+    if out.exists():
+        raise SystemExit(f"{out} exists: a bundle key is never overwritten (edges may have pinned it)")
+    E.load_or_make_key(out, allow_create=True)
+    print(f"wrote {out} (0600): import it into every signer node, then keep it as you keep the records key")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["acr"]:
         return acr_main(argv[1:])
+    if argv[:1] == ["bundle-key"]:
+        return bundle_key_main(argv[1:])
+    if argv[:1] == ["identity-key"]:
+        return identity_key_main(argv[1:])
     if argv[:1] == ["check"]:
         return check_main(argv[1:])
     a = parser().parse_args(argv)

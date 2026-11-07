@@ -9,7 +9,8 @@
 people's confirmations (decision 0031 point 10), seeds the commit witness from the stopped signer and starts it, two
 signer nodes (node-a, node-b) and the desk's edge API following the active node. It enrols one assured edge,
 `plant-a` (profile --profile, basic by default), sets its ceiling, registers two people's keys and writes the
-bastion account of each person (DIR/broker/usernames.json, as the reconciler would), then writes DIR/edge.json: everything an agent needs (the desk URL, the edge's private key, the bundle key to pin, an object whose "key" is the hex, and the officer's key).
+bastion account of each person (DIR/broker/usernames.json and the sealed identity-map.json, as the reconciler
+would, under DIR/reconciler.key, which the signers pin), then writes DIR/edge.json: everything an agent needs (the desk URL, the edge's private key, the bundle key to pin, an object whose "key" is the hex, and the officer's key).
 Then, every --every seconds, it does one thing at random and logs it to DIR/schedule.jsonl: grant a lease whose end
 falls 3 to 8 minutes out or whose start falls 2 to 6 minutes out, end a live one early, kill the active signer node
 (restarted after 90 s), or cut the edge off for one interval (the desk then closes every edge connection). The run
@@ -112,9 +113,11 @@ def build(d: Path) -> dict:
     if d.exists() and any(d.iterdir()):
         raise SystemExit(f"{d} is not empty: a soak starts from a fresh directory")
     d.mkdir(parents=True, exist_ok=True)
-    key, wkey, edge_key, officer = (Ed25519PrivateKey.generate() for _ in range(4))
-    for name, k in (("signer.key", key), ("witness.key", wkey), ("edge.key", edge_key), ("officer.key", officer)):
+    key, wkey, edge_key, officer, rec = (Ed25519PrivateKey.generate() for _ in range(5))
+    for name, k in (("signer.key", key), ("witness.key", wkey), ("edge.key", edge_key), ("officer.key", officer),
+                    ("reconciler.key", rec)):            # the reconciler's key seals the identity map (0021 point 2)
         (d / name).write_text(_hex(k), encoding="utf-8")
+    (d / "reconciler.pub").write_text(E.public_hex(rec), encoding="utf-8")      # the signers' --identity-key
     (d / "token").write_text("soak-" + _hex(Ed25519PrivateKey.generate())[:32], encoding="utf-8")
     cfg = yaml.safe_load((FIXTURES / "config.yaml").read_text(encoding="utf-8"))
     cfg["store"] = {"kind": "sqlite"}
@@ -124,6 +127,9 @@ def build(d: Path) -> dict:
     Store(d / "seed-desk", None, _records(d), signer=signer).close()
     signer.migrate()
     signer.background_check()
+    from keyclerk.edge_sealer import EdgeSealer       # HA nodes share one bundle key (0021): made once, imported;
+    E.load_or_make_key(d / "bundle.key", allow_create=True)   # node-b is copied from node-a below, key included
+    EdgeSealer(d / "node-a", None).import_key(d / "bundle.key")
     hcfg = {"origin": ORIGIN, "commit_witness": N.vkey(WITNESS, N.COSIGNATURE, N.raw_public(wkey)),
             "nodes": ["node-a", "node-b"]}
     root = replay.records(signer.replica)["root"]
@@ -158,7 +164,8 @@ class Core:
         return [py, "-m", "keyclerk.signer", "--key", str(d / "signer.key"), "--state", str(d / name),
                 "--config", str(d / "config.yaml"), "--listen", f"tcp:127.0.0.1:{self.ports[name]}",
                 "--token", str(d / "token"), "--ha-node", name,
-                "--commit-witness", f"http://127.0.0.1:{self.ports['witness']}", "--ha-hold", "5"]
+                "--commit-witness", f"http://127.0.0.1:{self.ports['witness']}", "--ha-hold", "5",
+                "--identity-key", str(d / "reconciler.pub")]
 
     def start(self, name):
         out = open(self.d / f"{name}.out", "a", encoding="utf-8")
@@ -421,12 +428,16 @@ def end_lease(desk: Desk, d: Path):
 
 def _probe(base: str, host: str, edge_key) -> dict:
     """One signed bundle request as the edge makes it, verified: edge.json is usable before an agent is pointed at it."""
+    import urllib.error
     import urllib.request
     path = "/api/v1/edge/bundle"
     req = urllib.request.Request(base + path, headers={"Host": host,
                                                        "KeyClerk-Edge": E.sign_request(edge_key, EDGE, "GET", path, b"")})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        sealed = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            sealed = json.loads(r.read())
+    except urllib.error.HTTPError as e:              # the desk's reason, not only its status
+        raise RuntimeError(f"the desk answered {e.code}: {e.read()[:600].decode('utf-8', 'replace')}") from None
     body = E.unseal(sealed, sealed["key"], E.BUNDLE_FORMAT)
     return {"serial": body.get("serial"), "ceiling": body.get("ceiling") is not None,
             "leases": sorted(x["lease_id"] for x in body.get("leases") or []),
@@ -489,6 +500,10 @@ def _run(a, d, keys, core):
     people = enrol(desk, keys, a.profile)
     usernames = {ANCHOR[p]: p for p in POOL + (FINN, ANN)}
     (broker / "usernames.json").write_text(json.dumps(usernames, indent=1), encoding="utf-8")
+    from keyclerk import identity_map                  # 0.29.0: the signer names accounts only from the sealed map
+    (broker / "identity-map.json").write_text(json.dumps(identity_map.seal(
+        _load(d / "reconciler.key"), store.load()["realm"], None, datetime.now(timezone.utc), usernames, {})),
+        encoding="utf-8")
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), _handler(desk, a.host))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     stop = threading.Event()

@@ -18,7 +18,7 @@ import hashlib
 from keyclerk import edge as E
 
 FAMILIES = ("statements", "ceilings", "ended", "unlock", "module_bytes", "requests", "email", "ceiling_hours", "reports", "relays",
-            "trusted_time", "time", "ratchet", "start_time")
+            "trusted_time", "time", "ratchet", "start_time", "site")
 
 
 def verdict(family: str, c: dict) -> dict:
@@ -74,6 +74,13 @@ def verdict(family: str, c: dict) -> dict:
         errs, eff = edge_relay.verify_tighten(c["cert"], c["tighten"], c["pins"], c["state"], c["applied"],
                                               E._ts(c["now"]), c.get("release"))
         return {"ok": not errs, "state": eff.get("state") if not errs else None}
+    if family == "site":                         # edge protocol 1.6, section 14: the site key's statements
+        from keyclerk import edge_relay
+        try:
+            edge_relay.verify_site(c["sealed"], c["site_key"], c["edge"], c["purpose"], E._ts(c["now"]))
+            return {"ok": True}
+        except ValueError:
+            return {"ok": False}
     if family == "time":                         # edge protocol 1.5, section 1: the desk's time, for one request
         errs, m = E.verify_time(c["sealed"], c["pins"], c["nonce"], c["waited"])
         return {"ok": not errs, "issued": m.get("issued") if not errs else None}

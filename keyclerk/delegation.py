@@ -587,6 +587,98 @@ def authority(doc: dict, actor: str, gid: str, power: str, at: datetime) -> str 
     return None
 
 
+# --- reviews (0.29, #42): derived, nothing stored but a reviewer's keep decision ---------------------------------
+
+def _months_after(t: datetime, months: int) -> datetime:
+    y, mo = divmod(t.month - 1 + months, 12)
+    y, mo = t.year + y, mo + 1
+    nxt = datetime(y + mo // 12, mo % 12 + 1, 1, tzinfo=t.tzinfo)
+    return t.replace(year=y, month=mo, day=min(t.day, (nxt - timedelta(days=1)).day))
+
+
+def keep_counts(doc: dict, m: dict, r: dict, judged: datetime | None = None) -> bool:
+    """A keep decision counts when its reviewer held the members power over the group then (the owner), or is one of
+    the parent IGA's named principals; never one by the member themselves, and never one by someone revoked for cause
+    from a time before the keep, as known when it is judged (0.29 review R1: memberships are judged so too)."""
+    by, at = r["by"], _ts(r["at"])
+    if same(doc, by, (m["member"] or {}).get("anchor")):
+        return False
+    if judged is not None and _tainted(doc, by, at, judged):
+        return False
+    if r["source"] == "parent":
+        return any(same(doc, by, a) for a in (doc.get("reviews") or {}).get("parents") or [])
+    return authority(doc, by, m["group"], "members", at) is not None
+
+
+def revival_keyed(doc: dict, m: dict, r: dict) -> bool:
+    """A keep made after the membership lapsed brings access back, so it needs a second key, as a new membership
+    would (0.29 review R4): someone else than the reviewer and the member, with the members power over the group
+    when the keep was made."""
+    at = _ts(r["at"])
+    member = (m["member"] or {}).get("anchor")
+    return any(not same(doc, x, r["by"]) and not same(doc, x, member) and authority(doc, x, m["group"], "members", at)
+               for x in r.get("approved_by", []))
+
+
+def _keeps(doc: dict, m: dict, at: datetime) -> list[tuple[dict, bool]]:
+    """(keep, counts) for every keep of this membership up to `at`, in time order: one made after the lapse that the
+    keeps before it leave counts only with its second key (R4)."""
+    pol = doc["reviews"]
+    out, counted = [], []
+    rs = sorted((r for r in doc.get("review_decisions", []) if r["membership"] == m["membership_id"]
+                 and r["decision"] == "keep" and _ts(r["at"]) <= at), key=lambda r: (_ts(r["at"]), r["decision_id"]))
+    for r in rs:
+        ok = keep_counts(doc, m, r, at)
+        if ok and _ts(r["at"]) >= _due(doc, m, pol, counted) + timedelta(days=pol["grace_days"]):
+            ok = revival_keyed(doc, m, r)
+        if ok:
+            counted.append(_ts(r["at"]))
+        out.append((r, ok))
+    return out
+
+
+def review_errors(doc: dict) -> list[str]:
+    """A keep after the lapse without its second key: the desk holds it for one (a key error, R4)."""
+    if not doc.get("reviews"):
+        return []
+    ms = {m["membership_id"]: m for m in doc.get("memberships", [])}
+    errs = []                                         # judged at the newest keep too: a keep is a key error when made
+    now = max([clock.now()] + [_ts(r["at"]) for r in doc.get("review_decisions", [])])
+    for mid in sorted({r["membership"] for r in doc.get("review_decisions", [])}):
+        m = ms.get(mid)
+        if m is None or _kind(m) != "anchor":
+            continue
+        pol, counted = doc["reviews"], []
+        for r, ok in _keeps(doc, m, now):
+            if ok:
+                counted.append(_ts(r["at"]))
+            elif keep_counts(doc, m, r, now) and _ts(r["at"]) >= _due(doc, m, pol, counted) + timedelta(
+                    days=pol["grace_days"]) and not r.get("approved_by"):
+                errs.append(f"{r['decision_id']}: a keep after {mid} lapsed brings access back: it needs a second key "
+                            f"from someone with the members power over {m['group']}, as a new membership would")
+    return errs
+
+
+def review_due(doc: dict, m: dict, at: datetime) -> datetime | None:
+    """When a direct membership is due for review; None where reviews are off or the membership is not direct. A rule
+    or an included group follows its source, so only a named person's membership is reviewed."""
+    pol = doc.get("reviews")
+    if not pol or _kind(m) != "anchor":
+        return None
+    return _due(doc, m, pol, [_ts(r["at"]) for r, ok in _keeps(doc, m, at) if ok])
+
+
+def _due(doc: dict, m: dict, pol: dict, keeps: list[datetime]) -> datetime:
+    base = max([_ts(m["start"]), _ts(pol["from"])] + keeps)
+    due = _months_after(base, pol["max_age_months"])
+    anchor = m["member"]["anchor"]
+    since = next((p.get("unit_since") for p in doc.get("persons", []) if any(same(doc, anchor, x) for x in p["anchors"])),
+                 None)
+    if since and _ts(m["start"]) < _ts(since) and not any(k >= _ts(since) for k in keeps):
+        due = min(due, _ts(since))          # the mover's grace: what came with the old unit is reviewed now
+    return due
+
+
 # --- memberships -------------------------------------------------------------------------------------------------
 
 def _kind(m: dict) -> str:
@@ -645,6 +737,9 @@ def _membership_status(doc: dict, m: dict, at: datetime) -> str:
         return "lapsed"
     if at >= _ts(m["end"]):
         return "ended"
+    due = review_due(doc, m, at)
+    if due is not None and at >= due + timedelta(days=doc["reviews"]["grace_days"]):
+        return "unreviewed"
     if membership_errors(doc, m, at=at):
         return "invalid"
     if m.get("standby_from"):
@@ -1089,6 +1184,7 @@ def check(doc: dict, memberships: set[str] | None = None, sod: set[str] | None =
     stand, the rate caps, and SoD at every change. memberships, sod: judge only these memberships and these anchors'
     separation of duty (a scoped check, decision 0022 S4); everything else is judged whole, on the whole records."""
     errs = identity_errors(doc)
+    errs += review_errors(doc)
     gs = _groups(doc)
     tops = [g for g in gs.values() if g.get("parent") is None]
     if gs and not (doc.get("root") or {}).get("holders"):
@@ -1128,7 +1224,8 @@ def check(doc: dict, memberships: set[str] | None = None, sod: set[str] | None =
     known = set(_delegations(doc)) | {m["membership_id"] for m in doc.get("memberships", [])}
     known |= {a["approver_id"] for a in doc.get("approvers", [])}
     known |= {"root:" + h["anchor"] for h in (doc.get("root") or {}).get("holders", [])}
-    known |= {r[k] for kind, k in (("edges", "edge_id"), ("person_keys", "key_id"), ("edge_visit_leases", "lease_id"))
+    known |= {r[k] for kind, k in (("edges", "edge_id"), ("person_keys", "key_id"), ("edge_visit_leases", "lease_id"),
+                                   ("edge_exclusions", "exclusion_id"))   # 0.29 review X2: an exclusion ends too
               for r in doc.get(kind, [])}                                 # decision 0014: end_edge_record
     errs += [f"admin revocation of unknown id {r['id']}" for r in doc.get("admin_revocations", []) if r["id"] not in known]
     return list(dict.fromkeys(errs))

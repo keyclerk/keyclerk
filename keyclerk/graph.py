@@ -105,15 +105,18 @@ def build(doc: dict, anchor: str, at: datetime) -> dict:
         recs = [m for m in doc.get("memberships", []) if m["group"] == gid and (m["member"].get("anchor") in anchors)]
         for m in recs:
             times.update({_iso(m["start"]), _iso(m["end"])})
-        if not held and not any(_ts(m["start"]) > at for m in recs):
+        overdue = [m for m in recs if D.membership_status(doc, m, at) == "unreviewed"]     # R5: shown, not hidden
+        if not held and not overdue and not any(_ts(m["start"]) > at for m in recs):
             continue
         groups.append(gid)
         paths = [x for a in anchors for x in D.explain(doc, a, gid, at)]
         direct = [m for m in recs if _ts(m["start"]) <= at < _ts(m["end"])]
         upcoming = [m for m in recs if _ts(m["start"]) > at]
         m = (direct or upcoming or [None])[0]
-        edge("member", "subject", group_node(gid), ctx, "member" if held else "from " + _iso(m["start"])[:10],
-             m["start"] if m else None, m["end"] if m else None, ("active" if held else "pending"),
+        label = "member" if held else ("review overdue" if overdue else "from " + _iso(m["start"])[:10])
+        edge("member", "subject", group_node(gid), ctx, label,
+             m["start"] if m else None, m["end"] if m else None,
+             "active" if held else ("unreviewed" if overdue else "pending"),
              via=[" > ".join(x) for x in paths][:5], record=m["membership_id"] if m else None)
         for a in (m or {}).get("approved_by", []):
             edge("approved", other(a, ctx), "group:" + gid, ctx, "approved", m["start"], m["end"])

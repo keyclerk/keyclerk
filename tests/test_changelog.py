@@ -99,3 +99,17 @@ def test_a_repository_without_a_deployer_guide_releases_without_an_upgrading_lin
     root = _repo(tmp_path, {"1-a.added.md": "- A new thing.\n"})
     assert not changelog.contract_changed(root)
     assert "A new thing" in changelog.release(root, "9.9.9", "2026-11-06")
+
+
+def test_a_release_candidate_has_its_section_and_becomes_the_release(tmp_path):
+    """0.29.0-rc.1 gets its own section (the release workflow reads it for the candidate's tag); the release after it,
+    without new fragments, renames that section, so the release carries the candidate's notes."""
+    root = _repo(tmp_path, {"31.added.md": "- Added.\n"})
+    changelog.release(root, "0.29.0-rc.1", "2026-11-07")
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## 0.29.0-rc.1 (2026-11-07)\n- Added.\n" in text
+    changelog.release(root, "0.29.0", "2026-11-08")
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## 0.29.0 (2026-11-08)\n- Added.\n" in text and "rc.1" not in text
+    with pytest.raises(SystemExit, match="no fragments"):
+        changelog.release(root, "0.30.0", "2026-11-09")       # another version's notes are never taken over

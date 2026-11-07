@@ -129,7 +129,8 @@ class LogStore(DeskFiles):
 
     def _open(self, name: str) -> SqliteStore:
         try:
-            return SqliteStore(self.path / name, self._signer.public_key(), self.realm)
+            genesis = getattr(self._signer, "genesis_key", self._signer.public_key)   # the store's key, not a rotated one
+            return SqliteStore(self.path / name, genesis(), self.realm)
         except L.StoreRefused as e:
             raise StoreFault(f"the desk's replica {name} does not open: {e}") from None
 
@@ -297,6 +298,9 @@ class LogStore(DeskFiles):
 
     def _propose(self, ops: list[dict], tokens: list, rows: list[dict], entry: dict) -> dict:
         from keyclerk.signer import SignerRefused
+        why = self.follower.snapshot_pending()           # D1: a snapshot's records are checked before the desk acts
+        if why:
+            raise Refusal(why)
         change = {"ops": ops, "entry": entry}
         try:
             answer = self._signer.propose(self.follower.base(), change, tokens, rows or None)

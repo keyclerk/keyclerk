@@ -613,6 +613,11 @@
           "director": {
             "type": "string",
             "description": "an agent's director: the person or workload it acts for"
+          },
+          "unit_since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "when the person joined their current unit: where reviews are on, their direct memberships from before it are due for review at once (the mover's grace)"
           }
         }
       }
@@ -2148,6 +2153,312 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "reviews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_age_months",
+        "grace_days",
+        "from"
+      ],
+      "description": "access reviews, derived (0.29, #42): a direct membership is due for review max_age_months after its start, its newest keep decision or `from`, whichever is latest; grace_days after that it no longer counts. A person's unit change (unit_since) makes their older direct memberships due at once",
+      "properties": {
+        "max_age_months": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 36
+        },
+        "grace_days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 90
+        },
+        "from": {
+          "type": "string",
+          "format": "date-time",
+          "description": "when reviews began: no membership is due before from plus max_age_months"
+        },
+        "parents": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string"
+          },
+          "description": "anchors of a parent IGA's principals whose keep decisions count (source parent)"
+        }
+      }
+    },
+    "review_decisions": {
+      "type": "array",
+      "description": "a reviewer's decision to keep a direct membership (0.29, #42); a revoke is end_membership. Never deleted or changed",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision_id",
+          "membership",
+          "decision",
+          "by",
+          "at",
+          "source"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string"
+          },
+          "membership": {
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "keep"
+            ]
+          },
+          "by": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "enum": [
+              "owner",
+              "parent"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "approved_by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "second keys: a keep after the lapse needs one from someone with the members power over the group (0.29 review R4)"
+          }
+        }
+      }
+    },
+    "edge_exclusions": {
+      "type": "array",
+      "description": "edges of which one person may hold access on one at a time (0.29): a twin site, a second plant. Refused at the desk and again when a bundle is derived; ended through end_edge_record",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exclusion_id",
+          "edges",
+          "by",
+          "at",
+          "reason"
+        ],
+        "properties": {
+          "exclusion_id": {
+            "type": "string"
+          },
+          "edges": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "by": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "edge_unlocks": {
+      "type": "array",
+      "description": "phoned unlock codes the checking signer computed (0.29 D3): the hourly count both HA nodes read. Written by the signer only; never deleted or changed",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "approver",
+          "at",
+          "edge",
+          "minutes",
+          "node",
+          "person",
+          "target",
+          "unlock_id"
+        ],
+        "properties": {
+          "unlock_id": {
+            "type": "string"
+          },
+          "edge": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "approver": {
+            "type": "string"
+          },
+          "person": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "minutes": {
+            "type": "integer"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "edge_escrows": {
+      "type": "array",
+      "description": "escrowed break-glass values as the checking signer recorded them (0.29 S2, D3): the digest of both halves and the two custodians. Written by the signer only; never deleted or changed",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "custodians",
+          "edge",
+          "escrow_id",
+          "item_id",
+          "received",
+          "sha256"
+        ],
+        "properties": {
+          "escrow_id": {
+            "type": "string"
+          },
+          "edge": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "custodians": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "received": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "edge_escrow_confirms": {
+      "type": "array",
+      "description": "a custodian's own confirmation of their escrow half, counted by the checking signer (0.29 S2, D3). Written by the signer only; never deleted or changed",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "at",
+          "confirm_id",
+          "custodian",
+          "escrow_id"
+        ],
+        "properties": {
+          "confirm_id": {
+            "type": "string"
+          },
+          "escrow_id": {
+            "type": "string"
+          },
+          "custodian": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "edge_activations": {
+      "type": "array",
+      "description": "attestation keys the checking signer activated against the edge's endorsement key (0.29 S12, D3). Written by the signer only; never deleted or changed",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "activation_id",
+          "ak_name",
+          "at",
+          "edge"
+        ],
+        "properties": {
+          "activation_id": {
+            "type": "string"
+          },
+          "edge": {
+            "type": "string"
+          },
+          "ak_name": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "custodian_recoveries": {
+      "type": "array",
+      "description": "recoveries of the key custodian by the two-person ceremony (decision 0033 Q6): the statement the trustees signed (its sha256), the size it named, who signed it. Written by the signer only; never deleted or changed",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "statement",
+          "size",
+          "trustees",
+          "at"
+        ],
+        "properties": {
+          "statement": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "trustees": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "string"
+            }
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }
