@@ -434,3 +434,17 @@ def test_a_bundle_bounds_what_it_says_was_dropped():
     out = E.bundle_dropped(many)
     assert len(out) == E.DROPPED_MAX and all(len(d["why"]) == E.DROPPED_WHY_MAX for d in out)
     assert all(len(w) == E.DROPPED_TEXT_MAX for d in out for w in d["why"]) and not E.dropped_errors(out)
+
+
+def test_the_long_poll_digest_counts_dropped_as_content():
+    """Edge protocol 1.6 with 1.4 agents, which ignore dropped: the desk's content digest and an agent's both hash
+    every member but serial, issued, format and key_id, so a change in dropped is a content change on both sides."""
+    from datetime import datetime, timezone
+    key = Ed25519PrivateKey.generate()
+    t = datetime(2026, 11, 7, tzinfo=timezone.utc)
+    pol = {"modules": {}, "release": None, "entrypoints": []}
+    a = E.build_bundle("edge-a", 1, t, {"low": 1}, [], [], [], None, pol, key)
+    b = E.build_bundle("edge-a", 2, t, {"low": 1}, [], [], [], None, pol, key, dropped=[])
+    c = E.build_bundle("edge-a", 3, t, {"low": 1}, [], [], [], None, pol, key,
+                       dropped=[{"lease_id": "L-1", "why": ["longer than the ceiling's longest lease"]}])
+    assert len({E.bundle_digest(a), E.bundle_digest(b), E.bundle_digest(c)}) == 3
