@@ -27,6 +27,25 @@ on:
         description: one more tag to push besides the version and latest
         type: string
         default: ""
+  workflow_dispatch:                    # a maintainer builds a tag's images again (its own signature names main)
+    inputs:
+      name:
+        description: keyclerk or keyclerk-custodian
+        type: choice
+        options: [keyclerk, keyclerk-custodian]
+        required: true
+      context:
+        description: the build context in the repository (. or cmd/keyclerk-custodian)
+        type: string
+        required: true
+      ref:
+        description: the tag to build
+        type: string
+        required: true
+      base:
+        description: another base image, by digest; empty keeps the Containerfile's
+        type: string
+        default: ""
 permissions:
   contents: read
 jobs:
@@ -59,14 +78,14 @@ jobs:
           args=()
           if [ -n "$BASE" ]; then args+=(--build-arg "BASE=${BASE}"); fi
           for i in 1 2; do
-            docker buildx build --no-cache --platform linux/amd64 "${args[@]}" \
+            docker buildx build -f "${CONTEXT}/Containerfile" --no-cache --platform linux/amd64 "${args[@]}" \
               --output "type=oci,dest=img${i}.tar,rewrite-timestamp=true" --metadata-file "meta${i}.json" "$CONTEXT"
           done
           d1="$(jq -r '."containerimage.digest"' meta1.json)"
           d2="$(jq -r '."containerimage.digest"' meta2.json)"
           if [ "$d1" != "$d2" ]; then echo "not reproducible: ${d1} and ${d2}" >&2; exit 1; fi
           echo "DIGEST=${d1}" >> "$GITHUB_ENV"
-          docker buildx build --platform linux/amd64 "${args[@]}" --load -t "local/${NAME}:test" "$CONTEXT"
+          docker buildx build -f "${CONTEXT}/Containerfile" --platform linux/amd64 "${args[@]}" --load -t "local/${NAME}:test" "$CONTEXT"
       - name: Smoke test in the image
         run: |
           if [ "$NAME" = keyclerk ]; then
@@ -99,7 +118,7 @@ jobs:
           tags="name=${image}:${version}"
           case "$version" in *-*) ;; *) tags="${tags},${image}:latest" ;; esac   # a release candidate never moves latest
           if [ -n "$EXTRA_TAG" ]; then tags="${tags},${image}:${EXTRA_TAG}"; fi
-          docker buildx build --platform linux/amd64 "${args[@]}" \
+          docker buildx build -f "${CONTEXT}/Containerfile" --platform linux/amd64 "${args[@]}" \
             --output "type=image,\"${tags}\",push=true,rewrite-timestamp=true" --metadata-file pushed.json "$CONTEXT"
           pushed="$(jq -r '."containerimage.digest"' pushed.json)"
           if [ "$pushed" != "$DIGEST" ]; then echo "the pushed digest ${pushed} is not the reproduced ${DIGEST}" >&2; exit 1; fi
