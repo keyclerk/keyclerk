@@ -38,7 +38,8 @@ KEYED = (("memberships", "membership_id"), ("delegations", "delegation_id"), ("g
          ("approvers", "approver_id"), ("badges", "badge_id"),
          ("edges", "edge_id"), ("person_keys", "key_id"), ("edge_visit_leases", "lease_id"),   # decision 0014: every kind
          ("edge_rotations", "rotation_id"),                    # the desk adds approved_by to (Desk._with_approvals)
-         ("situations", "situation_id"), ("surge_packages", "package_id"), ("leases", "lease_id"))   # and the kinds whose
+         ("situations", "situation_id"), ("surge_packages", "package_id"), ("leases", "lease_id"),   # and the kinds whose
+         ("review_decisions", "decision_id"))                  # 0.29 review R3, R4: a keep is signed and keyed
 #   two-person rules read approved_by from records reviewed as code: a proof each, or a pin in accepted_without_proof
 MAX_ARCHIVED_KEYS = 64
 
@@ -58,6 +59,32 @@ def statement(realm: str, items: list[tuple[str, dict]], by: str, purpose: str =
         raise ValueError("purpose is approval or proposal")
     body = json.dumps({f"keyclerk-{purpose}": 1, "realm": realm, "by": by, "records": recs},
                       sort_keys=True, separators=(",", ":"), default=str)
+    return base64.urlsafe_b64encode(hashlib.sha256(body.encode()).digest()).rstrip(b"=").decode()
+
+
+def unlock_statement(realm: str, edge: str, node: str, by: str, person: str, target: str, key_fingerprint: str,
+                     nonce: str, minutes: int) -> str:
+    """The nonce a phoned unlock by `by` must carry (0021, step 4b): every field of that one code, so the approver's
+    fresh sign-in signs this unlock and no other; its purpose is part of what is signed, apart from approvals."""
+    body = json.dumps({"keyclerk-unlock": 1, "realm": realm, "edge": edge, "node": node, "by": by, "person": person,
+                       "target": target, "key_fingerprint": key_fingerprint, "nonce": nonce, "minutes": minutes},
+                      sort_keys=True, separators=(",", ":"))
+    return base64.urlsafe_b64encode(hashlib.sha256(body.encode()).digest()).rstrip(b"=").decode()
+
+
+def carried_statement(realm: str, edge: str, lease_id: str, by: str) -> str:
+    """The nonce a person's fresh sign-in signs to carry one visit lease to its edge (0.29 review S1): the checking
+    signer seals a carried lease only on it, so a desk cannot carry anyone's lease without them."""
+    body = json.dumps({"keyclerk-carried": 1, "realm": realm, "edge": edge, "lease_id": lease_id, "by": by},
+                      sort_keys=True, separators=(",", ":"))
+    return base64.urlsafe_b64encode(hashlib.sha256(body.encode()).digest()).rstrip(b"=").decode()
+
+
+def escrow_statement(realm: str, edge: str, item_id: str, sha256: str, by: str) -> str:
+    """The nonce a custodian's fresh sign-in signs to confirm they opened and stored their half of one escrowed value
+    (0.29 review S2): the edge forgets the value only once the signer counted both custodians' own confirmations."""
+    body = json.dumps({"keyclerk-escrow": 1, "realm": realm, "edge": edge, "item_id": item_id, "sha256": sha256,
+                       "by": by}, sort_keys=True, separators=(",", ":"))
     return base64.urlsafe_b64encode(hashlib.sha256(body.encode()).digest()).rstrip(b"=").decode()
 
 
@@ -179,6 +206,8 @@ def needs_proposal_proof(doc: dict, kind: str, rec: dict, policy: dict) -> bool:
     if pol.get("off"):
         return False
     if kind == "delegations" and pol.get("delegations"):
+        return True
+    if kind == "review_decisions":                     # R3: a keep is the reviewer's own word, never the desk's
         return True
     if kind == "memberships" and D.effective_risk(doc, str(rec.get("group"))) in set(pol.get("classes") or []):
         return True

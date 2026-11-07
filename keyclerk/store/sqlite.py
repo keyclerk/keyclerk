@@ -182,9 +182,10 @@ def check_version() -> None:
 # --- the store ---------------------------------------------------------------------------------------------------------
 
 class SqliteStore:
-    def __init__(self, path, pinned: str, realm: str, _readonly: bool = False):
+    def __init__(self, path, pinned, realm: str, _readonly: bool = False):
         check_version()
-        E.load_public(pinned)
+        self.genesis = L.key_at(pinned, 0)        # the key the store was created with; pinned may be a history (#41)
+        E.load_public(self.genesis)
         self.path = Path(path)
         self.pinned, self.realm = pinned, realm
         self._readonly, self._lock = _readonly, threading.RLock()   # reentrant: link k is proven inside its transaction
@@ -213,7 +214,7 @@ class SqliteStore:
                 if stmt.strip():
                     db.execute(stmt)
             db.executemany("INSERT INTO meta (key, value) VALUES (?, ?)",
-                           [("format", STORE_FORMAT), ("realm", self.realm), ("pinned", self.pinned),
+                           [("format", STORE_FORMAT), ("realm", self.realm), ("pinned", self.genesis),
                             ("fence", "1"), ("frontier", "[]"), ("parts", "0"), ("migration", "")])
             db.execute(f"PRAGMA application_id = {APPLICATION_ID}")
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -226,9 +227,18 @@ class SqliteStore:
         meta = dict(db.execute("SELECT key, value FROM meta").fetchall())
         if meta.get("format") != STORE_FORMAT:
             raise StoreRefused(f"{self.path}: store format {meta.get('format')}, not {STORE_FORMAT}")
-        if meta.get("pinned") != self.pinned:
+        if meta.get("pinned") != self.genesis:
             raise StoreRefused(f"{self.path} is pinned to another records key ({str(meta.get('pinned'))[:16]}...): "
                                "open it with the key it was created with")
+        size = int(db.execute("SELECT COUNT(*) FROM links").fetchone()[0]) if not fresh else 0
+        import json as _json                      # the sealed versions this store adopted (#41), never trusted alone:
+        chain = _json.loads(meta["keys"]) if meta.get("keys") else []   # rebuilt from the pins at every open (N1)
+        held = L.held_history(chain if isinstance(chain, list) else [], size, self.genesis)
+        if not isinstance(held, str) and (isinstance(self.pinned, str) or held.version > self.pinned.version):
+            self.pinned = held
+        elif isinstance(self.pinned, str) and chain and isinstance(held, str):
+            raise StoreRefused(f"{self.path} adopted a records-key history this process cannot verify: pin the history "
+                               "and the trustee set it rests on (configuration records_keys and trustees)")
         if meta.get("realm") != self.realm:
             raise StoreRefused(f"{self.path} holds realm {meta.get('realm')}, not {self.realm}")
         if not self._readonly:
@@ -251,6 +261,20 @@ class SqliteStore:
             self._db.execute("COMMIT")
             return out
 
+    def adopt_history(self, history) -> None:
+        """Move to a newer records-key history (#41), verified by the caller against the pinned trustees."""
+        with self._lock:
+            new = L.adopt_history(self.pinned, history, self.size(), self.genesis)
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                self._db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('keys', ?)",
+                                 (json.dumps(new.chain, sort_keys=True),))
+                self._db.execute("COMMIT")
+            except Exception:
+                self._db.execute("ROLLBACK")
+                raise
+            self.pinned = new
+
     def _meta(self, db, key: str) -> str:
         return db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()[0]
 
@@ -270,6 +294,7 @@ class SqliteStore:
         def go(db):
             size, head = self._head(db)
             body, h = L.check_next(sealed, self.pinned, self.realm, size, head, int(self._meta(db, "fence")))
+            L.check_switch_root(self.pinned, self._frontier(db), h)   # review N6: the root at a key switch is vouched for
             return self._apply(db, size, body, side, None, lambda: (sealed, h))[1]
         return self._write(go)
 
@@ -404,7 +429,22 @@ class SqliteStore:
             if body["restore"]:
                 db.execute("INSERT INTO meta (key, value) VALUES ('restore', ?) ON CONFLICT (key) DO UPDATE SET value = "
                            "excluded.value", (json.dumps(body["restore"]),))
+            check = {"size": body["size"], "sha256": body["state"]["sha256"], "status": "pending"}   # D1, 2026-11-07
+            db.execute("INSERT INTO meta (key, value) VALUES ('snapshot_check', ?) ON CONFLICT (key) DO UPDATE SET "
+                       "value = excluded.value", (json.dumps(check),))
         self._write(go)
+
+    def snapshot_check(self) -> dict | None:
+        """{size, sha256, status: pending | verified | refused} of the snapshot this store started from, or None."""
+        row = self._q("SELECT value FROM meta WHERE key = 'snapshot_check'")
+        return json.loads(row[0][0]) if row else None
+
+    def set_snapshot_check(self, status: str, why: str = "") -> None:
+        cur = self.snapshot_check()
+        if cur is None:
+            return
+        val = json.dumps({**cur, "status": status, **({"why": why[:300]} if why else {})})
+        self._write(lambda db: db.execute("UPDATE meta SET value = ? WHERE key = 'snapshot_check'", (val,)))
 
     def side_put(self, kind: str, key: str, record: dict) -> None:
         check_side(kind, key, record)

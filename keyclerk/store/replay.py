@@ -48,6 +48,7 @@ def verify(view: View, pinned: str, realm: str) -> None:
     size, head, fence, k, frontier = 0, None, 1, 0, []
     for sealed in view.links():
         body, h = L.check_next(sealed, pinned, realm, size, head, fence)
+        L.check_switch_root(pinned, frontier, h)          # review N6
         k = L.parts(body) if size == 0 else k
         L.check_migrate(body, k)
         size, head, fence, frontier = size + 1, h, body["fence"], merkle.push(frontier, h)
@@ -83,6 +84,23 @@ def revision(view: View) -> int | None:
     return base + max(0, view.size() - 1 - k)
 
 
+def revision_at(view: View, size: int) -> int | None:
+    """The revision the log had at `size` links (0.29, #41 F8: where a recovery's switch puts it), or None when a
+    restore link at or after `size` renumbered it and the answer is not this simple count."""
+    if size <= 0:
+        return None
+    point = getattr(view, "restore_point", lambda: None)()
+    if point is not None:
+        seq, mark = point
+        if seq >= size:
+            return None
+        return mark + 1 + (size - 1 - seq)
+    g = genesis(view)
+    y = g["change"].get("yaml")
+    base, k = (y["revision"], y["parts"]) if y else (1, 0)
+    return base + max(0, size - 1 - k)
+
+
 def prove_migration(view: View, pinned: str) -> str:
     """At link k: the state equals the signed YAML revision the genesis names, by meaning, or StoreRefused. "proven",
     or ERASED when the YAML bytes are no longer kept (the chain is then all that is trusted)."""
@@ -92,7 +110,7 @@ def prove_migration(view: View, pinned: str) -> str:
     if kept is None:
         return ERASED
     raw = kept["text"].encode("utf-8")
-    if not E._verifies(pinned, y["signature"], raw):
+    if not E._verifies(L.key_at(pinned, 0), y["signature"], raw):
         raise StoreRefused("the YAML revision the genesis names is not signed by the records key")
     try:
         doc = M.loads_signed(kept["text"])

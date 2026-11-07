@@ -44,6 +44,7 @@ def test_the_reference_verifier_gives_the_recorded_verdicts():
         assert [x["lease_id"] for x in applied.get("visit_leases", [])] == c["expected"]["visit_leases"], c["name"]
         assert (applied.get("state") if not errs else None) == c["expected"]["state"], c["name"]
         assert (applied.get("governed_roles") if not errs else None) == c["expected"]["governed_roles"], c["name"]
+        assert (applied.get("dropped") if not errs else None) == c["expected"]["dropped"], c["name"]
 
 
 def test_the_other_families_give_the_recorded_verdicts():

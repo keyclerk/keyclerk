@@ -2198,6 +2198,181 @@
   ],
   "note": "kc-edge-request-v2 (section 3): message is the bytes the edge signs, base64; ok is the desk's check of the header against the request as received (method, path with its query, body), the pinned key and the moment now (unix seconds); the query is signed exactly as sent"
  },
+ "site": {
+  "cases": [
+   {
+    "edge": "edge-a",
+    "expected": {
+     "ok": true
+    },
+    "name": "a promotion inside its window",
+    "now": "2026-11-05T12:00:00Z",
+    "purpose": "promotion",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTEtMDVUMTE6MDA6MDBaIiwiZWRnZSI6ImVkZ2UtYSIsImZvcm1hdCI6ImtjLWVkZ2Utc2l0ZS12MiIsIm5vZGVfa2V5IjoiOGIyMzdkNzg4ZThlYWFlZjU1MGM2ZDEyNTgyM2ZhNDVmMWZkNWZjMjliMmM4OGJkZjg3MTExOTQ3MWZjMTMxMiIsIm5vdF9hZnRlciI6IjIwMjYtMTEtMDZUMTE6MDA6MDBaIiwicHVycG9zZSI6InByb21vdGlvbiIsInJlYXNvbiI6Im5vIHdpdG5lc3Mgb24gc2l0ZSIsInNpdGVfa2V5IjoiZmVjMTQyODY3M2Y2YWZlODkyNjRiMzgwNzM0NGFlOGIyNjlkMTI1YTUwMzg1NTIwMjY4N2RiNWE3MTI4NTc5ZiJ9",
+     "signatures": [
+      {
+       "key": "8b237d788e8eaaef550c6d125823fa45f1fd5fc29b2c88bdf871119471fc1312",
+       "key_id": "d2a28ec8581826fb",
+       "signature": "d9b20705f11f35393c1ce6596ce97f1cfd8db87190a5b6c9ce66e8ca63512275f51cd6f5d1885d28c2c21da24c5c8e26ad5d21af0c3572475fed2f62f227550b"
+      },
+      {
+       "key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f",
+       "key_id": "fb199ef924705393",
+       "signature": "671c19cfb35104400cda93a8f6c6864f1167b2570c6cc099b2a91a9ed2aced3e5b80f0d77ce2557fe118e3a1976926985942d11764127026a3e36d3a86f81201"
+      }
+     ]
+    },
+    "site_key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f"
+   },
+   {
+    "edge": "edge-a",
+    "expected": {
+     "ok": false
+    },
+    "name": "a promotion after its not_after",
+    "now": "2026-11-06T12:00:00Z",
+    "purpose": "promotion",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTEtMDVUMTE6MDA6MDBaIiwiZWRnZSI6ImVkZ2UtYSIsImZvcm1hdCI6ImtjLWVkZ2Utc2l0ZS12MiIsIm5vZGVfa2V5IjoiOGIyMzdkNzg4ZThlYWFlZjU1MGM2ZDEyNTgyM2ZhNDVmMWZkNWZjMjliMmM4OGJkZjg3MTExOTQ3MWZjMTMxMiIsIm5vdF9hZnRlciI6IjIwMjYtMTEtMDZUMTE6MDA6MDBaIiwicHVycG9zZSI6InByb21vdGlvbiIsInJlYXNvbiI6Im5vIHdpdG5lc3Mgb24gc2l0ZSIsInNpdGVfa2V5IjoiZmVjMTQyODY3M2Y2YWZlODkyNjRiMzgwNzM0NGFlOGIyNjlkMTI1YTUwMzg1NTIwMjY4N2RiNWE3MTI4NTc5ZiJ9",
+     "signatures": [
+      {
+       "key": "8b237d788e8eaaef550c6d125823fa45f1fd5fc29b2c88bdf871119471fc1312",
+       "key_id": "d2a28ec8581826fb",
+       "signature": "d9b20705f11f35393c1ce6596ce97f1cfd8db87190a5b6c9ce66e8ca63512275f51cd6f5d1885d28c2c21da24c5c8e26ad5d21af0c3572475fed2f62f227550b"
+      },
+      {
+       "key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f",
+       "key_id": "fb199ef924705393",
+       "signature": "671c19cfb35104400cda93a8f6c6864f1167b2570c6cc099b2a91a9ed2aced3e5b80f0d77ce2557fe118e3a1976926985942d11764127026a3e36d3a86f81201"
+      }
+     ]
+    },
+    "site_key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f"
+   },
+   {
+    "edge": "edge-a",
+    "expected": {
+     "ok": false
+    },
+    "name": "a promotion valid for more than a day",
+    "now": "2026-11-05T12:00:00Z",
+    "purpose": "promotion",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTEtMDVUMTE6MDA6MDBaIiwiZWRnZSI6ImVkZ2UtYSIsImZvcm1hdCI6ImtjLWVkZ2Utc2l0ZS12MiIsIm5vZGVfa2V5IjoiOGIyMzdkNzg4ZThlYWFlZjU1MGM2ZDEyNTgyM2ZhNDVmMWZkNWZjMjliMmM4OGJkZjg3MTExOTQ3MWZjMTMxMiIsIm5vdF9hZnRlciI6IjIwMjYtMTEtMDdUMTE6MDA6MDBaIiwicHVycG9zZSI6InByb21vdGlvbiIsInJlYXNvbiI6Im5vIHdpdG5lc3Mgb24gc2l0ZSIsInNpdGVfa2V5IjoiZmVjMTQyODY3M2Y2YWZlODkyNjRiMzgwNzM0NGFlOGIyNjlkMTI1YTUwMzg1NTIwMjY4N2RiNWE3MTI4NTc5ZiJ9",
+     "signatures": [
+      {
+       "key": "8b237d788e8eaaef550c6d125823fa45f1fd5fc29b2c88bdf871119471fc1312",
+       "key_id": "d2a28ec8581826fb",
+       "signature": "54aa43f514c656abf1fc1e1da0cfb66d76c0d1c86ff4af5a0dc97fbde7f140b809404d93833032a1355b49d27abe0dce7e4a2cb737ac18384398b7d777d1070e"
+      },
+      {
+       "key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f",
+       "key_id": "fb199ef924705393",
+       "signature": "fc3b69455e5c6aabeee9ce8d234d832331c9b9370c0ae19e1faabd030a2e55b8b335d2f00578d63b225f4d8a6b58fa31fcc173f15edc538d777554bc3b9a850d"
+      }
+     ]
+    },
+    "site_key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f"
+   },
+   {
+    "edge": "edge-a",
+    "expected": {
+     "ok": false
+    },
+    "name": "a 1.5 statement (kc-edge-site-v1) used as a promotion",
+    "now": "2026-11-05T12:00:00Z",
+    "purpose": "promotion",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTEtMDVUMTE6MDA6MDBaIiwiZWRnZSI6ImVkZ2UtYSIsImZvcm1hdCI6ImtjLWVkZ2Utc2l0ZS12MSIsIm5vZGVfa2V5IjoiOGIyMzdkNzg4ZThlYWFlZjU1MGM2ZDEyNTgyM2ZhNDVmMWZkNWZjMjliMmM4OGJkZjg3MTExOTQ3MWZjMTMxMiIsInB1cnBvc2UiOiJwcm9tb3Rpb24iLCJyZWFzb24iOiJubyB3aXRuZXNzIG9uIHNpdGUiLCJzaXRlX2tleSI6ImZlYzE0Mjg2NzNmNmFmZTg5MjY0YjM4MDczNDRhZThiMjY5ZDEyNWE1MDM4NTUyMDI2ODdkYjVhNzEyODU3OWYifQ==",
+     "signatures": [
+      {
+       "key": "8b237d788e8eaaef550c6d125823fa45f1fd5fc29b2c88bdf871119471fc1312",
+       "key_id": "d2a28ec8581826fb",
+       "signature": "4df7319adcca5361554373b2d3f14e9efdb2e0d3189e06d10a48bd44e1a9bc93c70f2faf0d1a622e1c27148f6b033115261d418761e6b6afdd029e5c5f1c0203"
+      },
+      {
+       "key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f",
+       "key_id": "fb199ef924705393",
+       "signature": "6f71c4950028e7cddde42f1ea892a01b085b475b34badbf4894867127110a39c5a10d5ff1677cc762cff43952ca16f4e9b765a77eb881c32a652f97f8e59d50f"
+      }
+     ]
+    },
+    "site_key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f"
+   },
+   {
+    "edge": "edge-a",
+    "expected": {
+     "ok": true
+    },
+    "name": "a provisional replacement (kc-edge-site-v1)",
+    "now": "2026-11-06T12:00:00Z",
+    "purpose": "provisional",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTEtMDVUMTE6MDA6MDBaIiwiZWRnZSI6ImVkZ2UtYSIsImZvcm1hdCI6ImtjLWVkZ2Utc2l0ZS12MSIsIm5vZGVfa2V5IjoiOGIyMzdkNzg4ZThlYWFlZjU1MGM2ZDEyNTgyM2ZhNDVmMWZkNWZjMjliMmM4OGJkZjg3MTExOTQ3MWZjMTMxMiIsInB1cnBvc2UiOiJwcm92aXNpb25hbCIsInJlYXNvbiI6Im5vIHdpdG5lc3Mgb24gc2l0ZSIsInNpdGVfa2V5IjoiZmVjMTQyODY3M2Y2YWZlODkyNjRiMzgwNzM0NGFlOGIyNjlkMTI1YTUwMzg1NTIwMjY4N2RiNWE3MTI4NTc5ZiJ9",
+     "signatures": [
+      {
+       "key": "8b237d788e8eaaef550c6d125823fa45f1fd5fc29b2c88bdf871119471fc1312",
+       "key_id": "d2a28ec8581826fb",
+       "signature": "60d2d0ee742dc1819537351ab4f7721a3b9b5cb84eb77c32cd20fffb08825b1d79099230912bd87a06543073d33d0e201c44bf701b1b0cdff8297a6a2c5a950c"
+      },
+      {
+       "key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f",
+       "key_id": "fb199ef924705393",
+       "signature": "c9fb988d7daf1e804df42ea1093dc9aacd805b77bda6ecbea066eedb084b0e3188fa843dc9ee8d6da59c74e19408424dc1d59b6e28966e483b570abeac32e90f"
+      }
+     ]
+    },
+    "site_key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f"
+   },
+   {
+    "edge": "edge-a",
+    "expected": {
+     "ok": false
+    },
+    "name": "another edge's promotion",
+    "now": "2026-11-05T12:00:00Z",
+    "purpose": "promotion",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTEtMDVUMTE6MDA6MDBaIiwiZWRnZSI6ImVkZ2UtYiIsImZvcm1hdCI6ImtjLWVkZ2Utc2l0ZS12MiIsIm5vZGVfa2V5IjoiOGIyMzdkNzg4ZThlYWFlZjU1MGM2ZDEyNTgyM2ZhNDVmMWZkNWZjMjliMmM4OGJkZjg3MTExOTQ3MWZjMTMxMiIsIm5vdF9hZnRlciI6IjIwMjYtMTEtMDZUMTE6MDA6MDBaIiwicHVycG9zZSI6InByb21vdGlvbiIsInJlYXNvbiI6Im5vIHdpdG5lc3Mgb24gc2l0ZSIsInNpdGVfa2V5IjoiZmVjMTQyODY3M2Y2YWZlODkyNjRiMzgwNzM0NGFlOGIyNjlkMTI1YTUwMzg1NTIwMjY4N2RiNWE3MTI4NTc5ZiJ9",
+     "signatures": [
+      {
+       "key": "8b237d788e8eaaef550c6d125823fa45f1fd5fc29b2c88bdf871119471fc1312",
+       "key_id": "d2a28ec8581826fb",
+       "signature": "5622e71404991287a20108724a10dc63fbc50501598795aad1dc2a2ad177e509257ab788e2d44100e550b392bed8659b99995878dbcc92bb07369f5d56cd5a0a"
+      },
+      {
+       "key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f",
+       "key_id": "fb199ef924705393",
+       "signature": "e02f5caea9e21c6281a308a7a4a1707c2498696b32c26d582deb5cb962fb44cecc926db8ff8f85b51373b2b72b28000d33371c1f61e6a98d2599c172be65a701"
+      }
+     ]
+    },
+    "site_key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f"
+   },
+   {
+    "edge": "edge-a",
+    "expected": {
+     "ok": false
+    },
+    "name": "signed by the site key without the node",
+    "now": "2026-11-05T12:00:00Z",
+    "purpose": "promotion",
+    "sealed": {
+     "bytes": "eyJhdCI6IjIwMjYtMTEtMDVUMTE6MDA6MDBaIiwiZWRnZSI6ImVkZ2UtYSIsImZvcm1hdCI6ImtjLWVkZ2Utc2l0ZS12MiIsIm5vZGVfa2V5IjoiOGIyMzdkNzg4ZThlYWFlZjU1MGM2ZDEyNTgyM2ZhNDVmMWZkNWZjMjliMmM4OGJkZjg3MTExOTQ3MWZjMTMxMiIsIm5vdF9hZnRlciI6IjIwMjYtMTEtMDZUMTE6MDA6MDBaIiwicHVycG9zZSI6InByb21vdGlvbiIsInJlYXNvbiI6Im5vIHdpdG5lc3Mgb24gc2l0ZSIsInNpdGVfa2V5IjoiZmVjMTQyODY3M2Y2YWZlODkyNjRiMzgwNzM0NGFlOGIyNjlkMTI1YTUwMzg1NTIwMjY4N2RiNWE3MTI4NTc5ZiJ9",
+     "signatures": [
+      {
+       "key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f",
+       "key_id": "fb199ef924705393",
+       "signature": "671c19cfb35104400cda93a8f6c6864f1167b2570c6cc099b2a91a9ed2aced3e5b80f0d77ce2557fe118e3a1976926985942d11764127026a3e36d3a86f81201"
+      }
+     ]
+    },
+    "site_key": "fec1428673f6afe89264b3807344ae8b269d125a503855202687db5a7128579f"
+   }
+  ],
+  "note": "edge protocol 1.6, section 14: verify_site(sealed, site_key, edge, purpose, now): a provisional replacement is kc-edge-site-v1; a promotion is kc-edge-site-v2 with not_after, after at and at most 24 hours later, refused once now passes it"
+ },
  "start_time": {
   "cases": [
    {
@@ -2898,6 +3073,7 @@
   "cases": [
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -2930,6 +3106,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -2956,6 +3133,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -2982,6 +3160,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3008,6 +3187,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3034,6 +3214,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3060,6 +3241,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3087,6 +3269,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [],
      "ok": true,
@@ -3117,6 +3300,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3143,6 +3327,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3169,6 +3354,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3195,6 +3381,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3221,6 +3408,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3247,6 +3435,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3273,6 +3462,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3299,6 +3489,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3325,6 +3516,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3351,6 +3543,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3377,6 +3570,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -3409,6 +3603,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3435,6 +3630,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3461,6 +3657,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3487,6 +3684,161 @@
    },
    {
     "expected": {
+     "dropped": [
+      {
+       "lease_id": "L-9",
+       "why": [
+        "longer than the ceiling's longest lease"
+       ]
+      },
+      {
+       "lease_id": null,
+       "why": [
+        "the edge's officer is not independent of the core: no leases"
+       ]
+      }
+     ],
+     "governed_roles": null,
+     "leases": [
+      "L-1"
+     ],
+     "ok": true,
+     "state": {
+      "ceiling_serial": 2,
+      "newest": "2026-10-23T12:00:00Z",
+      "serial": 7
+     },
+     "visit_leases": []
+    },
+    "name": "a bundle saying why a lease was dropped (1.6)",
+    "now": "2026-10-23T13:00:00Z",
+    "pins": {
+     "bundle_key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "edge": "edge-a",
+     "officer_key": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+     "release_key": null
+    },
+    "sealed": {
+     "bytes": "eyJjZWlsaW5nIjp7ImJ5dGVzIjoiZXlKamJHRnpjMlZ6SWpwYklteHZkeUlzSW1Wc1pYWmhkR1ZrSWl3aWNISnBkbWxzWldkbFpDSmRMQ0psWkdkbElqb2laV1JuWlMxaElpd2labTl5YldGMElqb2lhMk10WldSblpTMWpaV2xzYVc1bkxYWXlJaXdpYTJWNVgybGtJam9pTm1Fek9EQXpaRFZtTURVNU9UQXlZU0lzSW0xaGVGOXNaV0Z6WlY5b2IzVnljeUk2TnpJd0xDSnRZWGhmYjJabWJHbHVaVjlvYjNWeWN5STZNVElzSW5CbGNuTnZibk1pT2xzaWFXUndPamRqTVdZdFlXNXVJbDBzSW5CdmNuUnpJanBiTWpKZExDSndjbTltYVd4bElqb2lZWE56ZFhKbFpDSXNJbkpsYlc5MFpWOXlaV0ZqYUNJNkltOW1aaUlzSW5KdmJHVnpJanBiWFN3aWMyVnlhV0ZzSWpveUxDSnphV2R1WldSZllYUWlPaUl5TURJMkxURXdMVEl6VkRFd09qQXdPakF3V2lJc0luUmhjbWRsZEhNaU9sc2ljR3hqTFhOemFDSmRmUT09Iiwia2V5IjoiODEzOTc3MGVhODdkMTc1ZjU2YTM1NDY2YzM0YzdlY2NjYjhkOGE5MWI0ZWUzN2EyNWRmNjBmNWI4ZmM5YjM5NCIsImtleV9pZCI6IjZhMzgwM2Q1ZjA1OTkwMmEiLCJzaWduYXR1cmUiOiI2OTk5ZmUwOWMzMzJhZTI0MGU2MWUwZjQzMjExOTUxMmNlNGM4Y2Q0ODQ0N2JhYzc4YzEzOTU4YTI3M2Q2ODA4NDEwYzcyYmY2MjRhMWY0NGRjMmVjOWJhNzNkYzk5MzY2ZDcwMzI4NDk1NjRkMjA2Yzk0Mjk4MDJkZTRmM2QwYSJ9LCJkcm9wcGVkIjpbeyJsZWFzZV9pZCI6IkwtOSIsIndoeSI6WyJsb25nZXIgdGhhbiB0aGUgY2VpbGluZydzIGxvbmdlc3QgbGVhc2UiXX0seyJsZWFzZV9pZCI6bnVsbCwid2h5IjpbInRoZSBlZGdlJ3Mgb2ZmaWNlciBpcyBub3QgaW5kZXBlbmRlbnQgb2YgdGhlIGNvcmU6IG5vIGxlYXNlcyJdfV0sImVkZ2UiOiJlZGdlLWEiLCJmb3JtYXQiOiJrYy1lZGdlLWJ1bmRsZS12MyIsImhvcml6b25zIjp7ImVsZXZhdGVkIjoyNCwibG93IjoxNjgsInByaXZpbGVnZWQiOjF9LCJpc3N1ZWQiOiIyMDI2LTEwLTIzVDEyOjAwOjAwWiIsImtleV9pZCI6IjM0NzUwZjk4YmQ1OWZjZmMiLCJsZWFzZXMiOlt7ImNsYXNzIjoibG93IiwiZnJvbSI6IjIwMjYtMTAtMjNUMTE6MDA6MDBaIiwibGVhc2VfaWQiOiJMLTEiLCJwZXJzb24iOiJpZHA6N2MxZi1hbm4iLCJyb2xlIjoib3BlcmF0b3IiLCJyb2xlcyI6W10sInRhcmdldCI6InBsYy1zc2giLCJ1bnRpbCI6IjIwMjYtMTEtMjNUMTE6MDA6MDBaIiwidXNlcm5hbWUiOiJhbm4ifV0sInBvbGljeSI6eyJlbnRyeXBvaW50cyI6W10sIm1vZHVsZXMiOnt9LCJyZWxlYXNlIjpudWxsfSwicmV2b2tlZCI6W10sInNlcmlhbCI6NywidmlzaXRfbGVhc2VzIjpbXX0=",
+     "key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "key_id": "34750f98bd59fcfc",
+     "signature": "140356e5789b85aaf407bfd7ca08dda0bb5826441969388e2df4a5bfe57758d9f411a6598de2fcd9b337c4ca80ffa3eb6a89de2af43d7785946fdaba2e313c0b"
+    },
+    "state": {
+     "serial": 6
+    }
+   },
+   {
+    "expected": {
+     "dropped": null,
+     "governed_roles": null,
+     "leases": [],
+     "ok": false,
+     "state": null,
+     "visit_leases": []
+    },
+    "name": "a dropped entry without a reason (1.6)",
+    "now": "2026-10-23T13:00:00Z",
+    "pins": {
+     "bundle_key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "edge": "edge-a",
+     "officer_key": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+     "release_key": null
+    },
+    "sealed": {
+     "bytes": "eyJjZWlsaW5nIjp7ImJ5dGVzIjoiZXlKamJHRnpjMlZ6SWpwYklteHZkeUlzSW1Wc1pYWmhkR1ZrSWl3aWNISnBkbWxzWldkbFpDSmRMQ0psWkdkbElqb2laV1JuWlMxaElpd2labTl5YldGMElqb2lhMk10WldSblpTMWpaV2xzYVc1bkxYWXlJaXdpYTJWNVgybGtJam9pTm1Fek9EQXpaRFZtTURVNU9UQXlZU0lzSW0xaGVGOXNaV0Z6WlY5b2IzVnljeUk2TnpJd0xDSnRZWGhmYjJabWJHbHVaVjlvYjNWeWN5STZNVElzSW5CbGNuTnZibk1pT2xzaWFXUndPamRqTVdZdFlXNXVJbDBzSW5CdmNuUnpJanBiTWpKZExDSndjbTltYVd4bElqb2lZWE56ZFhKbFpDSXNJbkpsYlc5MFpWOXlaV0ZqYUNJNkltOW1aaUlzSW5KdmJHVnpJanBiWFN3aWMyVnlhV0ZzSWpveUxDSnphV2R1WldSZllYUWlPaUl5TURJMkxURXdMVEl6VkRFd09qQXdPakF3V2lJc0luUmhjbWRsZEhNaU9sc2ljR3hqTFhOemFDSmRmUT09Iiwia2V5IjoiODEzOTc3MGVhODdkMTc1ZjU2YTM1NDY2YzM0YzdlY2NjYjhkOGE5MWI0ZWUzN2EyNWRmNjBmNWI4ZmM5YjM5NCIsImtleV9pZCI6IjZhMzgwM2Q1ZjA1OTkwMmEiLCJzaWduYXR1cmUiOiI2OTk5ZmUwOWMzMzJhZTI0MGU2MWUwZjQzMjExOTUxMmNlNGM4Y2Q0ODQ0N2JhYzc4YzEzOTU4YTI3M2Q2ODA4NDEwYzcyYmY2MjRhMWY0NGRjMmVjOWJhNzNkYzk5MzY2ZDcwMzI4NDk1NjRkMjA2Yzk0Mjk4MDJkZTRmM2QwYSJ9LCJkcm9wcGVkIjpbeyJsZWFzZV9pZCI6IkwtOSIsIndoeSI6W119XSwiZWRnZSI6ImVkZ2UtYSIsImZvcm1hdCI6ImtjLWVkZ2UtYnVuZGxlLXYzIiwiaG9yaXpvbnMiOnsiZWxldmF0ZWQiOjI0LCJsb3ciOjE2OCwicHJpdmlsZWdlZCI6MX0sImlzc3VlZCI6IjIwMjYtMTAtMjNUMTI6MDA6MDBaIiwia2V5X2lkIjoiMzQ3NTBmOThiZDU5ZmNmYyIsImxlYXNlcyI6W3siY2xhc3MiOiJsb3ciLCJmcm9tIjoiMjAyNi0xMC0yM1QxMTowMDowMFoiLCJsZWFzZV9pZCI6IkwtMSIsInBlcnNvbiI6ImlkcDo3YzFmLWFubiIsInJvbGUiOiJvcGVyYXRvciIsInJvbGVzIjpbXSwidGFyZ2V0IjoicGxjLXNzaCIsInVudGlsIjoiMjAyNi0xMS0yM1QxMTowMDowMFoiLCJ1c2VybmFtZSI6ImFubiJ9XSwicG9saWN5Ijp7ImVudHJ5cG9pbnRzIjpbXSwibW9kdWxlcyI6e30sInJlbGVhc2UiOm51bGx9LCJyZXZva2VkIjpbXSwic2VyaWFsIjo3LCJ2aXNpdF9sZWFzZXMiOltdfQ==",
+     "key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "key_id": "34750f98bd59fcfc",
+     "signature": "e23baa0a23c10353fe3893ae5b4aa0796b0d7df57cd1000aa9d101a2e82ca64a1d2ab1123ee6f8af1a5f3f78baf5c6fa7429639ee6276eacc6a9375d79202904"
+    },
+    "state": {
+     "serial": 6
+    }
+   },
+   {
+    "expected": {
+     "dropped": null,
+     "governed_roles": null,
+     "leases": [],
+     "ok": false,
+     "state": null,
+     "visit_leases": []
+    },
+    "name": "a dropped entry with another member (1.6)",
+    "now": "2026-10-23T13:00:00Z",
+    "pins": {
+     "bundle_key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "edge": "edge-a",
+     "officer_key": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+     "release_key": null
+    },
+    "sealed": {
+     "bytes": "eyJjZWlsaW5nIjp7ImJ5dGVzIjoiZXlKamJHRnpjMlZ6SWpwYklteHZkeUlzSW1Wc1pYWmhkR1ZrSWl3aWNISnBkbWxzWldkbFpDSmRMQ0psWkdkbElqb2laV1JuWlMxaElpd2labTl5YldGMElqb2lhMk10WldSblpTMWpaV2xzYVc1bkxYWXlJaXdpYTJWNVgybGtJam9pTm1Fek9EQXpaRFZtTURVNU9UQXlZU0lzSW0xaGVGOXNaV0Z6WlY5b2IzVnljeUk2TnpJd0xDSnRZWGhmYjJabWJHbHVaVjlvYjNWeWN5STZNVElzSW5CbGNuTnZibk1pT2xzaWFXUndPamRqTVdZdFlXNXVJbDBzSW5CdmNuUnpJanBiTWpKZExDSndjbTltYVd4bElqb2lZWE56ZFhKbFpDSXNJbkpsYlc5MFpWOXlaV0ZqYUNJNkltOW1aaUlzSW5KdmJHVnpJanBiWFN3aWMyVnlhV0ZzSWpveUxDSnphV2R1WldSZllYUWlPaUl5TURJMkxURXdMVEl6VkRFd09qQXdPakF3V2lJc0luUmhjbWRsZEhNaU9sc2ljR3hqTFhOemFDSmRmUT09Iiwia2V5IjoiODEzOTc3MGVhODdkMTc1ZjU2YTM1NDY2YzM0YzdlY2NjYjhkOGE5MWI0ZWUzN2EyNWRmNjBmNWI4ZmM5YjM5NCIsImtleV9pZCI6IjZhMzgwM2Q1ZjA1OTkwMmEiLCJzaWduYXR1cmUiOiI2OTk5ZmUwOWMzMzJhZTI0MGU2MWUwZjQzMjExOTUxMmNlNGM4Y2Q0ODQ0N2JhYzc4YzEzOTU4YTI3M2Q2ODA4NDEwYzcyYmY2MjRhMWY0NGRjMmVjOWJhNzNkYzk5MzY2ZDcwMzI4NDk1NjRkMjA2Yzk0Mjk4MDJkZTRmM2QwYSJ9LCJkcm9wcGVkIjpbeyJsZWFzZSI6eyJwZXJzb24iOiJwIn0sImxlYXNlX2lkIjoiTC05Iiwid2h5IjpbIngiXX1dLCJlZGdlIjoiZWRnZS1hIiwiZm9ybWF0Ijoia2MtZWRnZS1idW5kbGUtdjMiLCJob3Jpem9ucyI6eyJlbGV2YXRlZCI6MjQsImxvdyI6MTY4LCJwcml2aWxlZ2VkIjoxfSwiaXNzdWVkIjoiMjAyNi0xMC0yM1QxMjowMDowMFoiLCJrZXlfaWQiOiIzNDc1MGY5OGJkNTlmY2ZjIiwibGVhc2VzIjpbeyJjbGFzcyI6ImxvdyIsImZyb20iOiIyMDI2LTEwLTIzVDExOjAwOjAwWiIsImxlYXNlX2lkIjoiTC0xIiwicGVyc29uIjoiaWRwOjdjMWYtYW5uIiwicm9sZSI6Im9wZXJhdG9yIiwicm9sZXMiOltdLCJ0YXJnZXQiOiJwbGMtc3NoIiwidW50aWwiOiIyMDI2LTExLTIzVDExOjAwOjAwWiIsInVzZXJuYW1lIjoiYW5uIn1dLCJwb2xpY3kiOnsiZW50cnlwb2ludHMiOltdLCJtb2R1bGVzIjp7fSwicmVsZWFzZSI6bnVsbH0sInJldm9rZWQiOltdLCJzZXJpYWwiOjcsInZpc2l0X2xlYXNlcyI6W119",
+     "key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "key_id": "34750f98bd59fcfc",
+     "signature": "8aed903de091a6ba1cc5699e9a60811992df41d34ce9de9b790a969bd199614a1cca61136bcfdac7fb15dc325edaeed4f5526562ce60b79201c1a66714c6c40f"
+    },
+    "state": {
+     "serial": 6
+    }
+   },
+   {
+    "expected": {
+     "dropped": null,
+     "governed_roles": null,
+     "leases": [],
+     "ok": false,
+     "state": null,
+     "visit_leases": []
+    },
+    "name": "a reason past 200 characters (1.6)",
+    "now": "2026-10-23T13:00:00Z",
+    "pins": {
+     "bundle_key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "edge": "edge-a",
+     "officer_key": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+     "release_key": null
+    },
+    "sealed": {
+     "bytes": "eyJjZWlsaW5nIjp7ImJ5dGVzIjoiZXlKamJHRnpjMlZ6SWpwYklteHZkeUlzSW1Wc1pYWmhkR1ZrSWl3aWNISnBkbWxzWldkbFpDSmRMQ0psWkdkbElqb2laV1JuWlMxaElpd2labTl5YldGMElqb2lhMk10WldSblpTMWpaV2xzYVc1bkxYWXlJaXdpYTJWNVgybGtJam9pTm1Fek9EQXpaRFZtTURVNU9UQXlZU0lzSW0xaGVGOXNaV0Z6WlY5b2IzVnljeUk2TnpJd0xDSnRZWGhmYjJabWJHbHVaVjlvYjNWeWN5STZNVElzSW5CbGNuTnZibk1pT2xzaWFXUndPamRqTVdZdFlXNXVJbDBzSW5CdmNuUnpJanBiTWpKZExDSndjbTltYVd4bElqb2lZWE56ZFhKbFpDSXNJbkpsYlc5MFpWOXlaV0ZqYUNJNkltOW1aaUlzSW5KdmJHVnpJanBiWFN3aWMyVnlhV0ZzSWpveUxDSnphV2R1WldSZllYUWlPaUl5TURJMkxURXdMVEl6VkRFd09qQXdPakF3V2lJc0luUmhjbWRsZEhNaU9sc2ljR3hqTFhOemFDSmRmUT09Iiwia2V5IjoiODEzOTc3MGVhODdkMTc1ZjU2YTM1NDY2YzM0YzdlY2NjYjhkOGE5MWI0ZWUzN2EyNWRmNjBmNWI4ZmM5YjM5NCIsImtleV9pZCI6IjZhMzgwM2Q1ZjA1OTkwMmEiLCJzaWduYXR1cmUiOiI2OTk5ZmUwOWMzMzJhZTI0MGU2MWUwZjQzMjExOTUxMmNlNGM4Y2Q0ODQ0N2JhYzc4YzEzOTU4YTI3M2Q2ODA4NDEwYzcyYmY2MjRhMWY0NGRjMmVjOWJhNzNkYzk5MzY2ZDcwMzI4NDk1NjRkMjA2Yzk0Mjk4MDJkZTRmM2QwYSJ9LCJkcm9wcGVkIjpbeyJsZWFzZV9pZCI6IkwtOSIsIndoeSI6WyJ4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgiXX1dLCJlZGdlIjoiZWRnZS1hIiwiZm9ybWF0Ijoia2MtZWRnZS1idW5kbGUtdjMiLCJob3Jpem9ucyI6eyJlbGV2YXRlZCI6MjQsImxvdyI6MTY4LCJwcml2aWxlZ2VkIjoxfSwiaXNzdWVkIjoiMjAyNi0xMC0yM1QxMjowMDowMFoiLCJrZXlfaWQiOiIzNDc1MGY5OGJkNTlmY2ZjIiwibGVhc2VzIjpbeyJjbGFzcyI6ImxvdyIsImZyb20iOiIyMDI2LTEwLTIzVDExOjAwOjAwWiIsImxlYXNlX2lkIjoiTC0xIiwicGVyc29uIjoiaWRwOjdjMWYtYW5uIiwicm9sZSI6Im9wZXJhdG9yIiwicm9sZXMiOltdLCJ0YXJnZXQiOiJwbGMtc3NoIiwidW50aWwiOiIyMDI2LTExLTIzVDExOjAwOjAwWiIsInVzZXJuYW1lIjoiYW5uIn1dLCJwb2xpY3kiOnsiZW50cnlwb2ludHMiOltdLCJtb2R1bGVzIjp7fSwicmVsZWFzZSI6bnVsbH0sInJldm9rZWQiOltdLCJzZXJpYWwiOjcsInZpc2l0X2xlYXNlcyI6W119",
+     "key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "key_id": "34750f98bd59fcfc",
+     "signature": "1fc7f500891fb48f19fff7b9addd473f703359bfc910a2fc3c541c5a64c68e9fb20d9f47dedc02d6078d613d2c596dd619be979d7314553a69aaf1687407fb0f"
+    },
+    "state": {
+     "serial": 6
+    }
+   },
+   {
+    "expected": {
+     "dropped": null,
+     "governed_roles": null,
+     "leases": [],
+     "ok": false,
+     "state": null,
+     "visit_leases": []
+    },
+    "name": "a null dropped (1.6)",
+    "now": "2026-10-23T13:00:00Z",
+    "pins": {
+     "bundle_key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "edge": "edge-a",
+     "officer_key": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+     "release_key": null
+    },
+    "sealed": {
+     "bytes": "eyJjZWlsaW5nIjp7ImJ5dGVzIjoiZXlKamJHRnpjMlZ6SWpwYklteHZkeUlzSW1Wc1pYWmhkR1ZrSWl3aWNISnBkbWxzWldkbFpDSmRMQ0psWkdkbElqb2laV1JuWlMxaElpd2labTl5YldGMElqb2lhMk10WldSblpTMWpaV2xzYVc1bkxYWXlJaXdpYTJWNVgybGtJam9pTm1Fek9EQXpaRFZtTURVNU9UQXlZU0lzSW0xaGVGOXNaV0Z6WlY5b2IzVnljeUk2TnpJd0xDSnRZWGhmYjJabWJHbHVaVjlvYjNWeWN5STZNVElzSW5CbGNuTnZibk1pT2xzaWFXUndPamRqTVdZdFlXNXVJbDBzSW5CdmNuUnpJanBiTWpKZExDSndjbTltYVd4bElqb2lZWE56ZFhKbFpDSXNJbkpsYlc5MFpWOXlaV0ZqYUNJNkltOW1aaUlzSW5KdmJHVnpJanBiWFN3aWMyVnlhV0ZzSWpveUxDSnphV2R1WldSZllYUWlPaUl5TURJMkxURXdMVEl6VkRFd09qQXdPakF3V2lJc0luUmhjbWRsZEhNaU9sc2ljR3hqTFhOemFDSmRmUT09Iiwia2V5IjoiODEzOTc3MGVhODdkMTc1ZjU2YTM1NDY2YzM0YzdlY2NjYjhkOGE5MWI0ZWUzN2EyNWRmNjBmNWI4ZmM5YjM5NCIsImtleV9pZCI6IjZhMzgwM2Q1ZjA1OTkwMmEiLCJzaWduYXR1cmUiOiI2OTk5ZmUwOWMzMzJhZTI0MGU2MWUwZjQzMjExOTUxMmNlNGM4Y2Q0ODQ0N2JhYzc4YzEzOTU4YTI3M2Q2ODA4NDEwYzcyYmY2MjRhMWY0NGRjMmVjOWJhNzNkYzk5MzY2ZDcwMzI4NDk1NjRkMjA2Yzk0Mjk4MDJkZTRmM2QwYSJ9LCJkcm9wcGVkIjpudWxsLCJlZGdlIjoiZWRnZS1hIiwiZm9ybWF0Ijoia2MtZWRnZS1idW5kbGUtdjMiLCJob3Jpem9ucyI6eyJlbGV2YXRlZCI6MjQsImxvdyI6MTY4LCJwcml2aWxlZ2VkIjoxfSwiaXNzdWVkIjoiMjAyNi0xMC0yM1QxMjowMDowMFoiLCJrZXlfaWQiOiIzNDc1MGY5OGJkNTlmY2ZjIiwibGVhc2VzIjpbeyJjbGFzcyI6ImxvdyIsImZyb20iOiIyMDI2LTEwLTIzVDExOjAwOjAwWiIsImxlYXNlX2lkIjoiTC0xIiwicGVyc29uIjoiaWRwOjdjMWYtYW5uIiwicm9sZSI6Im9wZXJhdG9yIiwicm9sZXMiOltdLCJ0YXJnZXQiOiJwbGMtc3NoIiwidW50aWwiOiIyMDI2LTExLTIzVDExOjAwOjAwWiIsInVzZXJuYW1lIjoiYW5uIn1dLCJwb2xpY3kiOnsiZW50cnlwb2ludHMiOltdLCJtb2R1bGVzIjp7fSwicmVsZWFzZSI6bnVsbH0sInJldm9rZWQiOltdLCJzZXJpYWwiOjcsInZpc2l0X2xlYXNlcyI6W119",
+     "key": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+     "key_id": "34750f98bd59fcfc",
+     "signature": "8a15dd56cec1d7d23867feef41e405f6569677c0713538fd231ed9b387592e3dbff76d53707d5f0ef4e242a87b5a6ab29f0afead380ca296b0e314742b584f0c"
+    },
+    "state": {
+     "serial": 6
+    }
+   },
+   {
+    "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [],
      "ok": true,
@@ -3517,6 +3869,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -3549,6 +3902,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -3583,6 +3937,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -3615,6 +3970,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3642,6 +3998,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3669,6 +4026,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3696,6 +4054,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -3729,6 +4088,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3755,6 +4115,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3781,6 +4142,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3807,6 +4169,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3833,6 +4196,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3859,6 +4223,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3885,6 +4250,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3911,6 +4277,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3937,6 +4304,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3963,6 +4331,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -3989,6 +4358,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4015,6 +4385,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -4048,6 +4419,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4075,6 +4447,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [],
      "ok": true,
@@ -4105,6 +4478,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4131,6 +4505,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4157,6 +4532,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [],
      "ok": true,
@@ -4187,6 +4563,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [],
      "ok": true,
@@ -4217,6 +4594,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -4249,6 +4627,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4275,6 +4654,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4301,6 +4681,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4327,6 +4708,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4353,6 +4735,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4379,6 +4762,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4406,6 +4790,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -4439,6 +4824,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4465,6 +4851,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4491,6 +4878,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -4523,6 +4911,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4549,6 +4938,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1",
@@ -4582,6 +4972,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -4614,6 +5005,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4641,6 +5033,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4667,6 +5060,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4693,6 +5087,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4719,6 +5114,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": [
       "engineer",
       "operator"
@@ -4754,6 +5150,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": null,
      "leases": [
       "L-1"
@@ -4786,6 +5183,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": [],
      "leases": [
       "L-1"
@@ -4818,6 +5216,7 @@
    },
    {
     "expected": {
+     "dropped": [],
      "governed_roles": [
       "operator"
      ],
@@ -4852,6 +5251,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4878,6 +5278,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4904,6 +5305,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4930,6 +5332,7 @@
    },
    {
     "expected": {
+     "dropped": null,
      "governed_roles": null,
      "leases": [],
      "ok": false,
@@ -4955,6 +5358,6 @@
     }
    }
   ],
-  "note": "verify_bundle(sealed, pins, state, now); ok means no errors; leases and visit_leases are the live ids; state is what the edge stores after a bundle it accepts; governed_roles is the displayName list of an accepted bundle's governed_roles, null when the bundle has none"
+  "note": "verify_bundle(sealed, pins, state, now); ok means no errors; leases and visit_leases are the live ids; state is what the edge stores after a bundle it accepts; governed_roles is the displayName list of an accepted bundle's governed_roles, null when the bundle has none; dropped is an accepted bundle's dropped member as carried (edge protocol 1.6), an empty list when it has none"
  }
 }

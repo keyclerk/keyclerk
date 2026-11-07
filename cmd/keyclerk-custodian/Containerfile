@@ -1,0 +1,22 @@
+# keyclerk-custodian (decision 0033): the static build on an empty base, run as its own user, nothing else in the image.
+# Build from a tag: git archive vX.Y.Z cmd/keyclerk-custodian | tar -x --strip-components=2 -C ctx, then
+# podman build --timestamp $(git log -1 --format=%ct vX.Y.Z) ctx. Reproducible (issue 49): the toolchain pinned by
+# digest, -trimpath, no build id, no VCS stamp. The PKCS#11 build links dynamically and is not this image.
+ARG GO=docker.io/library/golang:1.27-trixie@sha256:0c050feb47802ae436b9030833694a0b80160d08e3b3049ad30bf7c9e724e09d
+
+FROM ${GO} AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+COPY *.go ./
+RUN rm -f *_test.go && CGO_ENABLED=0 GOFLAGS=-buildvcs=false go build -trimpath -ldflags "-s -w -buildid=" \
+    -o /out/keyclerk-custodian . && mkdir -p /out/state && chown 10002:10002 /out/state
+
+FROM scratch
+LABEL org.opencontainers.image.source="https://github.com/keyclerk/keyclerk" \
+      org.opencontainers.image.licenses="EUPL-1.2" \
+      org.opencontainers.image.title="keyclerk-custodian"
+COPY --from=build /out/keyclerk-custodian /keyclerk-custodian
+COPY --from=build --chown=10002:10002 /out/state /state
+USER 10002:10002
+ENTRYPOINT ["/keyclerk-custodian"]

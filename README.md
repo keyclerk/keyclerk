@@ -17,7 +17,7 @@
 Access leases for Keycloak. KeyClerk receives people, checks who they are, and hands out keys that end by
 themselves: for employees, contractors, visitors and partners, for applications, privileged roles and doors.
 
-> Status: engine 0.28.0 (2026-11-06). The source is public and released on PyPI (`pip install keyclerk`). It runs on one host for a demo
+> Status: engine 0.29.0rc1 (2026-11-07, a release candidate; 0.28.0 is the latest release). The source is public and released on PyPI (`pip install keyclerk`). It runs on one host for a demo
 > and a local test stack; nobody else should run it in production yet. What follows separates what runs today, what exists as a tested library that nothing runs yet,
 > and what is designed only. A claim moves up a column only with the code and a test.
 
@@ -167,13 +167,29 @@ fails if this repository names one.
 ## Running
 
 One image, three commands: the reconciler (the one writer of the broker's managed groups), the read-only console and
-the desk (`keyclerk.api`). Build from a reviewed commit or a signed tag; the image installs only the hash-locked
-`requirements.lock`.
+the desk (`keyclerk.api`). It installs only the hash-locked `requirements.lock`. Each release from 0.29.0 publishes it
+as `ghcr.io/keyclerk/keyclerk` (and the key custodian as `ghcr.io/keyclerk/keyclerk-custodian`), for linux/amd64:
+reproducible from the tag, tested and scanned in the image, with a build provenance and an SBOM attested and the digest
+signed by the release workflow. A fixed base image is rebuilt and signed again within a day (tag `VERSION-base.DATE`;
+the label `org.opencontainers.image.base.name` names the base). Verify it and pin it by digest, never by tag (cosign
+2.5 or later reads the current Sigstore bundles):
 
 ```
-git archive HEAD | podman build -t keyclerk:0.28.0 -   # or a signed release tag: git archive v0.28.0
-podman run --read-only -v ./keyclerk.yaml:/etc/keyclerk/keyclerk.yaml:ro -v ./records.yaml:/etc/keyclerk/records.yaml:ro   -v ./records.yaml.sig:/etc/keyclerk/records.yaml.sig:ro -v ./records.pub:/etc/keyclerk/records.pub:ro   -v ./writer:/run/secrets/writer:ro -v ./reader:/run/secrets/reader:ro -v keyclerk-state:/var/lib/keyclerk keyclerk:0.28.0   keyclerk.reconcile --config /etc/keyclerk/keyclerk.yaml --records /etc/keyclerk/records.yaml   --signing-key /etc/keyclerk/records.pub --keycloak https://id.example --realm example   --secret-file /run/secrets/writer --reader-client keyclerk-reader --reader-secret-file /run/secrets/reader   --state /var/lib/keyclerk --apply
-podman run --read-only -p 127.0.0.1:8090:8090 ... keyclerk:0.28.0 keyclerk.console --host 0.0.0.0   --allowed-host console.example --oidc-public-issuer https://id.example/realms/example   --oidc-redirect https://console.example/callback ...
+gh attestation verify oci://ghcr.io/keyclerk/keyclerk:0.29.0 --repo keyclerk/keyclerk
+cosign verify ghcr.io/keyclerk/keyclerk:0.29.0 \
+  --certificate-identity-regexp '^https://github.com/keyclerk/keyclerk/\.github/workflows/image\.yml@refs/(tags/v|heads/main$)' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+podman pull ghcr.io/keyclerk/keyclerk@sha256:DIGEST       # the digest both commands printed
+```
+
+Or build it yourself from a signed tag. With the commit's time as the timestamp a rebuild reaches the same digest as
+the same builder's first build (the release workflow checks this for the published image); a Podman build is
+reproducible too, but its digest is Podman's, not BuildKit's:
+
+```
+git archive v0.29.0 | podman build --timestamp "$(git log -1 --format=%ct v0.29.0)" -t keyclerk:0.29.0 -
+podman run --read-only -v ./keyclerk.yaml:/etc/keyclerk/keyclerk.yaml:ro -v ./records.yaml:/etc/keyclerk/records.yaml:ro   -v ./records.yaml.sig:/etc/keyclerk/records.yaml.sig:ro -v ./records.pub:/etc/keyclerk/records.pub:ro   -v ./writer:/run/secrets/writer:ro -v ./reader:/run/secrets/reader:ro -v keyclerk-state:/var/lib/keyclerk keyclerk:0.29.0   keyclerk.reconcile --config /etc/keyclerk/keyclerk.yaml --records /etc/keyclerk/records.yaml   --signing-key /etc/keyclerk/records.pub --keycloak https://id.example --realm example   --secret-file /run/secrets/writer --reader-client keyclerk-reader --reader-secret-file /run/secrets/reader   --state /var/lib/keyclerk --apply
+podman run --read-only -p 127.0.0.1:8090:8090 ... keyclerk:0.29.0 keyclerk.console --host 0.0.0.0   --allowed-host console.example --oidc-public-issuer https://id.example/realms/example   --oidc-redirect https://console.example/callback ...
 ```
 
 Without `--apply` a run is a dry run. Records are applied only when they pass every check, carry a valid signature

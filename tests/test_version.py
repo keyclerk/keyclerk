@@ -15,4 +15,10 @@ def test_pyproject_and_the_package_name_the_same_version():
 
 
 def test_the_changelog_names_the_current_version():
-    assert f"## {keyclerk.__version__} (" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    """A candidate's section is headed as its tag says (0.29.0-rc.1, which the release workflow reads), the package as
+    PEP 440 writes it (0.29.0rc1): the same version."""
+    import re
+
+    from packaging.version import Version
+    heads = re.findall(r"^## (\S+) \(", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
+    assert any(Version(h) == Version(keyclerk.__version__) for h in heads)

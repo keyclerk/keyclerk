@@ -31,6 +31,7 @@ TYPES = (LOG, COSIGNATURE)
 MAX_NOTE = 64 * 1024                    # a checkpoint and some cosignatures; the spec asks for at least 16 signatures
 MAX_SIGNATURES = 32
 DECIMAL = re.compile(r"0|[1-9][0-9]{0,18}")
+MAX_TREE = 2 ** 53 - 1                            # the 2026-11-07 custodian review (A1): sizes past it are refused
 
 
 class NoteRefused(ValueError):
@@ -100,6 +101,8 @@ def parse_checkpoint(text: str) -> tuple[str, int, bytes]:
         raise NoteRefused("a checkpoint is three lines: origin, size, root (no extension lines)")
     if not DECIMAL.fullmatch(lines[1]):
         raise NoteRefused("the tree size is a decimal with no leading zero")
+    if int(lines[1]) > MAX_TREE:                 # every signed number is below 2^53 (edge.MAX_SIGNED_INT): a size past
+        raise NoteRefused("the tree size is past 2^53-1: no log of this realm is that large")   # it forges a tree
     root = unb64(lines[2])
     if len(root) != 32:
         raise NoteRefused("the root is 32 bytes")

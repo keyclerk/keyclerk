@@ -101,7 +101,7 @@ def test_the_site_key_signs_one_purpose_at_a_time():
     st = R.site_statement("provisional", "edge-a", E.public_hex(SITE), E.public_hex(NODE), NOW, "the old box burned")
     sealed = E.cosign(NODE, E.cosign(SITE, st, R.SITE_FORMAT), R.SITE_FORMAT)
     assert R.verify_site(sealed, E.public_hex(SITE), "edge-a", "provisional")["node_key"] == E.public_hex(NODE)
-    with pytest.raises(ValueError, match="not one for promotion"):
+    with pytest.raises(ValueError, match="kc-edge-site-v2"):            # 1.6: a promotion is its own format
         R.verify_site(sealed, E.public_hex(SITE), "edge-a", "promotion")
     with pytest.raises(ValueError, match="another edge"):
         R.verify_site(sealed, E.public_hex(SITE), "edge-b", "provisional")
@@ -109,3 +109,19 @@ def test_the_site_key_signs_one_purpose_at_a_time():
         R.verify_site(E.cosign(SITE, st, R.SITE_FORMAT), E.public_hex(SITE), "edge-a", "provisional")   # no node
     with pytest.raises(ValueError):
         R.verify_site(sealed, E.public_hex(OTHER), "edge-a", "provisional")                           # not the site key
+
+
+def test_a_promotion_statement_has_a_validity_window():
+    """kc-edge-site-v2 (edge protocol 1.6): not_after after at and at most a day later; expired, it promotes nothing."""
+    def promo(not_after=None):
+        st = R.site_statement("promotion", "edge-a", E.public_hex(SITE), E.public_hex(NODE), NOW, "no witness on site",
+                              not_after)
+        return E.cosign(NODE, E.cosign(SITE, st, R.SITE_FORMAT_V2), R.SITE_FORMAT_V2)
+    st = R.verify_site(promo(), E.public_hex(SITE), "edge-a", "promotion", NOW)
+    assert st["not_after"] == E._iso(NOW + timedelta(hours=24))
+    with pytest.raises(ValueError, match="expired"):
+        R.verify_site(promo(), E.public_hex(SITE), "edge-a", "promotion", NOW + timedelta(hours=25))
+    with pytest.raises(ValueError, match="at most 24 hours"):
+        R.verify_site(promo(NOW + timedelta(hours=48)), E.public_hex(SITE), "edge-a", "promotion", NOW)
+    with pytest.raises(ValueError, match="after at"):
+        R.verify_site(promo(NOW), E.public_hex(SITE), "edge-a", "promotion", NOW)

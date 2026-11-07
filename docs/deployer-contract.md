@@ -7,16 +7,19 @@ Check a planned deployment before starting it: `python -m keyclerk.init check --
 
 Starts as `python -m keyclerk.signer`.
 
-- Required flags: `--key`, `--state`, `--config`
-- Files that must exist when given: `--key`, `--config`, `--token`, `--reconciler-token`, `--approval-jwks`
+- Required flags: `--state`, `--config`
+- Files that must exist when given: `--key`, `--config`, `--token`, `--reconciler-token`, `--approval-jwks`, `--identity-key`, `--custodian-token`
 - Directories: `--state`
 - Configuration keys: `approvals.acr`
+- the records key's holder: --custodian (production) or --key (development), one of them
+- --custodian-token for a custodian over TCP
 - --listen (unix:/path or tcp:127.0.0.1:port), unless --adopt
 - --token for a TCP listener
 - HA: --ha-node and --commit-witness together
 - --ha-hold of at least 5 seconds
 - approvals.proofs required: --approval-issuer, --approval-audience and --approval-jwks
 - the reconciler's listener has its own --reconciler-token
+- --identity-key, the reconciler's public key, where a reconciler is wired (0.29.0: leases name bastion accounts only from its sealed identity map; python -m keyclerk.init identity-key)
 
 ## desk
 

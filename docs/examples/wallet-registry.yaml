@@ -1,0 +1,24 @@
+# The home's wallet registry (decision 0034, W0): its intended uses and exactly what each asks a wallet for.
+# Check it in CI:  python -m keyclerk.wallet_registry check docs/examples/wallet-registry.yaml --registration REGISTERED.json
+#   (--draft instead of --registration before the home is registered)
+relying_party:
+  name: Example Home
+  identifier: BE0000000000
+  address: Example Street 1, 1000 Brussels, BE
+  url: https://home.example
+  contact: https://home.example/privacy
+  services: Access to sites and systems for staff, contractors and visitors
+intended_uses:
+  - use_id: contractor-onboarding
+    purpose: Identify a contractor before their first site visit
+    privacy_policy: https://home.example/privacy/contractor-onboarding
+    identification: required
+    legal_reference: Contract term on site access; social-security registration of posted workers
+    credentials:
+      - {id: pid, format: dc+sd-jwt, vct: "urn:eudi:pid:1", claims: [given_name, family_name, birthdate]}
+  - use_id: desk-check-in
+    purpose: Check a visitor in at the desk; the visitor stays pseudonymous
+    privacy_policy: https://home.example/privacy/visitors
+    identification: pseudonym_allowed
+    credentials:
+      - {id: age, format: mso_mdoc, doctype: eu.europa.ec.eudi.pid.1, claims: [age_over_18]}

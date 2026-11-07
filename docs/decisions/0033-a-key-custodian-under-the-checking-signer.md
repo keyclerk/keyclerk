@@ -140,6 +140,42 @@ reason given.
   two people act. Access continues on the edges' horizons.
 
 ## Changelog
+- 2026-11-07: phase A, rest (#40): the TPM (point 5 and 6, Q8) seals the key file to the boot state's PCRs (the
+  answer encrypted under a session salted to the SRK) and holds an NV counter the state names, raised per epoch
+  (default an hour) and at recovery and import, in two steps so a crash is finished, never taken for a rollback;
+  a state with a lower value is refused at start, a state from before the binding binds again only through the
+  ceremony; the counter's auth comes from the key. The PKCS#11 build (Q9): a token's Ed25519 key behind
+  `-tags pkcs11`, dynamically linked, checked at start and on every signature; the state's seal keyed by the
+  key's deterministic signature over a fixed label, as no token gives its seed. The recovery's marker (Q6): the
+  custodian keeps what the trustees signed, and the signer records it once as its own record
+  `custodian_recoveries`. A custodian behind the witness at start now serves with its floor raised and signs nothing
+  until it has followed (Q4 "refuses to start or sign": it refuses to sign), so a restarted standby needs no
+  ceremony; the extended failover model found that cost. Tested against swtpm and SoftHSM 2 in a container, the
+  counter tests falsified. Size
+  (point 8): 2,671 lines of code without comments and blank lines (3,029 with them).
+- 2026-11-07: review of the first build (the review of 2026-11-07): five attackers found one
+  custodian could sign two bodies at one position, signed what it did not recognise, checked less than the Python
+  judge, trusted its state and socket, and bounded nothing. Reworked: strict classification (nothing falls through), a
+  persisted witness floor and never below its own size (a follow is staged, one connection's, refused if the state
+  moved), Python's byte rules in Go, an HMAC-sealed state, a lock, a token over TCP, a tombstone after export, bounded
+  connections. No adopt: a log reaches a custodian only through the ceremony. The witness is required (waived with
+  --unwitnessed outside production). Q4's residual is now stricter: a deposed node never signs a position twice.
+- 2026-11-07: phase A, first part, built (cmd/keyclerk-custodian, keyclerk/custodian.py, #40): the structural checks
+  of point 2 outside HA, check-persist-sign of point 3 with its concurrency test, point 4's refusal of a missing state,
+  a planned rotation that destroys the retired key (#41 F7), the local protocol of point 7 (one sign request whose
+  bytes the custodian classifies: a link, a checkpoint, a snapshot statement, a C2SP note, or bytes with no structure of
+  the log), the request parser fuzzed. Then (same day): adopting an existing log from its checked links, the watermark export
+  (the exporter retires) and import (only raises) of point 4, and point 5's check at start against the witness's
+  countersigned checkpoint. Then the HA rule of point 2 with Q4's custodian per node: a standby's custodian takes the
+  links the active node committed on the commit witness's countersigned note (advance), and a deposed one rebuilds from
+  link 0 into exactly the tree the witness countersigned, the one case its state goes back. Then the conformance
+  vectors of point 9 (tests/conformance/custodian.json, from tools/gen_custodian_conformance.py, replayed by the Go
+  custodian with the reference's exact signatures, and held against the store's structural check). Then the
+  lost-state ceremony of point 4 and Q6: recover takes the log's links again on a kc-custodian-recovery-v1 statement
+  signed by the pinned trustee set's threshold (an officer and a root trust owner, raw Ed25519 or SSHSIG with FIDO2,
+  verified in Go as keyclerk.trustees does), never below the witness, the old state kept. Open in phase A: the TPM seal
+  and counter and the PKCS#11 build (point 6), the failover model with the custodian (point 9), and the recovery's
+  marker in the log.
 - 2026-11-05 Proposed after the review of porting the core to Go.
 - 2026-11-05 Revised after the prior-art review: the witness as precedent, persist-then-sign in one critical section,
   no first run without state, a recovery ceremony and watermark export, rollback checked against the witness, no TPM-held

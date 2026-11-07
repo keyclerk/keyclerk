@@ -5,6 +5,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from keyclerk import edge as E
@@ -35,10 +36,13 @@ def _visit_lease(desk):
     return next(v["lease_id"] for v in desk.store.load()["edge_visit_leases"])
 
 
-def test_a_carried_lease_is_issued_after_a_fresh_sign_in_and_cannot_be_replayed(edge_server):
+def test_a_carried_lease_is_issued_after_a_fresh_sign_in_and_cannot_be_replayed(edge_server, monkeypatch):
     base, desk = edge_server
+    from keyclerk.edge_sealer import EdgeSealer
+    monkeypatch.setattr(EdgeSealer, "attested", lambda self, e, q, r, now: ("assured", []))   # a quote that verified (0016)
     _set_ceiling(base)
     lid = _visit_lease(desk)
+    assert call(base, "GET", "/edge/bundle")[0] == 200     # the signer carries only what a bundle it sealed would (S1)
     assert call(base, "POST", f"/me/visit-leases/{lid}/carried", cookie="ann-old", csrf="c-ann2", signed=False)[0] == 403
     code, sealed = call(base, "POST", f"/me/visit-leases/{lid}/carried", cookie="ann", csrf="c-ann", signed=False)
     assert code == 200
@@ -51,7 +55,9 @@ def test_a_carried_lease_is_issued_after_a_fresh_sign_in_and_cannot_be_replayed(
     assert call(base, "POST", f"/me/visit-leases/{lid}/carried", cookie="gina", csrf="c-gina", signed=False)[0] == 404   # not gina's
 
 
-def test_a_phoned_unlock_is_read_by_a_second_person_and_the_edge_computes_the_same_code(edge_server):
+def test_a_phoned_unlock_is_read_by_a_second_person_and_the_edge_computes_the_same_code(edge_server, monkeypatch):
+    from keyclerk.desk import Refusal
+    from test_edge_two_node_end_unlock import unlock, with_proofs
     base, desk = edge_server
     eid = "plant-u"
     ek = Ed25519PrivateKey.generate()
@@ -62,10 +68,11 @@ def test_a_phoned_unlock_is_read_by_a_second_person_and_the_edge_computes_the_sa
                                 "unlock_key": UNLOCK_PUB, "unlock_approvers": [GINA, FINN],
                                 "targets": [{"target": "plc-ssh", "role": "operator", "entitlement": "admin-console"}]})
     assert desk.approve(W(INGRID), r["change_id"])["outcome"] == "applied"
+    with_proofs(desk, monkeypatch)                    # after the enrolment, which this test approves without proofs
     body = {"person": ANN, "target": "plc-ssh", "key_fingerprint": "SHA256:abc", "nonce": "n-1", "minutes": 30}
     assert call(base, "POST", f"/edges/{eid}/unlock", body, cookie="ann", csrf="c-ann", signed=False)[0] == 403   # not an approver
-    code, out = call(base, "POST", f"/edges/{eid}/unlock", body, cookie="gina", csrf="c-gina", signed=False)
-    assert code == 200
+    assert call(base, "POST", f"/edges/{eid}/unlock", body, cookie="gina", csrf="c-gina", signed=False)[0] == 422   # no sign-in
+    out = unlock(desk, GINA, eid, body)
     key = call(base, "GET", "/edge-key", signed=False)[1]                             # pinned on the edge at installation
     assert key["unlock_format"] == "kc-unlock-v2"
     node = E.key_id(E.public_hex(ek))
@@ -75,14 +82,14 @@ def test_a_phoned_unlock_is_read_by_a_second_person_and_the_edge_computes_the_sa
     other_node = E.unlock_code(E.unlock_secret(UNLOCK, key["unlock_key"], UNLOCK_PUB, eid, "0" * 16),
                                eid, "0" * 16, ANN, "SHA256:abc", "plc-ssh", "n-1", 30)
     assert other_node != edge_side                                                   # bound to the node (two per edge in the HA profile)
-    piped = call(base, "POST", f"/edges/{eid}/unlock", {**body, "key_fingerprint": "SHA256:a|b"}, cookie="gina",
-                 csrf="c-gina", signed=False)
-    assert piped[0] == 422                                                             # no field can shift into another
-    self_unlock = call(base, "POST", f"/edges/{eid}/unlock", {**body, "person": GINA}, cookie="gina", csrf="c-gina", signed=False)
-    assert self_unlock[0] == 422                                                       # never yourself
+    with pytest.raises(Refusal):
+        unlock(desk, GINA, eid, {**body, "key_fingerprint": "SHA256:a|b"})           # no field can shift into another
+    with pytest.raises(Refusal):
+        unlock(desk, GINA, eid, {**body, "person": GINA})                            # never yourself
     for _ in range(2):
-        call(base, "POST", f"/edges/{eid}/unlock", body, cookie="finn", csrf="c-finn", signed=False)
-    assert call(base, "POST", f"/edges/{eid}/unlock", body, cookie="finn", csrf="c-finn", signed=False)[0] == 422   # 3 an hour
+        unlock(desk, FINN, eid, body)
+    with pytest.raises(Refusal):
+        unlock(desk, FINN, eid, body)                                                # 3 an hour
     assert any(i["kind"] == "phoned_unlock" for i in desk.edge_store.incidents(eid))
 
 
@@ -135,3 +142,55 @@ def test_an_ssh_key_belongs_to_one_person_and_a_broken_chain_is_an_incident(edge
     bad = {"seq": 5, "prev": "f" * 64, "sha256": "a" * 64, "size": 1, "session": "S", "at": "2026-10-23T10:00:00Z"}
     assert call(base, "POST", "/edge/evidence", {"entries": [bad]})[0] == 422
     assert desk.edge_store.incidents("plant-a")[-1]["kind"] == "evidence_fork"
+
+
+def test_a_carried_lease_needs_what_a_bundle_needs(edge_server, monkeypatch):
+    """Review S1: the signer carried any live visit lease. Now: no lease on an edge without a verified attestation
+    (visit leases need an assured edge), and none once the person's hardware key was ended."""
+    base, desk = edge_server
+    from keyclerk.edge_sealer import EdgeSealer
+    _set_ceiling(base)
+    lid = _visit_lease(desk)
+    assert call(base, "GET", "/edge/bundle")[0] == 200                                 # unattested: basic
+    code, why = call(base, "POST", f"/me/visit-leases/{lid}/carried", cookie="ann", csrf="c-ann", signed=False)
+    assert code == 422 and "assured" in str(why)
+    monkeypatch.setattr(EdgeSealer, "attested", lambda self, e, q, r, now: ("assured", []))
+    assert call(base, "GET", "/edge/bundle")[0] == 200
+    key = next(k for k in desk.store.load()["person_keys"] if k.get("ssh_key") == SSH)
+    real = desk.clock
+    desk.clock = lambda: real() + timedelta(seconds=5)   # ended after the lease began, not in the same second
+    desk.store._signer.configure_edge_clock(desk.clock)    # the signer cuts on the same clock
+    end = desk.propose(W(OWNER), {"action": "end_edge_record", "id": key["key_id"], "reason": "the key was lost"})
+    assert end["outcome"] == "applied", end
+    code, why = call(base, "POST", f"/me/visit-leases/{lid}/carried", cookie="ann", csrf="c-ann", signed=False)
+    assert code == 422 and "hardware key was ended" in str(why)
+
+
+def test_a_carried_lease_is_the_persons_own_signature_where_proofs_are_required(edge_server, monkeypatch):
+    """0.29 review S1, the person's proof: with approval proofs required, the signer seals a carried lease only on
+    the person's own fresh sign-in over it, each sign-in once; the desk's session alone carries nothing."""
+    import time
+
+    from test_edge_two_node_end_unlock import _Proofs, with_proofs
+
+    from keyclerk.desk import Refusal
+    base, desk = edge_server
+    from keyclerk.edge_sealer import EdgeSealer
+    monkeypatch.setattr(EdgeSealer, "attested", lambda self, e, q, r, now: ("assured", []))
+    _set_ceiling(base)
+    lid = _visit_lease(desk)
+    assert call(base, "GET", "/edge/bundle")[0] == 200
+    with_proofs(desk, monkeypatch)
+    ann = {"anchor": ANN, "roles": [], "auth_time": time.time()}
+    with pytest.raises(Refusal, match="your own signature"):
+        desk.carried_lease(ann, lid)
+    st = desk.carried_statement(ann, lid)
+    sealed = desk.carried_lease(ann, lid, proof=f"signed:{st['nonce']}:{ANN}#1")
+    assert sealed["bytes"]
+    with pytest.raises(Refusal, match="already carried"):
+        desk.carried_lease(ann, lid, proof=f"signed:{st['nonce']}:{ANN}#1")
+    old = _Proofs()
+    old.issued = time.time() - 11 * 60
+    desk.store._signer.proofs = old
+    with pytest.raises(Refusal, match="last 10 minutes"):
+        desk.carried_lease(ann, lid, proof=f"signed:{st['nonce']}:{ANN}#2")

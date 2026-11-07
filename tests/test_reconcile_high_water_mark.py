@@ -79,3 +79,25 @@ def test_an_upgrade_adopts_an_unsigned_mark_once_and_only_when_not_ahead(tmp_pat
     assert Rc.run_once(args(tmp_path, write(tmp_path, d, "r7.yaml"), mark_key=key, adopt_mark=True), AT, b)["applied"]
     assert b.mark.startswith("kc-mark-v1:7:")
     assert Rc.run_once(args(tmp_path, write(tmp_path, d, "r7.yaml"), mark_key=key), AT, b)["applied"]   # signed now
+
+
+def test_f8_a_recovery_resets_what_a_stolen_key_pushed_forward(tmp_path, monkeypatch):
+    """#41 F8 (TUF's fast-forward): after a recovery the last applied records from dropped links are no base, and a
+    mark signed under the older history counts only to the switch; a mark under the new history names its version."""
+    from types import SimpleNamespace
+
+    from keyclerk.store import replay
+
+    class Store:
+        pinned = SimpleNamespace(version=2, switch=10)
+    monkeypatch.setattr(replay, "revision_at", lambda st, size: 9 if size == 10 else None)
+    last, hv, back, rec = Rc.recovery_base(Store(), 1, {"revision": 50})
+    assert last is None and hv == 2 and back == 9 and rec["dropped_applied"] == 50
+    assert Rc.recovery_base(Store(), 2, {"revision": 50})[0] == {"revision": 50}            # already applied under it
+    assert Rc.recovery_base(Store(), 1, {"revision": 8})[0] == {"revision": 8}              # a planned rotation
+    key = Rc.mark_key(args(tmp_path, "x", mark_key=mark_key_file(tmp_path)))
+    v2 = Rc.sign_mark(key, "example", 12, 2)
+    assert v2.startswith("kc-mark-v2:12:2:") and Rc.read_mark(v2, key, "example") == (12, None)
+    assert Rc.mark_history(v2) == 2 and Rc.mark_history(Rc.sign_mark(key, "example", 12)) == 1
+    assert Rc.sign_mark(key, "example", 12, 1).startswith("kc-mark-v1:12:")
+    assert Rc.read_mark(v2.replace(":12:2:", ":12:3:"), key, "example")[1] is not None   # the version is signed

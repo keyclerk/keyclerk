@@ -311,6 +311,47 @@ A26. **ISO/IEC 24760-1's terms where they fit:** reference identifier (the ancho
     (the issuer), verifier (proofing) for the checker, validation and verification for the two axes, archived identity
     for the tombstone; the edition cited (2019 or 2025) to be pinned.
 
+### Pseudonymous people: identification is an option of the model (operator, 2026-11-06)
+The operator asked for this from the start: eIDAS 2 lets a wallet user present a pseudonym, and a relying party may not
+refuse one where no Union or national law requires the user to be identified (art. 5b(9) as recalled; the wording is
+to be verified against the Official Journal before this record is accepted).
+
+A27. **Identification is a property of the engagement kind, not of the model.** Each kind in the registry states
+    `identification: required`, with its legal reference (employment and social-security registration, a regulated
+    site's access law, a contract term), or `pseudonym_allowed`. Where no law requires identification, a home does not
+    refuse a pseudonym. The defaults: required for staff, contractors and every kind that can hold an admin persona or
+    a privileged grant; pseudonym allowed for visitors and desk check-ins. A deployment can tighten either. Turning a
+    required kind into one that allows pseudonyms needs its legal reference replaced and is a high-risk change with a
+    second key (0008, 0015).
+A28. **A pseudonymous person is a person like any other:** an anchor, engagements, claims, leases, the same clocks. It
+    lacks only an identifying fact. Its point-3 fact is the keyed hash of the pseudonym under the home's own key (the
+    wallet's pseudonym for this relying party, a passkey's credential id, or a visitor token the desk issued), so one
+    pseudonym is one person in a home.
+A29. **Claims attach without identity.** A pseudonymous person can hold attribute claims whose type allows it: an age
+    over a threshold, employment by an organisation through an employer attestation, a qualification, a safety
+    induction at this site. The holder axis is key-bound only (A15); person-matched is none by construction, so a type
+    whose lowest rungs need a person-matched holder refuses a pseudonymous holder.
+A30. **What is counted per human needs identification.** One human with two pseudonyms escapes a cap per person, so a
+    kind whose safety rests on a count per human (the visitor threshold of point 10, the caps on privileged hours of
+    point 13) requires identification. For pseudonymous visitors the threshold counts per pseudonym and per sponsor;
+    crossing it asks the visitor to identify, and never identifies them silently.
+A31. **Identification is added, never inferred.** A pseudonymous person becomes identified only by presenting
+    identifying evidence through an intake channel, a governed change approved like a claim. KeyClerk never links a
+    pseudonym to an identity by matching, and never merges two pseudonyms on a guess. An identified person becomes
+    pseudonymous again only through erasure.
+A32. **No re-identification mapping is held.** For a wallet pseudonym the wallet keeps the secret; for a desk token the
+    home keeps only its keyed hash. A home that must identify a pseudonymous person later, after an incident, asks the
+    person or uses what the law gives it outside KeyClerk. An edge receives the anchor only, as for anyone (point 2).
+    A pseudonymous person's lease carries no e-mail, so the bastion signs them in by key, or by the pseudonym at the
+    broker, never by e-mail.
+A33. **Exports stay pseudonymous end to end, and a pseudonymisation gateway fits there.** KeyClerk's events (the SIEM
+    stream, reports, the governance queries of 0.32.0) carry anchors, never names. A home that pairs KeyClerk with a
+    pseudonymisation gateway keeps both standalone and joins them by an adapter, with no shared key and
+    no shared runtime: the gateway masks the free-text fields that can still hold a name before anything reaches an
+    analysis or an AI session, and its own two-person unmask is the only way back. The constructions are alike (a
+    keyed hash under a key held for one scope only, point 2), but the keys are never the same: a KeyClerk fact hash
+    and a gateway pseudonym of the same input must not be linkable.
+
 ## Invariants (checked by the specifications and tests)
 - N1 Identifiers are pairwise per home; no raw cross-home id; cross-home recognition only by keyed hash under a
   scope's own key; at most one person per verified fact in a home.
@@ -338,6 +379,10 @@ A26. **ISO/IEC 24760-1's terms where they fit:** reference identifier (the ancho
 - N14 A grant names one engagement for life; for-cause ended persons hold no active persona; review and dormancy
   clocks never decrease across an engagement change with a short gap.
 - N15 Creating a claim, raising its level, and registering or extending a claim type are high-risk changes.
+- N16 No engagement of a kind that requires identification belongs to a pseudonymous person; no claim whose type
+  needs a person-matched holder belongs to one; no per-human cap is enforced by a count per pseudonym (A27, A29, A30).
+- N17 A pseudonymous person becomes identified only through an intake channel's evidence, never by matching; no
+  mapping from a pseudonym to an identity is stored (A31, A32).
 
 ## How it is modelled and verified
 One standard per kind of question, each already used somewhere in the estate:
@@ -489,3 +534,5 @@ rewritten to weaken one rule each instead of deleting the invariant they test (s
 - 2026-11-05 The ratchet: an anchor recorded at every wake, after the platform model's simulation of a cut-off site.
 - 2026-11-05 Proposed: the operator's answers to Q1 to Q9; Q8 after its own adversarial review.
 - 2026-11-06 Point 35 and the model table say which TLC runs completed: the ratchet model's full-bounds run did not.
+- 2026-11-06 Amendments A27 to A33 and invariants N16, N17: pseudonymous people as an option of the model (operator);
+  to be checked in People.als version 2 and in an adversarial review before acceptance.

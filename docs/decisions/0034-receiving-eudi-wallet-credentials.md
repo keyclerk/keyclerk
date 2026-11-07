@@ -76,11 +76,19 @@
 11. **Edges stay wallet-free** (Q5, on 0032 Q3: a cut-off site never judges new proof). A door use runs through a lease
     the desk judged; a carried lease resting on a wallet claim folds in that claim's status horizon and its maximum
     offline reliance (24 hours by default, 0032 Q7), shorter than the 72-hour carry cap.
+12. **A pseudonym is a first-class presentation** (operator, 2026-11-06; 0032 A27 to A33). For an engagement kind that
+    allows pseudonyms, the request asks for no identifying attribute: the wallet's pseudonym for this relying party
+    and the attributes the kind needs (an age over a threshold, an employer attestation), nothing else. The PID path of
+    point 8 runs only for kinds that require identification. The registration export lists the pseudonymous intended
+    use apart, so the registration shows that a visitor is never asked for a name. Wallet pseudonyms arrive in later
+    wallet versions; until a wallet offers one, a desk-issued visitor token or a passkey stands in.
 
 ## Stages, each with its done-when
 - **W0, now (no wallet):** the registry generates DCQL and the registration export; a parser of TS 119 602 lists with
-  a signed cache; the version table. Done when the CI lint refuses an unregistered attribute, the parser reads the
-  Commission's test list, and CI fails on an unpinned version.
+  a signed cache; the version table; a request without any identifying attribute for kinds that allow pseudonyms
+  (point 12); per intended use, the privacy-policy URL the 2026 amendment of the registration act requires, and a
+  request that matches the registration exactly (wallets warn the user on any request beyond it). Done when the CI lint refuses an unregistered attribute and an identifying attribute in a pseudonymous
+  request, the parser reads the Commission's test list, and CI fails on an unpinned version.
 - **W1, now (Q1: both flows together):** SD-JWT VC PID in the same-device remote flow (onboarding before arrival) and
   mdoc at the desk through the Digital Credentials API with both `openid4vp` and `org-iso-mdoc` (Annex C), with status
   lists, the two verifiers (point 5) and a mock registrar issuing registration certificates in the RPRC format. Done
@@ -96,7 +104,8 @@
 - **W4, waits for Belgium:** registration, the production access certificate, the PID list, MyGov.be. Done when one
   home is registered and one production PID presentation is accepted.
 - **W5, waits for issuers:** EAA through the wallet channel (qualifications, the posted-worker PDA1, employer
-  attestations). Done when one external EAA maps to a claim type with its band cap.
+  attestations), and from organisations' business wallets the legal person's identity and a mandate to represent it
+  (the European Business Wallet, COM(2025) 838, in trilogue). Done when one external EAA maps to a claim type with its band cap.
 
 ## The maintainer's answers (decision round, 2026-11-05)
 - Q1 Remote SD-JWT VC and desk mdoc are built together, in one stage (W1): the in-person case is the distinctive one.
@@ -124,3 +133,12 @@
 - 2026-11-05 Proposed: the adversarial review's amendments (the key class, four processes, the match as a proposal,
   pinned versions, Safari's Annex C, two verifiers, list fetching, registration drift, hosting, the carried lease's
   horizon, what is kept) and the maintainer's answers to Q1 to Q7.
+- 2026-11-06 Point 12: a pseudonym as a first-class presentation, and W0's pseudonymous request (operator).
+- 2026-11-06 W0: the privacy-policy URL per intended use and an exact match with the registration (CIR 2026/1730);
+  W5: business-wallet credentials and mandates.
+- 2026-11-06 W0 built (keyclerk.wallet_registry, keyclerk.lote). The version table pins what HAIP 1.0 itself
+  references: SD-JWT VC draft-ietf-oauth-sd-jwt-vc-13 and the Token Status List draft-ietf-oauth-status-list-14, not
+  the later drafts (-23, -21) the research recorded as current; RFC 9901; ISO/IEC 18013-5:2021. The Commission's PID
+  list page says the first compiled list "is being prepared" and is not published yet (read 2026-11-06), so the
+  parser was proven on a published signed LoTE (SIROS's test list under its published root) and on built vectors;
+  reading the Commission's own list waits for its publication.

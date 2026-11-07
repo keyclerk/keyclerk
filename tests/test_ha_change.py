@@ -19,6 +19,18 @@ from tests.test_signer_replica import ADD, change_ops, world  # noqa: F401 - the
 CFG = {"origin": "keyclerk.example/ha-change", "commit_witness": N.vkey("witness.example/commit", N.COSIGNATURE,
                                                                        N.raw_public(WKEY)), "nodes": ["node-a", "node-b"]}
 
+@pytest.fixture(autouse=True)
+def _trustees_pinned(monkeypatch):
+    """HA mode needs a pinned trustee set (0.29 review N8); these tests are not about trustee signatures, so links
+    before a far-off position are taken as an upgraded deployment takes its older ones."""
+    from keyclerk import trustees as T
+    from tests.test_trustees import pinned_set
+    ts = pinned_set("example")
+    monkeypatch.setattr(T, "pinned", lambda: {"set": ts, "since": 10 ** 9})
+    yield
+    T.use(None)
+
+
 
 class _Current:
     def __init__(self, world):

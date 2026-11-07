@@ -1,6 +1,9 @@
 ## What and why
 
-<!-- What this changes and why. Link the issue it closes. -->
+<!-- What this changes and why. One "Closes #N" line per issue it completes, so merging closes and links them; a
+release pull request lists every issue it ships. -->
+
+Closes #
 
 ## Decisions
 

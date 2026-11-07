@@ -49,11 +49,18 @@ def test_the_desk_answers_an_edges_time_request_for_that_request_only():
 
         def _node_seen(self, *a):
             pass
+
+        def _seal(self, kind, edge_id, **fields):          # the checking signer's answer (tests/test_edge_sealer.py)
+            assert kind == "time"
+            return E.time_answer(self.bundle_key, edge_id, fields["nonce"], self.clock())
+
+        def edge_key(self):
+            return {"key": E.public_hex(self.bundle_key)}
     from keyclerk.desk import Desk
     d = _D()
     nonce = "bm9uY2Utb2YtdGhlLXRpbWU"
     sealed = Desk.edge_time(d, "plant-a", ("1793102400", nonce))
-    pins = {"edge": "plant-a", "bundle_key": E.public_hex(d.bundle_key)}
+    pins = {"edge": "plant-a", "bundle_key": d.edge_key()["key"]}
     errs, m = E.verify_time(sealed, pins, nonce, 1.5)
     assert not errs and m["issued"] == "2026-11-05T10:00:00Z"
     assert E.verify_time(sealed, pins, nonce, 31)[0]                     # held back past the wait

@@ -18,7 +18,7 @@ from keyclerk import edge as E
 from keyclerk import relay as R
 from keyclerk.desk import Desk, Store
 
-from test_edges import EDGE_KEY, EVA, INGRID, OFFICER_KEY, OWNER, W, FINN, enrol
+from test_edges import EDGE_KEY, EVA, INGRID, OFFICER_KEY, OWNER, W, FINN, edge_desk, enrol
 from test_visits import FIXTURES
 
 GINA = "idp:77dd-gina"
@@ -48,9 +48,7 @@ class Auth:
 
 @pytest.fixture
 def edge_server(tmp_path):
-    key = tmp_path / "key"
-    key.write_text(Ed25519PrivateKey.generate().private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex(), encoding="utf-8")
-    desk = Desk(Store(tmp_path / "store", key, FIXTURES / "records.yaml"))
+    desk = edge_desk(tmp_path, seed=FIXTURES / "records.yaml")       # this module's FIXTURES: tests may swap them
     desk.approve(W(INGRID), enrol(desk)["change_id"])
     for who, pub in ((FINN, FINN_PUB), (GINA, GINA_PUB), (ANN, ANN_PUB)):
         r = desk.propose(W(who), {"action": "enrol_person_key", "public_key": R.b64e(pub), "user_verification": True})
@@ -162,7 +160,7 @@ def test_a_lease_credential_reaches_only_the_lease_holder_and_survives_a_failed_
     assert call(base, "POST", f"/relay/{rid}/take", cookie="ann", csrf="c-ann", signed=False)[0] == 404        # gone once confirmed
 
 
-def test_escrow_goes_to_designated_custodians_and_is_confirmed_only_when_both_opened(edge_server):
+def test_escrow_goes_to_designated_custodians_and_opening_alone_never_confirms_it(edge_server):
     base, desk = edge_server
     keys = {k["anchor"]: k["key_id"] for k in desk.store.load()["person_keys"]}
     ctx = "escrow:plc-console:BG-1"
@@ -179,7 +177,7 @@ def test_escrow_goes_to_designated_custodians_and_is_confirmed_only_when_both_op
         rid = next(x["relay_id"] for x in call(base, "GET", "/relay", cookie=who, signed=False)[1] if x["purpose"] == ctx)
         assert call(base, "POST", f"/relay/{rid}/take", cookie=who, csrf=csrf, signed=False)[0] == 200
         assert call(base, "POST", f"/relay/{rid}/confirm", cookie=who, csrf=csrf, signed=False)[0] == 200
-    assert status()["confirmed"] is True                   # only now may the edge forget the value
+    assert status()["confirmed"] is False      # S2: only the custodians' own sign-ins count (test_edge_escrow_evidence_s2)
 
 
 def test_evidence_is_a_chain_acknowledged_up_to_a_sequence_and_incidents_reach_the_officer(edge_server):
@@ -223,14 +221,15 @@ def test_an_officer_who_joins_the_core_freezes_the_edge(edge_server):
 
 def test_a_lease_carries_the_broker_username_the_reconciler_saw(tmp_path):
     """Decision 0014b: Warpgate and the facade know people by the broker's username; the reconciler saves it."""
-    key = tmp_path / "key"
-    key.write_text(Ed25519PrivateKey.generate().private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex(), encoding="utf-8")
     state = tmp_path / "broker"
     state.mkdir()
-    (state / "usernames.json").write_text(json.dumps({ANN: "ann.peeters"}), encoding="utf-8")
     ann_mail = "ann" + "@example.test"                     # built from parts: the leak gate flags any address
-    (state / "emails.json").write_text(json.dumps({ANN: ann_mail}), encoding="utf-8")
-    desk = Desk(Store(tmp_path / "store", key, FIXTURES / "records.yaml"), broker_state=state)
+    reconciler = Ed25519PrivateKey.generate()              # 0021 point 2: the reconciler seals what the bastion knows
+    from keyclerk import identity_map
+    (state / "identity-map.json").write_text(json.dumps(identity_map.seal(
+        reconciler, "example", 1, datetime.now(timezone.utc), {ANN: "ann.peeters"}, {ANN: ann_mail})), encoding="utf-8")
+    desk = edge_desk(tmp_path, broker_state=state)
+    desk.store._signer.configure_identity(E.public_hex(reconciler))
     desk.approve(W(INGRID), enrol(desk)["change_id"])
     c = ceiling()
     desk.set_ceiling(W(EVA), "plant-a", {"ceiling": E.seal_ceiling(OFFICER_KEY, c)})
@@ -284,3 +283,19 @@ def test_an_edge_fetches_an_address_only_for_its_own_live_lease(edge_server):
         call(base, "GET", f"/edge/lease/{lease['lease_id']}/email")
     assert call(base, "GET", f"/edge/lease/{lease['lease_id']}/email")[0] == 429
 
+
+
+def test_issue_52_the_desk_warns_when_a_membership_outlasts_an_edges_ceiling(tmp_path):
+    """A lease longer than the edge's ceiling is dropped, never shortened (rolling leases are for 0.30): the desk says so
+    at the grant, besides the bundle's dropped reasons, and the change goes on as it would."""
+    desk = edge_desk(tmp_path, seed=FIXTURES / "records.yaml")
+    desk.approve(W(INGRID), enrol(desk)["change_id"])
+    desk.set_ceiling(W(EVA), "plant-a", {"ceiling": E.seal_ceiling(OFFICER_KEY, {**ceiling(1), "max_lease_hours": 24})})
+    r = desk.propose(W(OWNER), {"action": "add_member", "group": "admins", "anchor": "idp:44aa-dirk", "days": 30,
+                                "reason": "on call"})
+    assert r["outcome"] in ("applied", "pending"), r
+    assert any("plant-a" in w and "at most 24 hours" in w for w in r.get("warnings", [])), r
+    desk.set_ceiling(W(EVA), "plant-a", {"ceiling": E.seal_ceiling(OFFICER_KEY, ceiling(2))})   # 120 days: it fits
+    r = desk.propose(W(OWNER), {"action": "add_member", "group": "admins", "anchor": "idp:91d0-bert", "days": 30,
+                                "reason": "on call"})
+    assert r["outcome"] in ("applied", "pending") and "warnings" not in r, r

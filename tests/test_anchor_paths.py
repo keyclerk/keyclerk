@@ -13,8 +13,8 @@ from keyclerk import records
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA = json.loads((ROOT / "keyclerk/schema/records.schema.json").read_text(encoding="utf-8"))
-ANCHOR_LIKE = re.compile(r"anchor|^by$|_by$|officer|owner|director|delegate|sponsor|checker|person|holders|custodians"
-                         r"|approvers|^host|hosts|organiser|escort|steward|deputy|front_office|coordinator|issued_by|contact|on_call")
+ANCHOR_LIKE = re.compile(r"anchor|^by$|_by$|officer|owner|director|delegate|sponsor|checker|person|holders|custodians?$"
+                         r"|approvers?$|^host|hosts|organiser|escort|steward|deputy|front_office|coordinator|issued_by|contact|on_call")
 # Fields whose names look like anchors but hold something else, each with why.
 NOT_ANCHORS = {
     "persons.person": "the person's record name (a label; moved into the mapping table by the migration, step 3)",

@@ -136,6 +136,19 @@ def verifier_cases() -> dict:
             records_head={"revision": 12, "head": "AB" * 32}), pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
         ("a null records head (1.4)", reseal(bk, good, lambda d: {**d, "records_head": None}), pins, {"serial": 6},
          "2026-10-23T13:00:00Z"),
+        # edge protocol 1.6: what the signer left out and why; it informs, it never grants
+        ("a bundle saying why a lease was dropped (1.6)", E.build_bundle("edge-a", 7, t0, hz, [lease], [], [], sig, pol, bk,
+            dropped=[{"lease_id": "L-9", "why": ["longer than the ceiling's longest lease"]},
+                     {"lease_id": None, "why": ["the edge's officer is not independent of the core: no leases"]}]),
+         pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
+        ("a dropped entry without a reason (1.6)", reseal(bk, good, lambda d: {**d, "dropped": [{"lease_id": "L-9", "why": []}]}),
+         pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
+        ("a dropped entry with another member (1.6)", reseal(bk, good, lambda d: {**d, "dropped": [
+            {"lease_id": "L-9", "why": ["x"], "lease": {"person": "p"}}]}), pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
+        ("a reason past 200 characters (1.6)", reseal(bk, good, lambda d: {**d, "dropped": [{"lease_id": "L-9", "why": ["x" * 201]}]}),
+         pins, {"serial": 6}, "2026-10-23T13:00:00Z"),
+        ("a null dropped (1.6)", reseal(bk, good, lambda d: {**d, "dropped": None}), pins, {"serial": 6},
+         "2026-10-23T13:00:00Z"),
     ]
     import edge_verifier_vectors                        # an edge implementation's vectors, verdicts from this checkout
     cases += edge_verifier_vectors.cases()
@@ -146,10 +159,12 @@ def verifier_cases() -> dict:
                     "expected": {"ok": not errs, "leases": [x["lease_id"] for x in applied.get("leases", [])],
                                  "visit_leases": [x["lease_id"] for x in applied.get("visit_leases", [])],
                                  "governed_roles": applied.get("governed_roles") if not errs else None,
+                                 "dropped": applied.get("dropped") if not errs else None,
                                  "state": applied.get("state") if not errs else None}})
     return {"note": "verify_bundle(sealed, pins, state, now); ok means no errors; leases and visit_leases are the live "
                     "ids; state is what the edge stores after a bundle it accepts; governed_roles is the displayName list of an accepted "
-                    "bundle's governed_roles, null when the bundle has none", "cases": out}
+                    "bundle's governed_roles, null when the bundle has none; dropped is an accepted bundle's dropped member as "
+                    "carried (edge protocol 1.6), an empty list when it has none", "cases": out}
 
 
 def families() -> dict:
@@ -399,6 +414,30 @@ def families() -> dict:
         "relays": [{"name": n, "cert": ce, "tighten": t, "pins": rpins, "state": st, "applied": applied,
                     "now": "2026-11-05T12:30:00Z", "release": {"serial": 5, "floor": 3}} for n, ce, t, st in relays],
     }
+    from keyclerk import edge_relay as ER           # edge protocol 1.6, section 14: the site key's statements
+    sk, nk = E.Ed25519PrivateKey.from_private_bytes(b"s" * 32), E.Ed25519PrivateKey.from_private_bytes(b"m" * 32)
+    st0 = datetime(2026, 11, 5, 11, 0, tzinfo=timezone.utc)
+
+    def site(purpose="promotion", edge="edge-a", hours=None, fmt=None, node=True):
+        body = ER.site_statement(purpose, edge, E.public_hex(sk), E.public_hex(nk), st0, "no witness on site",
+                                 st0 + timedelta(hours=hours) if hours else None)
+        if fmt:
+            body = {k: v for k, v in body.items() if k != "not_after"} | {"format": fmt}
+        f = fmt or ER.site_format(purpose)
+        sealed = E.cosign(sk, body, f)
+        return E.cosign(nk, sealed, f) if node else sealed
+    later = "2026-11-06T12:00:00Z"
+    raw["site"] = [{"name": n, "sealed": sd, "site_key": E.public_hex(sk), "edge": "edge-a", "purpose": pu, "now": nw}
+                   for n, sd, pu, nw in (
+                       ("a promotion inside its window", site(), "promotion", "2026-11-05T12:00:00Z"),
+                       ("a promotion after its not_after", site(), "promotion", later),
+                       ("a promotion valid for more than a day", site(hours=48), "promotion", "2026-11-05T12:00:00Z"),
+                       ("a 1.5 statement (kc-edge-site-v1) used as a promotion",
+                        site(fmt=ER.SITE_FORMAT), "promotion", "2026-11-05T12:00:00Z"),
+                       ("a provisional replacement (kc-edge-site-v1)", site("provisional"), "provisional", later),
+                       ("another edge's promotion", site(edge="edge-b"), "promotion", "2026-11-05T12:00:00Z"),
+                       ("signed by the site key without the node", site(node=False), "promotion",
+                        "2026-11-05T12:00:00Z"))]
     notes = {"statements": "unseal_multi(sealed, required, format); ok, and what it says when ok",
              "ceilings": "check_ceiling(edge, officer_key, sealed, floor)", "ended": "verify_ended(sealed, pins, enrolment_key)",
              "unlock": "kc-unlock-v2: the node (edge_private, desk_public) and the desk (desk_private, edge_public) reach "
@@ -410,6 +449,9 @@ def families() -> dict:
              "reports": "edge protocol 1.4: whether the desk accepts a report body (section 7) at the moment now, and the "
                         "bastion declaration it keeps: tokens it knows as capabilities and adapter, the rest as "
                         "unknown, never refused",
+             "site": "edge protocol 1.6, section 14: verify_site(sealed, site_key, edge, purpose, now): a provisional "
+                     "replacement is kc-edge-site-v1; a promotion is kc-edge-site-v2 with not_after, after at and at "
+                     "most 24 hours later, refused once now passes it",
              "relays": "edge protocol 1.5, section 14: verify_tighten(cert, tighten, pins, state, applied, now, release):"
                        " ok, and the state the edge stores after a tightening it applies",
              "ceiling_hours": "edge protocol 1.4: the hours the ceiling policy judges a lease or visit lease by, "

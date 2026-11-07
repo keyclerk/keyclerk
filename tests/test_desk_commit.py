@@ -9,7 +9,7 @@ from keyclerk.store import note as N
 from keyclerk.store.follow import Follower, NotCommitted
 from keyclerk.store.link import StoreRefused
 from keyclerk.store.memory import MemoryStore
-from tests.test_signer_ha import ORIGIN, WKEY, _add, _wait, pair  # noqa: F401 - the fixture
+from tests.test_signer_ha import ORIGIN, WKEY, _add, _wait, pair, _trustees_pinned  # noqa: F401 - the fixture
 from tests.test_signer_replica import world  # noqa: F401 - the fixture
 
 

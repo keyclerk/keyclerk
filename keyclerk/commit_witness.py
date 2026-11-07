@@ -11,6 +11,9 @@ witness holds (409). A conflicting tree is refused (422) and kept as evidence. S
 stronger than a consistency proof alone.
 
     POST /commit                      {"old": size, "links": [sealed link, ...], "note": the checkpoint, signed}
+    POST /keys                        {"origin", "sealed"}: a newer records-key history (#41), adopted once it holds
+                                      against the trustee set this witness pins (--trustees) and rests on its own
+                                      countersignature; the log's later origins then reach the same commit log
                                       200 the cosignature line; 409 text/x.tlog.size; 422; 403; 404; 400
     GET  /<sha256(origin)>/checkpoint the newest countersigned checkpoint, at once (no lag, unlike C2SP's monitor
                                       endpoint, which may lag an hour)
@@ -73,6 +76,7 @@ class CommitLog:
             body, h = L.open_link(sealed, self.pinned)
             realm = realm if realm is not None else body["realm"]
             L.follows(body, realm, size, head, fence)
+            L.check_trustees(body)
             frontier, size, head, fence = merkle.push(frontier, h), size + 1, h, body["fence"]
         return frontier, size, head, fence, realm
 
@@ -100,14 +104,80 @@ class CommitLog:
 class CommitWitness(W.Witness):
     """A witness in commit mode for every log it is given (decision 0031)."""
 
-    def __init__(self, key, name: str, state: Path, logs: list[str], clock=None):
+    def __init__(self, key, name: str, state: Path, logs: list[str], clock=None, trustees: dict | None = None,
+                 histories: list | None = None, trustees_since: int = 0):
         super().__init__(key, name, state, logs, **({"clock": clock} if clock else {}))
+        from keyclerk import records_keys as RK
+        from keyclerk import trustees as T
+        if trustees is None:
+            raise ValueError("a commit witness needs the trustee set it pins (--trustees, 0.29 review N8): without one "
+                             "the records key alone would decide HA changes")
+        self.trustees = trustees
+        T.use(trustees, trustees_since)           # HA and restore links are checked against it here too (F1, N7)
         self.commits: dict[str, CommitLog] = {}
-        for origin, (_, _, pub) in self.logs.items():
+        self.aliases: dict[str, str] = {}         # a later origin of a log (#41) -> the origin it began under
+        for origin, (_, _, pub) in list(self.logs.items()):
             c = CommitLog(self.state / "commit" / W.origin_hash(origin), pub.hex())
+            pins = [x for x in histories or [] if x.key_at(0) == pub.hex() and x.window(0)["origin"] == origin]
+            pin = max(pins, key=lambda x: x.version) if pins else None
+            kept = c.d / "keys.json"              # the sealed versions this witness adopted: never trusted alone (N2)
+            chain = json.loads(kept.read_text(encoding="utf-8")) if kept.exists() else []
+            h = RK.rebuild(pin, chain if isinstance(chain, list) else [], trustees, pub.hex())
+            if h is None and chain:
+                raise ValueError(f"the witness adopted a records-key history for {origin} it cannot verify: start it with "
+                                 "--records-keys (the log's pinned history) and --trustees")
+            if h is not None:
+                c.pinned = h
+                self._aliases(origin, h)
             cur = self.latest(origin)
             c.load(cur["size"] if cur else 0)
             self.commits[origin] = c
+
+    def _aliases(self, base: str, h) -> None:
+        """A log's later origins reach its commit log; never an origin another log already holds (review N3)."""
+        for w in h.doc["keys"]:
+            o = w["origin"]
+            if o == base:
+                continue
+            if (o in self.commits and o != base) or self.aliases.get(o, base) != base:
+                raise ValueError(f"origin {o} already belongs to another log this witness keeps")
+            self.aliases[o] = base
+            self.logs[o] = (o, N.LOG, bytes.fromhex(w["key"]))
+
+    def adopt_keys(self, body: bytes) -> tuple[int, str, bytes]:
+        """POST /keys: a newer records-key history for one of this witness's logs (#41)."""
+        from keyclerk import records_keys as RK
+
+        def say(status: int, why: str) -> tuple[int, str, bytes]:
+            return status, "text/plain; charset=utf-8", (why + "\n").encode("utf-8")
+        if self.trustees is None:
+            return say(403, "this commit witness pins no trustee set (--trustees): it adopts no records-key history")
+        try:
+            req = json.loads(body)
+            origin, sealed = req["origin"], req["sealed"]
+        except (ValueError, KeyError, TypeError) as e:
+            return say(400, f"POST /keys is {{origin, sealed}}: {e}")
+        base = self.aliases.get(origin, origin)
+        c = self.commits.get(base)
+        if c is None:
+            return say(404, "this witness does not witness that log")
+        if isinstance(c.pinned, str):
+            return say(409, "no records-key history is pinned for this log: start the witness with --records-keys")
+        with self._lock:
+            try:
+                nxt = RK.advance(c.pinned, sealed, self.trustees, self.vkey)
+            except RK.HistoryRefused as e:
+                return say(422, f"the history does not hold: {e}")
+            if RK.dropped(c.pinned, nxt, c.size):
+                return say(409, f"a recovery to link {nxt.switch}, and this witness holds {c.size} links: reseed it from "
+                                "the trusted links (python -m keyclerk.witness reseed), the old record kept as evidence")
+            try:
+                self._aliases(base, nxt)
+            except ValueError as e:
+                return say(409, str(e))
+            W._write(c.d / "keys.json", json.dumps(nxt.chain, sort_keys=True).encode())
+            c.pinned = nxt
+        return say(200, f"version {nxt.version} adopted: from link {nxt.switch} under {nxt.window(nxt.switch)['origin']}")
 
     def add_checkpoint(self, body: bytes) -> tuple[int, str, bytes]:
         """A commit witness takes checkpoints only with their links (POST /commit): a bare C2SP submission could move
@@ -132,12 +202,17 @@ class CommitWitness(W.Witness):
         log = self.logs.get(origin)
         if log is None:
             return say(404, "this witness does not witness that log")
+        base = self.aliases.get(origin, origin)
+        pin = self.commits[base].pinned
+        if not isinstance(pin, str) and pin.checkpoint_key(size)["origin"] != origin:
+            return say(403, f"a checkpoint of size {size} is signed under {pin.checkpoint_key(size)['origin']}, not "
+                            f"{origin}: the records-key history says which key signs where (#41)")
         try:
             if N.verify(text, sigs, log) is None:
                 return say(403, "no signature of the log's key")
         except N.NoteRefused as e:
             return say(403, str(e))
-        c = self.commits[origin]
+        c = self.commits[base]
         own = "".join(f"{N.DASH} {n} {N.b64(raw)}\n" for n, raw in sigs
                       if n == log[0] and raw[:4] == N.key_id(log[0], N.LOG, log[2]))
         with self._lock:
@@ -169,7 +244,8 @@ class CommitWitness(W.Witness):
         return super().checkpoint(digest)
 
     def links(self, digest: str, start: int, limit: int) -> tuple[int, str, bytes]:
-        for origin, c in self.commits.items():
+        for origin in list(self.commits) + list(self.aliases):
+            c = self.commits[self.aliases.get(origin, origin)]
             if W.origin_hash(origin) == digest:
                 if not (0 <= start <= c.size and 1 <= limit <= MAX_LINKS):
                     return 400, "text/plain; charset=utf-8", b"start within the log, limit 1 to 500\n"
@@ -178,20 +254,37 @@ class CommitWitness(W.Witness):
 
 
 def reseed(state: Path, origin: str, pinned: str, links_file: Path, by: str, reason: str, clock, note: str,
-           key=None, name: str | None = None) -> dict:
+           key=None, name: str | None = None, history=None, trustees: dict | None = None) -> dict:
     """The commit witness starts again from links checked from the genesis (decision 0031 point 9), the witness
-    stopped. Its old record of the log is kept beside the evidence."""
+    stopped. Its old record of the log is kept beside the evidence. A log whose records key was rotated (#41) is
+    checked with its pinned history and the trustee set, each link and the seed checkpoint under the key in force
+    there, and the history is kept for the witness to adopt when it starts (0.29 review N9)."""
+    from keyclerk import records_keys as RK
     d = Path(state) / "commit" / W.origin_hash(origin)
-    c = CommitLog(d.with_name(d.name + ".seed"), pinned)
+    h = None
+    if history is not None:
+        h = RK.rebuild(history, history.chain, trustees, pinned)
+        if h is None:
+            raise ValueError("the records-key history does not start from this log's key (--pin)")
+        if h.window(0)["origin"] != origin:
+            raise ValueError("--origin is the origin the log began under, the one its history starts with")
+    c = CommitLog(d.with_name(d.name + ".seed"), h if h is not None else pinned)
     links = [json.loads(x) for x in Path(links_file).read_text(encoding="utf-8").splitlines() if x.strip()]
     if not links:
         raise ValueError("a reseed starts from the links of the newest head the desk saw, never from nothing")
-    checked = c.check(links)
+    try:
+        checked = c.check(links)
+    except L.StoreRefused as e:
+        if h is None:
+            raise L.StoreRefused(f"{e}; a log whose records key was rotated is reseeded with its history "
+                                 "(--records-keys) and the trustee set (--trustees)") from None
+        raise
     root = merkle.root(checked[0])
+    w = h.checkpoint_key(checked[1]) if h is not None else {"origin": origin, "key": pinned}
     try:                                          # the records key's checkpoint of the seed head, checked first
         text, sigs = N.split(note)
-        ok = N.parse_checkpoint(text) == (origin, checked[1], root) and \
-            N.verify(text, sigs, (origin, N.LOG, bytes.fromhex(pinned))) is not None
+        ok = N.parse_checkpoint(text) == (w["origin"], checked[1], root) and \
+            N.verify(text, sigs, (w["origin"], N.LOG, bytes.fromhex(w["key"]))) is not None
     except N.NoteRefused:
         ok = False
     if not ok:
@@ -200,17 +293,20 @@ def reseed(state: Path, origin: str, pinned: str, links_file: Path, by: str, rea
     old = Path(state) / "logs" / f"{W.origin_hash(origin)}.json"
     old.parent.mkdir(parents=True, exist_ok=True)          # a witness seeded before it first ran
     forgot = json.loads(old.read_text(encoding="utf-8")) if old.exists() else None
+    if h is not None and h.chain:                 # the sealed versions past the pin, adopted again at start (N2)
+        W._write(c.d / "keys.json", json.dumps(h.chain, sort_keys=True).encode())
     if d.exists():
         os.replace(d, d.with_name(d.name + f".before-reseed-{int(clock())}"))
     os.replace(c.d, d)
-    own = "".join(f"{N.DASH} {n} {N.b64(raw)}\n" for n, raw in sigs if n == origin)
+    own = "".join(f"{N.DASH} {n} {N.b64(raw)}\n" for n, raw in sigs if n == w["origin"])
     t = int(clock())
     line = N.cosign(text, name, key, t) if key is not None else ""      # countersigned now
     W._write(old, json.dumps({"origin": origin, "size": checked[1], "root": N.b64(root), "time": t,
                               "note": text + "\n" + own + line, "reseeded": True}, sort_keys=True).encode())
     with open(Path(state) / "evidence.jsonl", "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps({"at": int(clock()), "kind": "reseed", "origin": origin, "by": by, "reason": reason,
-                            "size": checked[1], "forgot": forgot}, sort_keys=True) + "\n")
+                            "size": checked[1], "forgot": forgot,
+                            "history": h.version if h is not None else None}, sort_keys=True) + "\n")
         f.flush()
         os.fsync(f.fileno())
     return {"origin": origin, "size": checked[1], "root": N.b64(root)}
@@ -235,6 +331,11 @@ class CommitClient:
     def checkpoint(self, origin: str) -> tuple[int, str, bytes]:
         return self.transport("GET", f"{self.url}/{W.origin_hash(origin)}/checkpoint", None, self.timeout)
 
+    def keys(self, origin: str, sealed: dict) -> tuple[int, str, bytes]:
+        """Hand the commit witness a newer records-key history (#41): before the first link the new key signs."""
+        body = json.dumps({"origin": origin, "sealed": sealed}, separators=(",", ":")).encode()
+        return self.transport("POST", self.url + "/keys", body, self.timeout)
+
     def links(self, origin: str, start: int, limit: int = MAX_LINKS) -> list[dict]:
         status, _, body = self.transport("GET", f"{self.url}/{W.origin_hash(origin)}/links?start={start}&limit={limit}",
                                          None, self.timeout)
@@ -250,6 +351,8 @@ def in_process(witness: CommitWitness):
     def t(method, url, body, timeout):
         if method == "POST" and url.endswith("/commit"):
             return witness.commit(body)
+        if method == "POST" and url.endswith("/keys"):
+            return witness.adopt_keys(body)
         m = _re.search(r"/([0-9a-f]{64})/(checkpoint|links)(?:\?start=(\d+)&limit=(\d+))?$", url)
         if m and m.group(2) == "checkpoint":
             return witness.checkpoint(m.group(1))

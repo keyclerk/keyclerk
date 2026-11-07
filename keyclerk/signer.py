@@ -123,6 +123,8 @@ class Signer:
         self.config_pending = self.replica is not None and self._config_sha() != self._read("config.sha256")
         self.last_check = None                    # the last background full check's result
         self.not_ready: str | None = None         # why the replica's records do not meet this engine's schema
+        self.identity_key: str | None = None      # the reconciler's key for the identity map (0021 point 2)
+        self._edges = None
         self.check_schema()
 
     def check_schema(self) -> str | None:
@@ -297,7 +299,9 @@ class Signer:
             with f.open("r+b") as h:
                 h.truncate(keep)
             data = data[:keep]
-        why, prev, _ = audit_chain(data.splitlines(), self.key.public_key())
+        pin = self._pin()
+        keys = None if isinstance(pin, str) else [w["key"] for w in pin.doc["keys"]]
+        why, prev, _ = audit_chain(data.splitlines(), self.key.public_key(), keys)
         if why:
             return why
         self._audit_prev = prev
@@ -343,24 +347,27 @@ class Signer:
             return
         self._hold()
         try:
-            store = SqliteStore(db, self.public_key(), mark["realm"])
+            store = SqliteStore(db, self._pin(), mark["realm"])
         except L.StoreRefused as e:
             self.broken = f"the signer's replica does not open: {e}; restore the signer's state from a backup (decision 0019)"
             return
         self.replica = store
+        if not isinstance(store.pinned, str) and store.pinned.key_at(store.size()) != self.public_key():
+            self.broken = (f"this signer's key is not the one records-key history version {store.pinned.version} has in "
+                           f"force at link {store.size()}: start it with that key (#41); it signs nothing until then")
         try:
-            replay.verify(store, self.public_key(), mark["realm"])
+            replay.verify(store, store.pinned, mark["realm"])
         except L.StoreRefused as e:
             self.broken = f"the signer's replica failed verification: {e}; restore the signer's state from a backup (decision 0019)"
             return
         cp = store.checkpoint()
-        cp_size = L.open_checkpoint(cp, self.public_key())["size"] if cp else 0
+        cp_size = L.open_checkpoint(cp, store.pinned)["size"] if cp else 0
         if store.size() > cp_size:                # a crash between a link and its checkpoint: the chain is verified
             store.add_checkpoint(L.seal_checkpoint(self.key, store.realm, store.size(), store.root(), store.head(),
                                                    self.FENCE, _now()))
             cp_size = store.size()
         if cp_size < mark["size"] or (mark["size"] and L.open_link(store.link(mark["size"] - 1),
-                                                                    self.public_key())[1].hex() != mark["head"]):
+                                                                    store.pinned)[1].hex() != mark["head"]):
             self.broken = (f"the replica's newest checkpoint covers {cp_size} links, but this signer last signed "
                            f"{mark['size']} (revision {mark['revision']}): a replica restored from an older backup must not "
                            "sign on top of a newer history. Restore the newest backup of the signer's state, or follow "
@@ -403,8 +410,261 @@ class Signer:
                                 "(head says why each failed), or lift the setting")
         return self.replica
 
+    # --- edges: the bundle key lives here (0021 point 1, keyclerk/edge_sealer.py) ---
+
+    def configure_edge_clock(self, clock) -> None:
+        """The clock edge objects are cut at (default: the system's); tests run the desk and signer on one clock."""
+        self._edge_clock = clock
+        if self._edges is not None:
+            self._edges.clock = clock
+
+    def configure_identity(self, public_hex: str | None) -> None:
+        """Pin the reconciler's key: the identity map that names a lease's bastion account is accepted only under it."""
+        self.identity_key = public_hex
+        if self._edges is not None:
+            self._edges.identity_key = public_hex
+
+    def edges(self):
+        """The bundle key's holder, cutting from what this signer signed: its change log (only committed links in HA
+        mode), or before a migration the YAML revision it signed last (decision 0015)."""
+        from keyclerk.edge_sealer import EdgeSealer, ReplicaSource, SignedYamlSource
+        if self.broken and self.broken != self.frozen():
+            raise SignerRefused(self.broken)
+        if self.replica is not None:
+            store = self._readable()              # a standby refuses, as a read does
+            if self.ha is not None and self.ha.get("committed", 0) != store.size():
+                raise SignerRefused("the newest link is not committed yet: a bundle is cut only from committed "
+                                    "records; retry")
+            source = ReplicaSource(store)
+        elif self._last()[2] is not None:
+            source = SignedYamlSource(self._last)
+        else:
+            raise SignerRefused("this signer has signed no records yet: there is nothing an edge may hold")
+        if self._edges is None or type(self._edges.source) is not type(source):
+            self._edges = EdgeSealer(self.state, source, clock=getattr(self, "_edge_clock", None))
+            self._edges.identity_key = self.identity_key
+        self._edges.record = self.record_own if isinstance(source, ReplicaSource) else None   # D3: shared by HA nodes
+        self._edges.ha = self.ha is not None
+        return self._edges
+
+    def seal_bundle(self, req: dict) -> dict:
+        from keyclerk.edge_sealer import EdgeRefused
+        if self.broken or self.frozen():
+            raise SignerRefused(self.broken or self.frozen())
+        try:
+            return self.edges().seal_bundle(req.get("edge_id"), req.get("serial"), req.get("ceiling"),
+                                            req.get("policy"), req.get("attested"), req.get("first_seen"),
+                                            req.get("identity_map"), req.get("quote"), req.get("request"))
+        except EdgeRefused as e:
+            raise SignerRefused(str(e)) from None
+
+    def bundle_public(self, edge_id: str | None = None) -> dict:
+        from keyclerk.edge_sealer import EdgeRefused
+        try:
+            out = self.edges().public()
+            if edge_id:                           # one edge's own co-signed rollover, when there is one (F6)
+                out = {**out, "rollover": self.edges().rollover_for(edge_id)}
+            return out
+        except EdgeRefused as e:
+            raise SignerRefused(str(e)) from None
+
+    def rollover_begin(self, next_from: Path | None = None) -> dict:
+        """A bundle-key rollover begun (#41 F6): a statement per live edge for its officer to co-sign."""
+        from keyclerk.edge_sealer import EdgeRefused
+        if self.broken or self.frozen():
+            raise SignerRefused(self.broken or self.frozen())
+        try:
+            out = {"statements": self.edges().rollover_begin(next_from)}
+        except EdgeRefused as e:
+            raise SignerRefused(str(e)) from None
+        self._audit({"op": "rollover_begin", "edges": len(out["statements"])})
+        return out
+
+    def rollover_finish(self, statements: list) -> dict:
+        """The rollover finished once every live edge's officer co-signed: the bundle key changes."""
+        from keyclerk.edge_sealer import EdgeRefused
+        if self.broken or self.frozen():
+            raise SignerRefused(self.broken or self.frozen())
+        try:
+            out = self.edges().rollover_finish(statements)
+        except EdgeRefused as e:
+            raise SignerRefused(str(e)) from None
+        self._audit({"op": "rollover_finish", "old": out["old"], "new": out["new"], "edges": out["edges"]})
+        return out
+
+    def unlock(self, req: dict) -> dict:
+        """A phoned unlock code (0021 point 1): computed here, after this signer's own records allow it."""
+        from keyclerk.edge_sealer import EdgeRefused
+        if self.broken or self.frozen():
+            raise SignerRefused(self.broken or self.frozen())
+        if self.proofs is None or (getattr(self.proofs, "policy", None) or {}).get("proofs") != "required":
+            raise SignerRefused("a phoned unlock is the approver's own signature: it needs approval proofs (approvals."
+                                "proofs: required, decision 0006), so no desk can have a code computed on its word alone "
+                                "(0.29 review S3)")
+        from keyclerk import anchors
+        if self.replica is not None:
+            self.proofs.resolve = lambda claims, view=self.replica: anchors.resolve(view, claims)
+        try:
+            out = self.edges().unlock(req.get("edge_id"), req.get("fields") or {}, self.proofs)
+        except EdgeRefused as e:
+            raise SignerRefused(str(e)) from None
+        f = req.get("fields") or {}
+        self._audit({"op": "unlock", "edge": req.get("edge_id"), "node": f.get("node"), "approver": f.get("approver"),
+                     "person": f.get("person"), "target": f.get("target"), "minutes": f.get("minutes")})
+        return out
+
+    def identity_map(self, req: dict) -> dict:
+        """The reconciler's sealed identity map, passed on by the desk when it changes; checked and kept here."""
+        from keyclerk.edge_sealer import EdgeRefused
+        if self.broken or self.frozen():                 # 0.29 review S11: a broken signer keeps nothing new
+            raise SignerRefused(self.broken or self.frozen())
+        try:
+            return self.edges().accept_identity(req.get("sealed"))
+        except EdgeRefused as e:
+            raise SignerRefused(str(e)) from None
+
+    def seal_edge(self, req: dict) -> dict:
+        from keyclerk.edge_sealer import EdgeRefused
+        if self.broken or self.frozen():
+            raise SignerRefused(self.broken or self.frozen())
+        if req.get("kind") in ("attest_challenge", "attest_activate"):     # D3: credential activation in the signer
+            try:
+                f = req.get("fields") or {}
+                if req["kind"] == "attest_challenge":
+                    return self.edges().attest_challenge(req.get("edge_id"))
+                out = self.edges().attest_activate(req.get("edge_id"), f.get("secret"))
+            except EdgeRefused as e:
+                raise SignerRefused(str(e)) from None
+            self._audit({"op": "attest_activate", "edge": req.get("edge_id")})
+            return out
+        verify = None
+        if req.get("kind") in ("escrow_confirm", "carried") and self.proofs is not None \
+                and (getattr(self.proofs, "policy", None) or {}).get("proofs") == "required":
+            from keyclerk import anchors
+            if self.replica is not None:
+                self.proofs.resolve = lambda claims, view=self.replica: anchors.resolve(view, claims)
+            verify = self.proofs
+        try:
+            out = self.edges().seal(req.get("kind"), req.get("edge_id"), req.get("fields") or {},
+                                    req.get("identity_map"), verify)
+        except EdgeRefused as e:
+            raise SignerRefused(str(e)) from None
+        if req.get("kind") == "escrow_confirm":         # S2: each counted confirmation is a line in the audit log
+            f = req.get("fields") or {}
+            self._audit({"op": "escrow_confirm", "edge": req.get("edge_id"), "item": f.get("item_id"),
+                         "custodian": f.get("custodian")})
+        return out
+
     def public_key(self) -> str:
         return self.key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+
+    def _verifier(self):
+        """What a link or checkpoint of this signer's log is checked with: its replica's pin (a history after a
+        rotation, #41), or its own key."""
+        return self.replica.pinned if self.replica is not None else self.public_key()
+
+    def _pin(self):
+        """What the replica checks with (review N1): the configured history moved forward through the sealed versions
+        this signer adopted (state/records-keys/v*.json), each against the pinned trustees; its own key for a log
+        that never rotated. A state file alone never names a key."""
+        d = self.state / "records-keys"
+        files = sorted(d.glob("v*.json"), key=lambda f: int(f.stem[1:])) if d.exists() else []
+        if not files:
+            return self.public_key()
+        from keyclerk.store import link as L
+        rep = getattr(self, "replica", None)
+        genesis = getattr(rep, "genesis", None) or L.key_at(self._genesis_hint(), 0)
+        return L.held_history([json.loads(f.read_text(encoding="utf-8")) for f in files], 0, genesis)
+
+    def _genesis_hint(self):
+        """The log's first key, from the replica's own meta, for a signer whose key has rotated."""
+        import sqlite3
+        db = self.state / "replica.db"
+        if not db.exists():
+            return self.public_key()
+        c = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            row = c.execute("SELECT value FROM meta WHERE key = 'pinned'").fetchone()
+        finally:
+            c.close()
+        return row[0] if row else self.public_key()
+
+    def records_keys(self) -> dict:
+        """{versions}: the sealed records-key histories this signer holds, oldest first, for followers (#41)."""
+        d = self.state / "records-keys"
+        files = sorted(d.glob("v*.json"), key=lambda f: int(f.stem[1:])) if d.exists() else []
+        return {"versions": [json.loads(f.read_text(encoding="utf-8")) for f in files]}
+
+    def rotation_statement(self, new_public: str, new_origin: str, note: str, witness: str, reason: str) -> dict:
+        """The next records-key history (#41), unsigned: the current one with the newest window closed at this
+        signer's size and the new key's window opened under its own origin, resting on `note`, the witness's
+        countersigned checkpoint at that size. The trustees sign it; the new key accepts it; then rotate()."""
+        from keyclerk import records_keys as RK
+        with self.lock:
+            store = self._ready()
+            cur = store.pinned
+            if isinstance(cur, str):
+                cur = RK.pinned()
+                if cur is None or cur.key_at(0) != store.genesis:
+                    raise SignerRefused("this log has no records-key history yet: pin version 1 (configuration "
+                                        "records_keys) before the first rotation")
+            b = store.size()
+            keys = [{**w, "to_seq": b if w["to_seq"] is None else w["to_seq"]} for w in cur.doc["keys"]]
+            keys.append({"key": new_public, "origin": new_origin, "from_seq": b, "to_seq": None})
+            doc = {"format": RK.FORMAT, "realm": store.realm, "version": cur.version + 1, "keys": keys,
+                   "trusted": {"note": note, "witness": witness},
+                   "reason_sha256": hashlib.sha256(reason.encode()).hexdigest(), "at": _now()}
+            errs = RK.check(doc)
+            if errs:
+                raise SignerRefused("the next history is not well formed: " + "; ".join(errs[:3]))
+            return doc
+
+    def rotate(self, sealed: dict, new_key: Ed25519PrivateKey) -> dict:
+        """Move to the next records-key history (#41), signed by the pinned trustees and accepted by the new key: it
+        must switch exactly at this signer's size (a recovery first restores the signer to the trusted checkpoint,
+        decision 0019). The old key signs a last audit line naming the new key; from then on only the new key signs.
+        Run offline, the signer stopped (python -m keyclerk.records_keys)."""
+        from keyclerk import records_keys as RK
+        from keyclerk import trustees as T
+        with self.lock:
+            store = self._ready()
+            trust = T.pinned()
+            if trust is None:
+                raise SignerRefused("no trustee set is pinned (configuration trustees): a rotation is the trustees'")
+            cur = store.pinned if not isinstance(store.pinned, str) else RK.pinned()
+            if cur is None or cur.key_at(0) != store.genesis:
+                raise SignerRefused("this log has no records-key history yet: pin version 1 (configuration records_keys)")
+            try:
+                nxt = RK.advance(cur, sealed, trust["set"])
+            except RK.HistoryRefused as e:
+                raise SignerRefused(f"the history does not hold: {e}") from None
+            if nxt.switch != store.size():
+                raise SignerRefused(f"the history switches at link {nxt.switch}, this signer holds {store.size()}: "
+                                    "restore its state to the trusted checkpoint first (decision 0019)")
+            new_pub = new_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+            if new_pub != nxt.key_at(nxt.switch):
+                raise SignerRefused("the key given is not the history's new key")
+            if isinstance(store.pinned, str):
+                store.adopt_history(cur)
+            store.adopt_history(nxt)
+            d = self.state / "records-keys"
+            d.mkdir(exist_ok=True)
+            for name, data in ((f"v{nxt.version}.json", json.dumps(sealed, sort_keys=True)),):
+                tmp = d / (name + ".tmp")
+                with open(tmp, "w", encoding="utf-8", newline="\n") as h:
+                    h.write(data)
+                    h.flush()
+                    os.fsync(h.fileno())
+                os.replace(tmp, d / name)
+            self._audit({"op": "rotate", "version": nxt.version, "new_key": new_pub})   # the old key's last line
+            self.key = new_key
+            return {"version": nxt.version, "switch": nxt.switch, "origin": nxt.window(nxt.switch)["origin"]}
+
+    def genesis_key(self) -> str:
+        """The records key the log began with, which every store of it is pinned to; after a rotation (#41) it differs
+        from public_key(), the key signing now."""
+        rep = getattr(self, "replica", None)
+        return getattr(rep, "genesis", None) or self.public_key()
 
     # --- what it holds: the last revision it signed --------------------------------------------------------------
 
@@ -657,7 +917,7 @@ class Signer:
         witnessed = sizes[q - 1] if len(sizes) >= q else 0
         since, minutes = None, 0.0
         if witnessed < size:
-            since = L.open_link(self.replica.link(witnessed), self.public_key())[0]["at"]
+            since = L.open_link(self.replica.link(witnessed), self._verifier())[0]["at"]
             minutes = (datetime.now(timezone.utc) - datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ").replace(
                 tzinfo=timezone.utc)).total_seconds() / 60
         block = self.witness["block"]
@@ -676,6 +936,8 @@ class Signer:
         if self.witness is None or self.replica is None or self.broken:
             return None
         origin = self.witness["origin"]
+        if self.replica is not None and not isinstance(self.replica.pinned, str):
+            origin = self.replica.pinned.checkpoint_key(self.replica.size())["origin"]   # one origin per key (#41)
         committed = None
         if self.ha is not None:                    # decision 0031 point 8: detection witnesses see committed heads only,
             if self.ha["role"] != "active":        # from the active node, so none can hold a head a takeover drops
@@ -738,6 +1000,9 @@ class Signer:
         from keyclerk import ha as HA
         if not HA.NODE.fullmatch(node):
             raise SignerRefused("an HA node name is lower case, digits and hyphens")
+        from keyclerk import trustees as T
+        if T.pinned() is None:
+            raise SignerRefused("HA mode needs a pinned trustee set (configuration trustees, 0.29 review N8): without one the records key alone would decide HA changes and restore links")
         self.ha = {"node": node, "client": client, "hold": float(hold_seconds), "role": "standby", "why": None,
                    "clock": clock or _t.monotonic, "seen": (None, 0.0)}
 
@@ -778,7 +1043,7 @@ class Signer:
         if store.size() < done or done == 0:
             return False
         try:
-            return L.open_link(store.link(done - 1), self.public_key())[1] == self._head_at(cfg, done)
+            return L.open_link(store.link(done - 1), self._verifier())[1] == self._head_at(cfg, done)
         except (OSError, L.StoreRefused):
             return False
 
@@ -848,14 +1113,22 @@ class Signer:
         fresh = self.state / "replica-resync.db"
         for suffix in ("", "-wal", "-shm"):
             Path(str(fresh) + suffix).unlink(missing_ok=True)
-        new = SqliteStore(fresh, self.public_key(), old.realm)
+        new = SqliteStore(fresh, self._pin(), old.realm)
         try:
             for kind, key, rec in [(k, kk, r) for k in ("proof_tokens", "anchor_map", "anchor_idp")
                                    for kk, r in old.side_scan(k)]:
                 new.side_put(kind, key, rec)
+            taken = []
             while new.size() < done:
                 for sealed in self.ha["client"].links(cfg["origin"], new.size()):
                     new.append(sealed)
+                    taken.append(sealed)
+            if hasattr(self.key, "follow"):              # decision 0033: the custodian follows on the witness's word
+                from keyclerk.custodian import CustodianRefused
+                try:
+                    self.key.follow("rebuild", taken, self.ha["seen_note"][1])
+                except CustodianRefused as e:            # its own tail is not yet passed: it waits, never re-signs
+                    self.ha["why"] = f"the custodian waits: {e}"
             if new.size():
                 new.add_checkpoint(L.seal_checkpoint(self.key, new.realm, new.size(), new.root(), new.head(),
                                                      self.FENCE, _now()))
@@ -868,7 +1141,7 @@ class Signer:
                 os.replace(src, dst)
             else:
                 dst.unlink(missing_ok=True)
-        self.replica = SqliteStore(self.state / "replica.db", self.public_key(), old.realm)
+        self.replica = SqliteStore(self.state / "replica.db", self._pin(), old.realm)
         self._write_mark()
 
     def ha_tick(self) -> str:
@@ -903,13 +1176,22 @@ class Signer:
                 self.ha["role"], self.ha["why"] = "standby", f"deposed: the commit witness holds {done} links"
                 self._audit({"op": "ha_deposed", "size": store.size()})    # another node committed: resync below
             if store.size() > done or (store.size() == done and done and store.head() is not None and
-                                       L.open_link(store.link(done - 1), self.public_key())[1] != self._head_at(cfg, done)):
+                                       L.open_link(store.link(done - 1), self._verifier())[1] != self._head_at(cfg, done)):
                 self._resync_from_commit(cfg)            # an uncommitted tail of its own: dropped
                 store = self.replica
             try:
+                taken = []
                 while store.size() < done:
                     for sealed in self.ha["client"].links(cfg["origin"], store.size()):
                         store.append(sealed)
+                        taken.append(sealed)
+                if taken and hasattr(self.key, "follow"):    # decision 0033 Q4: the custodian follows the active node
+                    from keyclerk.custodian import CustodianRefused
+                    try:
+                        self.key.follow("extend", taken, self.ha["seen_note"][1])
+                    except CustodianRefused:                 # it holds a tail of its own: rebuilt from the committed log
+                        self._resync_from_commit(cfg)
+                        store = self.replica
             except L.StoreRefused:                       # its own history parted from the committed one: rebuilt
                 self._resync_from_commit(cfg)
                 store = self.replica
@@ -924,7 +1206,7 @@ class Signer:
     def _head_at(self, cfg: dict, size: int) -> bytes | None:
         from keyclerk.store import link as L
         got = self.ha["client"].links(cfg["origin"], size - 1, 1)
-        return L.open_link(got[0], self.public_key())[1] if got else None
+        return L.open_link(got[0], self._verifier())[1] if got else None
 
     def _take_over(self, store, cfg: dict, done: int) -> str:
         """The committed head stood still for the hold time: sign a takeover link and commit it. If the witness takes
@@ -946,6 +1228,10 @@ class Signer:
         self.ha["role"], self.ha["why"], self.ha["ok_at"] = "active", f"took over at {done}", self.ha["clock"]()
         self._audit({"op": "ha_takeover", "size": done})
         self._write_mark()
+        try:
+            self.record_custodian_recovery()
+        except Exception as e:   # noqa: BLE001 - the marker is retried at the next start; signing goes on
+            sys.stderr.write(f"keyclerk.signer: the custodian's recovery marker was not recorded: {e}\n")
         return "active"
 
     def start_ha(self, every_seconds: float) -> threading.Thread:
@@ -981,11 +1267,16 @@ class Signer:
         t.start()
         return t
 
-    def restore_link(self, mark: int, confirmations: list[tuple[str, str]], verify) -> dict:
+    def restore_link(self, mark: int, confirmations: list[tuple[str, str]], verify,
+                     trustee_sigs: list[dict] | None = None) -> dict:
         """After a restore whose lost links no follower holds (decision 0019 point 5, operator 2026-11-03): one link
         with no ops that resumes the numbering above `mark`, the newest revision anyone saw, signed only once the
         security officer and a root trust owner each proved the restore statement for this realm, mark and head.
         Never over the socket: run offline with the signer stopped (python -m keyclerk.restore link)."""
+        from keyclerk import trustees as T
+        if T.pinned() is None:
+            raise SignerRefused("a restore link needs a pinned trustee set (configuration trustees, 0.29 review N8): "
+                                "two trustees sign the mark, never the records key alone")
         import secrets
         from datetime import datetime, timezone
 
@@ -1008,7 +1299,9 @@ class Signer:
                      "records": {}}
             try:
                 body = L.link_body(store.realm, size, hexhead, self.FENCE, _now(), [], entry,
-                                   restore={"mark": int(mark), "confirmations": proofs})
+                                   restore={"mark": int(mark), "confirmations": proofs,
+                                            **({"trustees": trustee_sigs} if trustee_sigs else {})})
+                L.check_trustees(body)
                 side = [("proof_tokens", p["proof"], {"token": token}) for p, (_, token) in zip(proofs, ordered, strict=False)]
                 sealed, h = store.append_checked(body, lambda b: L.seal_body(self.key, b), side=side)
             except L.StoreRefused as e:
@@ -1021,12 +1314,15 @@ class Signer:
             return {"link": sealed, "checkpoint": cp, "hash": h.hex(), "revision": replay.revision(store)}
 
     def ha_change(self, mode: str, value: dict | None, node: str | None, confirmations: list[tuple[str, str]], verify,
-                  witness=None) -> dict:
+                  witness=None, trustee_sigs: list[dict] | None = None) -> dict:
         """Switch HA on or off, or name other nodes or another commit witness, or break the glass (decision 0031 points 3
         and 10): one HA change link, signed only once the security officer and a root trust owner each proved the
         statement for this realm, mode, value and base (operator 2026-11-05). Never over the socket: run offline with
         every signer node stopped (python -m keyclerk.ha). With HA on, `witness` is the current commit witness's
         client: a planned change is signed only on its committed head; a break-glass only while it does not answer."""
+        from keyclerk import trustees as T
+        if T.pinned() is None:
+            raise SignerRefused("HA mode needs a pinned trustee set (configuration trustees, 0.29 review N8): without one the records key alone would decide HA changes and restore links")
         import secrets
         from datetime import datetime, timezone
 
@@ -1091,7 +1387,9 @@ class Signer:
                      "actor": None, "records": {}}
             try:
                 body = L.link_body(store.realm, size, hexhead, self.FENCE, _now(), [op], entry,
-                                   ha={"mode": mode, "confirmations": proofs, **({"node": node} if node else {})})
+                                   ha={"mode": mode, "confirmations": proofs, **({"node": node} if node else {}),
+                                       **({"trustees": trustee_sigs} if trustee_sigs else {})})
+                L.check_trustees(body)
                 side = [("proof_tokens", p["proof"], {"token": token}) for p, (_, token) in zip(proofs, ordered, strict=False)]
                 sealed, h = store.append_checked(body, lambda b: L.seal_body(self.key, b), side=side)
             except L.StoreRefused as e:
@@ -1104,7 +1402,52 @@ class Signer:
 
     DUPLICATE_WINDOW = 1000                       # links after a stale base searched for the same change
 
-    def propose(self, base: dict, change: dict, tokens: list, rows: list | None = None) -> dict:
+    def record_custodian_recovery(self) -> bool:
+        """Decision 0033 Q6: a custodian brought back by the two-person ceremony is recorded in the log once, as the
+        signer's own record, so every verifier sees where the trustees vouched for the log. At start and at a takeover;
+        a standby records nothing. False when there is nothing to record."""
+        from datetime import datetime, timezone
+
+        from keyclerk import edge as E
+        from keyclerk.store import replay
+        state = getattr(self.key, "state", None)
+        if state is None or (self.ha is not None and self.ha.get("role") != "active"):
+            return False
+        rec = state().get("recovered")
+        if not rec:
+            return False
+        if any(x["statement"] == rec["statement"] for x in replay.records(self.replica).get("custodian_recoveries", [])):
+            return False
+        self.record_own([{"op": "put", "kind": "custodian_recoveries", "key": rec["statement"], "record": {
+            "statement": rec["statement"], "size": int(rec["size"]), "trustees": sorted(rec["trustees"]),
+            "at": datetime.now(timezone.utc).strftime(E.ISO)}}], "custodian_recovery")
+        return True
+
+    def record_own(self, ops: list[dict], action: str) -> dict:
+        """A change of the signer's own records (0.29 D3: unlocks, escrows, confirmations, activations), on the head it
+        holds, so both HA nodes read the same; judged and committed as any change. Retried when a desk's change came
+        first."""
+        import secrets as _secrets
+        recs: dict[str, list] = {}
+        for op in ops:
+            recs.setdefault(op["kind"], []).append(op["key"])
+        entry = {"change_id": "C-" + _secrets.token_hex(6), "action": action, "actor": "keyclerk:signer",
+                 "outcome": "applied", "records": recs}
+        last = None
+        for _ in range(5):
+            store = self.replica
+            h = store.head()
+            try:
+                return self.propose({"size": store.size(), "head": h.hex() if h is not None else None},
+                                    {"ops": sorted(ops, key=lambda o: (o["kind"], o["key"])), "entry": entry}, [],
+                                    internal=True)
+            except SignerRefused as e:
+                last = e
+                if not str(e).startswith("stale"):
+                    raise
+        raise SignerRefused(f"the signer's own record did not land: {last}")
+
+    def propose(self, base: dict, change: dict, tokens: list, rows: list | None = None, internal: bool = False) -> dict:
         """Apply a change to the replica in one transaction, check it there against the replica's own state, and only
         then sign and keep it, with its per-change checkpoint (decision 0022 point 5). The desk's base is a staleness guard, never state.
         The key signs nothing for a refused change: the unsigned body is checked, and sealed only once it passed."""
@@ -1131,6 +1474,11 @@ class Signer:
             if not isinstance(change, dict) or set(change) != {"ops", "entry"}:
                 raise SignerRefused("a change is exactly ops and entry")
             _entry_shape(change["entry"])
+            from keyclerk import records as _R
+            if not internal and any(isinstance(op, dict) and op.get("kind") in _R.SIGNER_KINDS
+                                    for op in change["ops"] if isinstance(change["ops"], list)):
+                raise SignerRefused("unlocks, escrows, their confirmations and activations are the checking signer's own "
+                                    "records: no desk writes them (0.29 D3)")
             if self.ha is not None:
                 change = {**change, "entry": {**change["entry"], "node": self.ha["node"]}}
             per_kind: dict[str, int] = {}
@@ -1142,6 +1490,7 @@ class Signer:
                 raise SignerRefused(f"a change touches more than {self.MAX_PER_KIND} records of {', '.join(map(str, wide))}: "
                                     "split it into smaller changes (the per-change cap, decision 0022)")
             self._no_provider_ids(change["ops"], store)
+            self._no_backdated_visits(change["ops"], store)
             side = self._tokens(change["ops"], tokens) + self._rows(store, change["ops"], rows)
             try:
                 body = L.link_body(store.realm, size, hexhead or L.ZERO, self.FENCE, _now(), change["ops"],
@@ -1183,7 +1532,7 @@ class Signer:
         cid, at = change["entry"].get("change_id"), base.get("size")
         if not isinstance(cid, str) or not isinstance(at, int) or isinstance(at, bool) or not 0 <= at < store.size():
             return None
-        prev = L.open_link(store.link(at - 1), self.public_key())[1].hex() if at else None
+        prev = L.open_link(store.link(at - 1), self._verifier())[1].hex() if at else None
         if prev != base.get("head"):
             return None                               # another history: an ordinary stale refusal
         try:
@@ -1192,7 +1541,7 @@ class Signer:
             return None
         for seq in range(at, min(store.size(), at + self.DUPLICATE_WINDOW)):
             sealed = store.link(seq)
-            body, h = L.open_link(sealed, self.public_key())
+            body, h = L.open_link(sealed, self._verifier())
             if body["change"]["entry"].get("change_id") != cid:
                 continue
             kept = {k: v for k, v in body["change"]["entry"].items() if k != "node"}     # the node is the signer's
@@ -1203,6 +1552,34 @@ class Signer:
                 self._commit_tail(store)              # asked again: committed before it is answered
             return {"duplicate": seq, "link": sealed, "checkpoint": store.checkpoint(seq + 1), "hash": h.hex()}
         return None
+
+    @staticmethod
+    def _no_backdated_visits(ops, store) -> None:
+        """0.29 review X4: a visit lease enters the log starting now or later (five minutes of skew), so a desk cannot
+        backdate one to win a cross-edge exclusion's tie-break; one already kept may be approved with its start. R3: a
+        keep enters the log dated at the change, within the same skew."""
+        from datetime import datetime, timedelta, timezone
+
+        from keyclerk import edge as E
+        now = datetime.now(timezone.utc)
+        for op in ops if isinstance(ops, list) else []:
+            if not (isinstance(op, dict) and op.get("op") == "put" and isinstance(op.get("record"), dict)
+                    and op.get("kind") in ("edge_visit_leases", "review_decisions")):
+                continue
+            field = "from" if op["kind"] == "edge_visit_leases" else "at"
+            old = store.get(op["kind"], op.get("key"))
+            if old is not None and old.get(field) == op["record"].get(field):
+                continue
+            try:
+                t = E._ts(op["record"].get(field))
+            except (ValueError, TypeError):
+                continue                                 # the records check refuses a malformed time
+            if op["kind"] == "edge_visit_leases" and t < now - timedelta(seconds=E.SKEW):
+                raise SignerRefused(f"visit lease {str(op.get('key'))[:40]} starts in the past: a visit lease starts "
+                                    "now or later (0.29 review X4)")
+            if op["kind"] == "review_decisions" and abs((t - now).total_seconds()) > E.SKEW:
+                raise SignerRefused(f"review decision {str(op.get('key'))[:40]} is not dated at this change: a keep is "
+                                    "made when it is signed (0.29 review R3)")
 
     @staticmethod
     def _no_provider_ids(ops, store) -> None:
@@ -1411,11 +1788,16 @@ class Signer:
         self._audit_prev = body["sha256"]
 
 
-def audit_chain(lines, pub) -> tuple[str | None, str, int]:
+def audit_chain(lines, pub, keys: list[str] | None = None) -> tuple[str | None, str, int]:
     """Whether whole audit lines verify (every line signed by pub, each naming the one before): (why not or None, the
     last line's hash, the number of lines). The signer checks its own at start; a backup checks the copy it takes,
-    line by line from the file."""
+    line by line from the file. A rotate line (#41), signed by the key before it, hands the chain to the key it names;
+    with keys (the records-key history's keys in order) that must be the next one, so no line in the file brings in a
+    key of its own."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     prev, n = "0" * 64, 0
+    if keys:
+        pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(keys[0]))
     for n, line in enumerate(lines, 1):
         try:
             e = json.loads(line)
@@ -1424,6 +1806,12 @@ def audit_chain(lines, pub) -> tuple[str | None, str, int]:
             if e["prev"] != prev or e["sha256"] != sha:
                 raise ValueError("it does not follow the line before")
             pub.verify(bytes.fromhex(e["signature"]), sha.encode())
+            if e.get("op") == "rotate":
+                if keys is not None:
+                    i = keys.index(pub.public_bytes(Encoding.Raw, PublicFormat.Raw).hex())
+                    if i + 1 >= len(keys) or keys[i + 1] != e["new_key"]:
+                        raise ValueError("a rotate line names a key the history does not hold next")
+                pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(e["new_key"]))
         except Exception as ex:   # noqa: BLE001 - unreadable, unlinked or unsigned: the chain is broken here
             return (f"the signer's audit log does not verify at line {n} ({type(ex).__name__}): restore the signer's "
                     "state from a backup as a whole (decision 0019)"), prev, n
@@ -1480,7 +1868,8 @@ def _entry_shape(entry) -> None:
 # Who may ask what (decision 0028, amendment of 2026-10-26): a subject link is never undone and decides whose sign-ins
 # count as whom, so only the reconciler, which reads the broker, records one; the desk's credential cannot.
 READ_OPS = frozenset({"ping", "public_key", "head", "links", "anchors", "checkpoint"})
-ROLE_OPS = {"desk": READ_OPS | {"sign_line", "commit", "migrate", "propose", "start", "tokens"},
+ROLE_OPS = {"desk": READ_OPS | {"sign_line", "commit", "migrate", "propose", "start", "tokens", "seal_bundle",
+                                 "bundle_public", "seal_edge", "identity_map", "unlock"},
             "reconciler": READ_OPS | {"link_subject"}}
 
 
@@ -1525,10 +1914,22 @@ def _handler(signer: Signer, token: str | None, role: str = "desk"):
                     out = signer.anchors(req.get("after"), req.get("limit"))
                 elif op == "checkpoint":
                     out = signer.checkpoint(req.get("size"))
+                elif op == "records_keys":                       # #41: the histories followers adopt
+                    out = signer.records_keys()
                 elif op == "snapshot":                           # issue 28: a desk starts from a snapshot
                     out = signer.snapshot()
                 elif op == "snapshot_state":
                     out = signer.snapshot_state(req.get("size"), req.get("offset"), req.get("limit"))
+                elif op == "seal_bundle":                        # 0021: the signer builds and seals a bundle
+                    out = signer.seal_bundle(req)
+                elif op == "bundle_public":
+                    out = signer.bundle_public(req.get("edge_id"))
+                elif op == "seal_edge":
+                    out = signer.seal_edge(req)
+                elif op == "identity_map":                       # 0021 point 2: the desk passes on the reconciler's
+                    out = signer.identity_map(req)
+                elif op == "unlock":                             # 0021 point 1: the unlock key lives here too
+                    out = signer.unlock(req)
                 elif op == "link_subject":                       # the reconciler, phase 2 (decision 0028)
                     out = signer.link_subject(req.get("anchor"), req.get("sub"))
                 else:
@@ -1646,6 +2047,21 @@ class SignerClient:
     def migrate(self) -> dict:
         return self._call({"op": "migrate"})
 
+    def seal_bundle(self, req: dict) -> dict:
+        return self._call({"op": "seal_bundle", **{k: v for k, v in req.items() if k != "op"}})
+
+    def bundle_public(self, edge_id: str | None = None) -> dict:
+        return self._call({"op": "bundle_public", **({"edge_id": edge_id} if edge_id else {})})
+
+    def seal_edge(self, req: dict) -> dict:
+        return self._call({"op": "seal_edge", **{k: v for k, v in req.items() if k != "op"}})
+
+    def identity_map(self, req: dict) -> dict:
+        return self._call({"op": "identity_map", **{k: v for k, v in req.items() if k != "op"}})
+
+    def unlock(self, req: dict) -> dict:
+        return self._call({"op": "unlock", **{k: v for k, v in req.items() if k != "op"}})
+
     def head(self) -> dict:
         return self._call({"op": "head"})
 
@@ -1658,6 +2074,9 @@ class SignerClient:
 
     def links(self, start: int, limit: int = 500) -> dict:
         return self._call({"op": "links", "start": start, "limit": limit})
+
+    def records_keys(self) -> dict:
+        return self._call({"op": "records_keys"})
 
     def tokens(self, after: str | None = None, limit: int = 500) -> dict:
         return self._call({"op": "tokens", "after": after, "limit": limit})
@@ -1724,7 +2143,11 @@ def resume_main(argv: list[str]) -> int:
 def parser() -> argparse.ArgumentParser:
     """The command line, without starting anything: what the deployer contract and the preflight read."""
     ap = argparse.ArgumentParser(prog="python -m keyclerk.signer", description=__doc__.splitlines()[0])
-    ap.add_argument("--key", required=True)
+    ap.add_argument("--key", help="the records key in this process: development and tests only (decision 0033)")
+    ap.add_argument("--custodian-token", metavar="FILE", help="the custodian's token, required over TCP")
+    ap.add_argument("--custodian", metavar="ADDR",
+                    help="keyclerk-custodian's local socket (unix:PATH or tcp:127.0.0.1:PORT): it holds the records key "
+                         "and signs nothing that breaks the log's structure (decision 0033, the production default)")
     ap.add_argument("--state", required=True)
     ap.add_argument("--config", required=True)
     ap.add_argument("--listen", help="unix:/path or tcp:127.0.0.1:port; not needed with --adopt")
@@ -1745,13 +2168,106 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--commit-witness", metavar="URL", help="the realm's commit witness (its key comes from the log)")
     ap.add_argument("--ha-hold", type=float, default=30.0,
                     help="seconds the committed head stands still before this standby takes over")
+    ap.add_argument("--identity-key", metavar="FILE",
+                    help="the reconciler's public key (64 hex digits) the identity map is sealed with (0021 point 2): "
+                         "leases name bastion accounts only from a map under it. python -m keyclerk.init identity-key "
+                         "writes it from the reconciler's --mark-key")
     return ap
+
+
+def read_identity_key(path) -> str:
+    """The reconciler's public key from its file: 64 hex digits, a valid Ed25519 point."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from keyclerk import guard
+    hexkey = guard.read_bounded(Path(path), 200).strip().lower()
+    try:
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(hexkey))
+    except ValueError:
+        raise SystemExit(f"--identity-key {path}: not an Ed25519 public key in 64 hex digits") from None
+    return hexkey
+
+
+def import_bundle_key_main(argv: list[str]) -> int:
+    """python -m keyclerk.signer import-bundle-key --state DIR --from FILE
+
+    Move a desk's bundle.key into the signer once (0.29.0, decision 0021): enrolled edges keep the key they pinned.
+    Refused when the signer already holds another bundle key. Delete the desk's copy afterwards."""
+    from keyclerk.edge_sealer import EdgeRefused, EdgeSealer
+    ap = argparse.ArgumentParser(prog="python -m keyclerk.signer import-bundle-key",
+                                 description=import_bundle_key_main.__doc__.splitlines()[0])
+    ap.add_argument("--state", required=True)
+    ap.add_argument("--from", dest="source", required=True)
+    ap.add_argument("--unlock-from", dest="unlock", help="the desk's unlock-v2.key, moved in the same way")
+    a = ap.parse_args(argv)
+    try:
+        sealer = EdgeSealer(Path(a.state), None)
+        if a.unlock:
+            sealer.import_unlock_key(Path(a.unlock))
+        got = sealer.import_key(Path(a.source))
+    except (EdgeRefused, RuntimeError, OSError, ValueError) as e:
+        raise SystemExit(f"keyclerk.signer import-bundle-key: {e}") from None
+    print(f"the signer holds the bundle key {got['key_id']}{' and the unlock key' if a.unlock else ''} now; delete "
+          f"{a.source}{' and ' + a.unlock if a.unlock else ''} from the desk")
+    return 0
+
+
+def rollover_main(argv: list[str]) -> int:
+    """python -m keyclerk.signer rollover begin|finish --key KEY --state DIR --config FILE ...
+
+    The bundle-key rollover (#41 F6), with the signer stopped:
+      begin  [--next NEXT] --out STATEMENTS.json   a statement per live edge for its officer to co-sign; HA nodes share
+                                                    one bundle key, so make NEXT once and begin on every node with it
+      finish --statements COSIGNED.json             every live edge's statement co-signed by its officer: the bundle
+                                                    key changes; on HA nodes finish the standby first, then the active
+    Edges fetch their own co-signed statement from the desk (GET /edge-key?edge=ID) and move to the new key."""
+    ap = argparse.ArgumentParser(prog="python -m keyclerk.signer rollover", description=rollover_main.__doc__.splitlines()[0])
+    ap.add_argument("step", choices=("begin", "finish"))
+    ap.add_argument("--key", required=True)
+    ap.add_argument("--state", required=True)
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--next", help="begin: the next bundle key file, the same on every HA node")
+    ap.add_argument("--out", help="begin: where the statements go")
+    ap.add_argument("--statements", help="finish: the statements, each co-signed by its edge's officer")
+    a = ap.parse_args(argv)
+    from keyclerk import config, guard
+    config.configure(a.config)
+    key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(guard.read_bounded(Path(a.key), 200).strip()))
+    try:
+        signer = Signer(key, Path(a.state))
+        if a.step == "begin":
+            if not a.out:
+                raise SignerRefused("begin writes the statements: give --out")
+            got = signer.rollover_begin(Path(a.next) if a.next else None)
+            tmp = Path(a.out).with_name(Path(a.out).name + ".tmp")
+            with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                f.write(json.dumps(got["statements"], indent=1) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, a.out)
+            print(f"{len(got['statements'])} statements in {a.out}: each edge's officer co-signs theirs "
+                  "(python -m keyclerk.edge_cli cosign), then finish with all of them")
+        else:
+            if not a.statements:
+                raise SignerRefused("finish takes the co-signed statements: give --statements")
+            got = signer.rollover_finish(json.loads(Path(a.statements).read_text(encoding="utf-8")))
+            print(f"the bundle key is {got['new'][:16]}... now (was {got['old'][:16]}...), for {len(got['edges'])} "
+                  "edges; destroy the retired key once every edge moved")
+    except (SignerRefused, OSError, ValueError) as e:
+        raise SystemExit(f"keyclerk.signer rollover: refused: {e}") from None
+    finally:
+        if "signer" in locals():
+            signer.close()
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["resume"]:
         return resume_main(argv[1:])
+    if argv[:1] == ["rollover"]:
+        return rollover_main(argv[1:])
+    if argv[:1] == ["import-bundle-key"]:
+        return import_bundle_key_main(argv[1:])
     ap = parser()
     a = ap.parse_args(argv)
     if bool(a.ha_node) != bool(a.commit_witness):
@@ -1760,7 +2276,24 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--ha-hold is at least 5 seconds: a shorter one takes over from a node that merely paused")
     from keyclerk import config, guard
     config.configure(a.config)
-    key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(guard.read_bounded(Path(a.key), 200).strip()))
+    if bool(a.key) == bool(a.custodian):
+        raise SystemExit("give the records key's holder: --custodian ADDR (production) or --key FILE (development and "
+                         "tests), one of them")
+    if a.custodian:
+        from keyclerk.custodian import CustodianKey, CustodianRefused
+        tok = guard.read_bounded(Path(a.custodian_token), 200).strip() if a.custodian_token else None
+        try:
+            key = CustodianKey(a.custodian, tok)
+        except ValueError as e:
+            raise SystemExit(f"keyclerk.signer: {e}") from None
+        try:
+            key.public_key()
+        except CustodianRefused as e:
+            raise SystemExit(f"keyclerk.signer: {e}") from None
+    else:
+        key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(guard.read_bounded(Path(a.key), 200).strip()))
+        sys.stderr.write("keyclerk.signer: the records key is in this process: development and tests only; production "
+                         "runs keyclerk-custodian (--custodian, decision 0033)\n")
     if a.adopt:
         st = Path(a.adopt)
         rev = Signer(key, Path(a.state)).adopt((st / "records.yaml").read_text(encoding="utf-8"),
@@ -1788,6 +2321,14 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"keyclerk.signer: {e}") from None
     if signer.broken:
         sys.stderr.write(f"keyclerk.signer: refusing to sign: {signer.broken}\n")
+    elif a.custodian and not a.ha_node:
+        try:
+            if signer.record_custodian_recovery():
+                sys.stderr.write("keyclerk.signer: the custodian's recovery is recorded in the log (decision 0033 Q6)\n")
+        except Exception as e:   # noqa: BLE001 - retried at the next start; signing goes on
+            sys.stderr.write(f"keyclerk.signer: the custodian's recovery marker was not recorded: {e}\n")
+    if a.identity_key:
+        signer.configure_identity(read_identity_key(a.identity_key))
     if config.acr_finding():                       # at every start (decision 0030 point 5)
         sys.stderr.write(f"keyclerk.signer: finding: {config.acr_finding()}\n")
     wcfg = config.current().get("witness")

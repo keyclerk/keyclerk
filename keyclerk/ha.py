@@ -15,6 +15,7 @@ Without the record, nothing of this applies: one signer, as in 0.27.0.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 NODE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 FIELDS = {"origin", "commit_witness", "nodes"}
@@ -65,6 +66,15 @@ def statement(realm: str, by: str, mode: str, size: int, head: str, value: dict 
     return base64.urlsafe_b64encode(hashlib.sha256(body.encode()).digest()).rstrip(b"=").decode()
 
 
+def trustee_sigs(args: list[str]) -> list[dict] | None:
+    """[{trustee_id, sig}] from TRUSTEE_ID=FILE arguments; None when none are given."""
+    out = []
+    for x in args or []:
+        tid, _, f = x.partition("=")
+        out.append({"trustee_id": tid, "sig": Path(f).read_text(encoding="utf-8").strip()})
+    return out or None
+
+
 def main(argv: list[str] | None = None) -> int:
     """python -m keyclerk.ha nonce|sign: an HA change, offline, every signer node stopped (decision 0031).
 
@@ -97,8 +107,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--commit-witness", help="the current commit witness's URL (required while HA is on)")
         if name == "nonce":
             p.add_argument("--by", required=True, help="the person's broker id; mapped to the log's anchor")
+            p.add_argument("--trustee-statement", help="write the bytes two trustees sign to this file (#41, F1)")
         else:
             p.add_argument("--proof", action="append", default=[], help="BROKER_ID=FILE holding that person's ID token")
+            p.add_argument("--trustee-sig", action="append", default=[],
+                           help="TRUSTEE_ID=FILE holding that trustee's signature over the trustee statement")
             p.add_argument("--approval-issuer", action="append", default=[])
             p.add_argument("--approval-audience", action="append", default=[])
             p.add_argument("--keycloak", required=True)
@@ -119,6 +132,12 @@ def main(argv: list[str] | None = None) -> int:
             print(statement(store.realm, inward(a.by), mode, store.size(), store.head().hex(), value, a.node))
             print(f"confirms: {mode} at size {store.size()}, head {store.head().hex()[:16]}"
                   + (f", node {a.node} signs on" if a.node else ""), file=sys.stderr)
+            if a.trustee_statement:
+                from keyclerk.store import link as L
+                st = L.ha_statement(store.realm, store.size(), store.head().hex(), mode, a.node, value)
+                Path(a.trustee_statement).write_bytes(b"kc-ha-change-v1\n" + st)
+                print(f"trustees sign {a.trustee_statement}: ssh-keygen -Y sign -n keyclerk-trustee@{store.realm} -f KEY "
+                      f"{a.trustee_statement}", file=sys.stderr)
             return 0
         from keyclerk import approvals
         from keyclerk.commit_witness import CommitClient
@@ -131,7 +150,8 @@ def main(argv: list[str] | None = None) -> int:
             confirmations.append((inward(who), Path(f).read_text(encoding="utf-8").strip()))
         try:
             out = signer.ha_change(mode, value, a.node, confirmations, verify,
-                                   CommitClient(a.commit_witness) if a.commit_witness else None)
+                                   CommitClient(a.commit_witness) if a.commit_witness else None,
+                                   trustee_sigs=trustee_sigs(a.trustee_sig))
         except SignerRefused as e:
             print(f"no HA change: {e}", file=sys.stderr)
             return 1
@@ -154,9 +174,14 @@ def committed(note: str, cfg: dict, pinned: str) -> tuple[int, bytes]:
     try:
         text, sigs = N.split(note)
         origin, size, root = N.parse_checkpoint(text)
-        if origin != cfg["origin"]:
+        if isinstance(pinned, str):
+            want, key = cfg["origin"], pinned
+        else:                                      # a records-key history (#41): each key has its own origin
+            w = pinned.checkpoint_key(size)
+            want, key = w["origin"], w["key"]
+        if origin != want:
             raise ValueError(f"a checkpoint of {origin[:60]}, not of this log's origin")
-        if N.verify(text, sigs, (origin, N.LOG, bytes.fromhex(pinned))) is None:
+        if N.verify(text, sigs, (origin, N.LOG, bytes.fromhex(key))) is None:
             raise ValueError("the checkpoint is not signed by the records key")
         if N.verify(text, sigs, N.parse_vkey(cfg["commit_witness"])) is None:
             raise ValueError("the checkpoint is not countersigned by the log's commit witness")

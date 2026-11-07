@@ -15,6 +15,15 @@ from keyclerk.store import replay
 from keyclerk.store.follow import Follower
 from keyclerk.store.memory import MemoryStore
 
+@pytest.fixture(autouse=True)
+def _trustees_pinned(monkeypatch):
+    """A restore link needs a pinned trustee set (0.29 review N8); these tests are not about trustee signatures."""
+    from keyclerk import trustees as T
+    from tests.test_trustees import pinned_set
+    ts = pinned_set("example")
+    monkeypatch.setattr(T, "pinned", lambda: {"set": ts, "since": 10 ** 9})
+
+
 
 def _people(signer):
     root = replay.records(signer.replica)["root"]

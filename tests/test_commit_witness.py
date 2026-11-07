@@ -17,6 +17,18 @@ ORIGIN = "keyclerk.example/commit-test"
 WKEY = W.Ed25519PrivateKey.from_private_bytes(b"c" * 32)
 
 
+@pytest.fixture(autouse=True)
+def _trustees_pinned(monkeypatch):
+    """HA mode needs a pinned trustee set (0.29 review N8); these tests are not about trustee signatures, so links
+    before a far-off position are taken as an upgraded deployment takes its older ones."""
+    from keyclerk import trustees as T
+    from tests.test_trustees import pinned_set
+    ts = pinned_set("example")
+    monkeypatch.setattr(T, "pinned", lambda: {"set": ts, "since": 10 ** 9})
+    yield
+    T.use(None)
+
+
 def _store():
     s = open_store("memory:", PUB, "example")
     s.append(nxt(s, [{"op": "put", "kind": "head", "key": "realm", "record": {"value": "example"}}]))
@@ -39,7 +51,9 @@ def _commit(w, old, links, note):
 
 
 def _witness(tmp_path):
-    return C.CommitWitness(WKEY, "witness.example/commit", tmp_path / "cw", [N.vkey(ORIGIN, N.LOG, N.raw_public(KEY))])
+    from tests.test_trustees import pinned_set
+    return C.CommitWitness(WKEY, "witness.example/commit", tmp_path / "cw", [N.vkey(ORIGIN, N.LOG, N.raw_public(KEY))],
+                           trustees=pinned_set("example"), trustees_since=10 ** 9)
 
 
 def test_a_commit_carries_its_links_and_one_of_two_racing_commits_wins(tmp_path):

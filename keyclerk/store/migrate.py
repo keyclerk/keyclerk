@@ -211,9 +211,9 @@ def migrate_yaml(raw: str, signature_hex: str, key, store, at: str, visits: list
     """Move one signed YAML revision into an empty store; what was moved, counted."""
     data = raw.encode("utf-8")
     sig = signature_hex.strip()
-    if E.public_hex(key) != store.pinned:
+    if E.public_hex(key) != L.key_at(store.pinned, 0):
         raise StoreRefused("the key given is not the store's records key")
-    if not E._verifies(store.pinned, sig, data):
+    if not E._verifies(L.key_at(store.pinned, 0), sig, data):
         raise StoreRefused("the YAML revision's signature does not verify against the records key: migrate only "
                            "records this key signed (restore records.yaml and records.yaml.sig from the store's revisions)")
     if store.size():

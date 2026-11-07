@@ -36,6 +36,13 @@ removes it, `break_glass` removes it when the commit witness is lost and names t
 this link's base (seq and prev). The confirmations are the security officer's and a root trust owner's, as a restore
 link's (operator 2026-11-05).
 
+Trustee signatures (#41, F1): a restore link and an HA change link may carry "trustees": [{"trustee_id", "sig"}, ...],
+two to four signatures by trustees of the set a verifier pins (keyclerk.trustees) over a statement naming the
+position: kc-ha-change-v1 {realm, seq, prev, mode, node, value_sha256} or kc-restore-v1 {realm, seq, prev, mark}.
+A verifier that pins a set (configuration trustees: {set, since}) refuses such a link at or after `since` without
+one officer's and one root trust owner's signatures; the confirmations' token hashes stay, for the signer's own
+check, but no verifier can check a hash, so they no longer decide anything there.
+
 kc-checkpoint-v1 body: {"format", "realm", "size" (links in the log), "root" (merkle root, hex), "head" (the link hash
 of seq size-1, hex), "fence", "at"}.
 
@@ -173,14 +180,15 @@ def _body(body: dict) -> dict:
         r = ch["restore"]
         if body["seq"] < 1 or ch["ops"] or "yaml" in ch or "migrate" in ch:
             raise StoreRefused("a restore link follows the genesis and carries no ops")
-        if not isinstance(r, dict) or set(r) != {"mark", "confirmations"} or not _count(r["mark"], 1) \
+        if not isinstance(r, dict) or set(r) - {"trustees"} != {"mark", "confirmations"} or not _count(r["mark"], 1) \
                 or not isinstance(r["confirmations"], list) or len(r["confirmations"]) != 2 \
                 or any(not isinstance(c, dict) or set(c) != {"by", "proof"} or not isinstance(c["by"], str)
                        or not 1 <= len(c["by"]) <= 256 or not isinstance(c["proof"], str) or not HEX64.fullmatch(c["proof"])
                        for c in r["confirmations"]) \
                 or r["confirmations"][0]["by"] == r["confirmations"][1]["by"]:
-            raise StoreRefused("restore is {mark, confirmations}: a whole mark from 1 and two confirmations "
-                               "{by, proof} by two different people, each proof 64 hex characters")
+            raise StoreRefused("restore is {mark, confirmations, trustees?}: a whole mark from 1 and two "
+                               "confirmations {by, proof} by two different people, each proof 64 hex characters")
+        _trustee_sigs(r)
     _ops(ch["ops"])
     _ha_change(body)
     return body
@@ -203,7 +211,7 @@ def _ha_change(body: dict) -> None:
     if body["seq"] < 1 or "yaml" in ch or "migrate" in ch or "restore" in ch:
         raise StoreRefused("an HA change link follows the genesis and is no migrate or restore link")
     if not isinstance(h, dict) or h.get("mode") not in HA_MODES \
-            or set(h) != ({"mode", "confirmations", "node"} if h["mode"] == "break_glass" else {"mode", "confirmations"}) \
+            or set(h) - {"trustees"} != ({"mode", "confirmations", "node"} if h["mode"] == "break_glass" else {"mode", "confirmations"}) \
             or ("node" in h and not (isinstance(h["node"], str) and _NODE.fullmatch(h["node"]))) \
             or not isinstance(h["confirmations"], list) or len(h["confirmations"]) != 2 \
             or any(not isinstance(c, dict) or set(c) != {"by", "proof"} or not isinstance(c["by"], str)
@@ -215,6 +223,67 @@ def _ha_change(body: dict) -> None:
     want = "put" if h["mode"] == "set" else "del"
     if len(ch["ops"]) != 1 or len(touches) != 1 or touches[0]["op"] != want:
         raise StoreRefused(f"an HA change link of mode {h['mode']} carries one op: {want} head ha")
+
+
+def _trustee_sigs(d: dict) -> None:
+    sigs = d.get("trustees")
+    if sigs is None:
+        return
+    if not isinstance(sigs, list) or not 2 <= len(sigs) <= 4 or any(
+            not isinstance(x, dict) or set(x) != {"trustee_id", "sig"} or not isinstance(x["trustee_id"], str)
+            or not 1 <= len(x["trustee_id"]) <= 64 or not isinstance(x["sig"], str) or not 1 <= len(x["sig"]) <= 16384
+            for x in sigs):
+        raise StoreRefused("trustees is two to four {trustee_id, sig}, signatures as text")
+
+
+def ha_statement(realm: str, seq: int, prev: str, mode: str, node: str | None, value) -> bytes:
+    """What two trustees sign for an HA change at one position (F1): the position, the mode, the node and the HA
+    record's hash, so a signature for one change at one place is void at any other."""
+    vs = hashlib.sha256(E.canonical(value)).hexdigest() if value is not None else None
+    return E.canonical({"format": "kc-ha-change-v1", "realm": realm, "seq": seq, "prev": prev, "mode": mode,
+                        "node": node, "value_sha256": vs})
+
+
+def restore_statement(realm: str, seq: int, prev: str, mark: int) -> bytes:
+    """What two trustees sign for a restore link at one position (F1, F8: the mark is theirs, not the key's)."""
+    return E.canonical({"format": "kc-restore-v1", "realm": realm, "seq": seq, "prev": prev, "mark": mark})
+
+
+def trustee_statement(body: dict) -> tuple[str, bytes] | None:
+    """(label, statement bytes) the trustees must have signed for this link; None when it needs none."""
+    ch = body["change"]
+    if "ha" in ch:
+        h = ch["ha"]
+        value = next((op["record"]["value"] for op in ch["ops"] if op["op"] == "put"), None)
+        return "kc-ha-change-v1", ha_statement(body["realm"], body["seq"], body["prev"], h["mode"], h.get("node"), value)
+    if "restore" in ch:
+        return "kc-restore-v1", restore_statement(body["realm"], body["seq"], body["prev"], ch["restore"]["mark"])
+    return None
+
+
+def check_trustees(body: dict) -> None:
+    """Where this process pins a trustee set, an HA change link or a restore link from the pinned position on holds
+    only with one officer's and one root trust owner's signatures over its statement (F1): the records key alone,
+    and hashes of tokens a verifier cannot see, never decide them."""
+    from keyclerk import trustees as T
+    what = trustee_statement(body)
+    if what is None:
+        return
+    try:
+        trust = T.pinned()
+    except (OSError, ValueError) as e:
+        raise StoreRefused(f"the pinned trustee set cannot be read: {e}") from None
+    if trust is None or body["seq"] < trust["since"]:
+        return
+    kind = "ha" if "ha" in body["change"] else "restore"
+    sigs = body["change"][kind].get("trustees")
+    if not sigs:
+        raise StoreRefused(f"link {body['seq']}: an {'HA change' if kind == 'ha' else 'restore'} link without trustee "
+                           "signatures; this verifier pins a trustee set, so the records key alone does not decide it")
+    try:
+        T.threshold(trust["set"], what[0], what[1], sigs)
+    except T.TrusteeRefused as e:
+        raise StoreRefused(f"link {body['seq']}: the trustee signatures do not hold: {e}") from None
 
 
 def check_restore(body: dict, revision_before: int | None) -> None:
@@ -233,8 +302,122 @@ def _seal(key: Ed25519PrivateKey, label: str, body: dict) -> dict:
     return {"bytes": base64.b64encode(raw).decode("ascii"), "signature": key.sign(_message(label, raw)).hex()}
 
 
-def _open(sealed, pinned: str, label: str) -> tuple[bytes, dict]:
-    """(message || signature, the parsed body): the signature checked first, over the bytes as they came."""
+def _key_for(pinned, label: str, raw: bytes) -> str:
+    """The key that must have signed these bytes: the pinned key, or, for a records-key history (#41), the key in force
+    at the link's seq or for the checkpoint's size. The position is read before the signature is checked only to
+    choose the key; whatever it claims, the store's sequence check still places the link."""
+    if isinstance(pinned, str):
+        return pinned
+    from keyclerk.records_keys import HistoryRefused
+    try:
+        body = E._parse(raw)
+    except ValueError as e:
+        raise StoreRefused(str(e)) from None
+    pos = body.get("seq") if label == LINK_FORMAT else body.get("size")
+    if not isinstance(pos, int) or isinstance(pos, bool) or pos < 0:
+        raise StoreRefused(f"a {label} without a position")
+    try:
+        return pinned.key_at(pos) if label == LINK_FORMAT else pinned.checkpoint_key(pos)["key"]
+    except HistoryRefused as e:
+        raise StoreRefused(str(e)) from None
+
+
+def key_at(pinned, seq: int) -> str:
+    """The records key in force at link `seq`: the pinned key, or the history's window holding seq (#41)."""
+    return pinned if isinstance(pinned, str) else pinned.key_at(seq)
+
+
+def adopt_history(current, history, size: int, genesis: str):
+    """The history a store with `size` links moves to (already verified by records_keys.advance against the trustees):
+    it starts from the store's genesis key, it is newer than the one held, and it drops none of the store's links (a
+    recovery that cuts links the store holds is truncated first, its links kept as evidence)."""
+    if history.key_at(0) != genesis:
+        raise StoreRefused("the history does not start from this store's records key")
+    if not isinstance(history.chain, list):
+        raise StoreRefused("a history without its sealed versions")
+    if not isinstance(current, str) and history.version <= current.version:
+        raise StoreRefused(f"history version {history.version} is not newer than {current.version}")
+    b = history.switch
+    if size > b and key_at(current, b) != history.key_at(b):
+        raise StoreRefused(f"the history switches at link {b}, but this store holds {size} links signed under the older "
+                           "key from there on: truncate to the switch first (they are kept as evidence)")
+    return history
+
+
+def switch_roots(pinned) -> dict[int, bytes]:
+    """{size: root} of every checkpoint a records-key history's versions rest on (review N6): at each switch the log's
+    root is what the trustees and the witness vouched for, so an older key's fork of the links before it is refused."""
+    if isinstance(pinned, str):
+        return {}
+    got = getattr(pinned, "_switch_roots", None)
+    if got is not None:
+        return got
+    from keyclerk.store import note as N
+    docs = []
+    for sealed in pinned.chain:
+        try:
+            docs.append(E._parse(base64.b64decode(sealed["bytes"])))
+        except (ValueError, KeyError, TypeError):
+            continue
+    docs.append(pinned.doc)
+    got = {}
+    for d in docs:
+        t = d.get("trusted") if isinstance(d, dict) else None
+        if not t:
+            continue
+        try:
+            _, size, root = N.parse_checkpoint(N.split(t["note"])[0])
+        except (N.NoteRefused, KeyError, TypeError, ValueError):
+            continue
+        got[size] = root
+    pinned._switch_roots = got
+    return got
+
+
+def check_switch_root(pinned, frontier: list, h: bytes) -> None:
+    """Refuse the link with hash h when, appended to a log with this frontier, it reaches a switch whose vouched root
+    is another (review N6)."""
+    roots = switch_roots(pinned)
+    if not roots:
+        return
+    from keyclerk.store import merkle
+    nxt = merkle.push(list(frontier), h)
+    size = merkle.size(nxt)
+    want = roots.get(size)
+    if want is not None and merkle.root(nxt) != want:
+        raise StoreRefused(f"at link {size} the log's root is not the one the records-key history rests on: an older "
+                           "key's fork of the links before a switch; not followed")
+
+
+def held_history(chain: list, size: int, genesis: str):
+    """What a store opening with these stored sealed versions checks with (review N1): the configured pin moved forward
+    through them against the pinned trustees, or the genesis key alone. Nothing stored is trusted by itself."""
+    from keyclerk import records_keys as RK
+    from keyclerk import trustees as T
+    try:
+        pin, trust = RK.pinned(), T.pinned()
+        h = RK.rebuild(pin, chain, trust["set"] if trust else None, genesis)
+    except (OSError, ValueError) as e:
+        raise StoreRefused(f"the store's records-key history does not hold against the pins: {e}") from None
+    return genesis if h is None else h
+
+
+def configured_history(current, size: int, genesis: str):
+    """What a store opening with `current` checks with: the process's pinned history (records_keys.pinned) when it
+    starts from this store's key and is newer than the one held; otherwise `current`."""
+    from keyclerk import records_keys as RK
+    try:
+        pin = RK.pinned()
+    except (OSError, ValueError) as e:
+        raise StoreRefused(f"the pinned records-key history cannot be read: {e}") from None
+    if pin is None or pin.key_at(0) != genesis or (not isinstance(current, str) and pin.version <= current.version):
+        return current
+    return adopt_history(current, pin, size, genesis)
+
+
+def _open(sealed, pinned, label: str) -> tuple[bytes, dict]:
+    """(message || signature, the parsed body): the signature checked first, over the bytes as they came. `pinned`
+    is the records key in hex, or a records-key history (keyclerk.records_keys.KeyHistory)."""
     if not isinstance(sealed, dict) or set(sealed) != {"bytes", "signature"}:
         raise StoreRefused(f"a sealed {label} is exactly bytes and signature")
     try:
@@ -244,7 +427,7 @@ def _open(sealed, pinned: str, label: str) -> tuple[bytes, dict]:
     if len(raw) > MAX_LINK:
         raise StoreRefused(f"a {label} body is at most {MAX_LINK} bytes")
     msg = _message(label, raw)
-    if not E._verifies(pinned, sealed["signature"], msg):
+    if not E._verifies(_key_for(pinned, label, raw), sealed["signature"], msg):
         raise StoreRefused(f"the {label} is not signed by the records key")
     try:
         body = E._parse(raw)
@@ -286,7 +469,9 @@ def open_link(sealed, pinned: str) -> tuple[dict, bytes]:
 def check_next(sealed, pinned: str, realm: str, size: int, head: bytes | None, fence: int) -> tuple[dict, bytes]:
     """A link that may follow a log of `size` links whose last hash is `head` and last fence `fence`."""
     body, h = open_link(sealed, pinned)
-    return follows(body, realm, size, head, fence), h
+    follows(body, realm, size, head, fence)
+    check_trustees(body)
+    return body, h
 
 
 def follows(body: dict, realm: str, size: int, head: bytes | None, fence: int) -> dict:

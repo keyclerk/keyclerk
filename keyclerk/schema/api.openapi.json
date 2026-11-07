@@ -1410,7 +1410,8 @@
        "void",
        "lapsed",
        "invalid",
-       "standby"
+       "standby",
+       "unreviewed"
       ]
      },
      "can_end": {
@@ -2376,6 +2377,15 @@
         }
        }
       }
+     },
+     "warnings": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "maxLength": 300
+      },
+      "maxItems": 20,
+      "description": "what the change will not do as one may expect (issue 52: an edge's ceiling)"
      }
     }
    },
@@ -4386,7 +4396,7 @@
   },
   "/relay/{relay_id}/confirm": {
    "post": {
-    "summary": "Confirm you opened it: a credential is deleted, an escrow half recorded",
+    "summary": "Confirm you opened it: a credential is deleted; an escrow half leaves your inbox but counts only with a fresh sign-in (confirm-sign-in)",
     "tags": [
      "change"
     ],
@@ -4473,9 +4483,207 @@
     ]
    }
   },
+  "/me/visit-leases/{lease_id}/carry-sign-in": {
+   "post": {
+    "summary": "Start the fresh sign-in that signs one carried visit lease (where approval proofs are required): the broker URL; the lease file is saved when it returns",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "lease_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
+  "/relay/{relay_id}/confirm-sign-in": {
+   "post": {
+    "summary": "Start the fresh sign-in that confirms your escrow half (where approval proofs are required): the broker URL to go to; the checking signer counts it (0.29 review S2)",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "relay_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ]
+   }
+  },
   "/edge/escrow/{item_id}": {
    "get": {
-    "summary": "Whether both custodians opened their halves; forget the value only then",
+    "summary": "Whether the checking signer counted both custodians' own sign-ins; forget the value only then",
     "tags": [
      "edge"
     ],
@@ -4673,6 +4881,145 @@
   "/edges/{edge_id}/unlock": {
    "post": {
     "summary": "Read a phoned-unlock code (an unlock approver of the edge, never the person)",
+    "tags": [
+     "change"
+    ],
+    "security": [
+     {
+      "bearer": []
+     },
+     {
+      "session": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "invalid input",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "not signed in",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "not allowed, or the CSRF header is missing",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "body too large",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "415": {
+      "description": "not JSON",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "refused",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "too many requests from one person",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "busy",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "edge_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/edges/{edge_id}/unlock-sign-in": {
+   "post": {
+    "summary": "Start the fresh sign-in that signs one phoned unlock (where approval proofs are required): the broker URL to go to; the code is shown after it",
     "tags": [
      "change"
     ],

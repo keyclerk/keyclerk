@@ -254,7 +254,8 @@ def management_server(address: tuple[str, int], readiness: Readiness, token: str
 
         do_PUT = do_DELETE = do_PATCH = do_POST
 
-    return ThreadingHTTPServer(address, H)
+    from keyclerk.httpserve import DualStackHTTPServer
+    return DualStackHTTPServer(address, H)
 
 
 def read_token(path: str) -> str:

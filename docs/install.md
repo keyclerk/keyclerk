@@ -366,7 +366,9 @@ someone else than the signer hosts. A desk only ever follows links the commit wi
    --origin ORIGIN --out SEED`. It writes every link and the records key's checkpoint of them.
 3. On the witness host, with the witness stopped: `python -m keyclerk.witness reseed --state DIR --origin ORIGIN --pin
    RECORDS_PUBLIC_HEX --links SEED/links.jsonl --checkpoint SEED/checkpoint.note --key witness.key --name
-   witness.example.org/commit --by NAME --reason TEXT`. Then run it with `serve --commit` (and TLS in front). A commit
+   witness.example.org/commit --by NAME --reason TEXT`; for a log whose records key was rotated, add `--records-keys
+   HISTORY --trustees SET` (the files you deliver to the witness anyway). Then run it with `serve --commit` (and TLS in
+   front). A commit
    witness never starts from nothing: a signer refuses an empty one as an outage, and after losing the witness host you
    seed a new one the same way, from the newest log you hold.
 4. Copy the stopped signer's state to the second node's host. Start each signer with `--ha-node NAME --commit-witness
@@ -406,6 +408,106 @@ example `python -c "import os; print(os.urandom(32).hex())" > mark.key`, then re
 user). A mark that does not verify, or records older than the mark, refuse the revision; memberships the records never
 required are still removed, and the run reports an incident. Upgrading from 0.26.x, run the reconciler once with
 `--adopt-mark`: it signs the existing unsigned mark when that mark is not ahead of the records.
+
+## Rotating the records key (0.29.0)
+The records key never names its successor: the trustees do (decision record of #41). Before the first rotation:
+- write the trustee set (`kc-trustees-v1`, at least two security officers and two root trust owners, nobody in both
+  roles, each key on their own FIDO2 key, PIV or OpenPGP card), check it (`python -m keyclerk.trustees check SET.json`)
+  and pin it in every service's configuration (`trustees: {set: FILE, since: N}`);
+- write version 1 of the records-key history (`kc-records-keys-v1`: the current records key, its log origin, from link
+  0) and pin it the same way (`records_keys: {history: FILE}`). Deliver both files out of band, never through the
+  desk.
+
+To change the trustee set (someone leaves, a key is lost): write version N+1, have an officer and a root trust owner
+of the current set sign it (`python -m keyclerk.trustees statement kc-trustees-v1 NEXT.json`, then each signs
+`NEXT.json.tosign`), and have every new key sign it too under `kc-trustees-accept-v1`. Then `python -m
+keyclerk.trustees next CURRENT.json NEXT.json SIGS.json ACCEPTS.json PINNED.json` writes the new set only once it
+verifies (SIGS.json and ACCEPTS.json are lists of `{trustee_id, sig}`); pin it where the old one was. A commit
+witness pins one set per process: restart it with the new `--trustees`.
+
+A rotation, with the signer stopped:
+1. Take the witness's countersigned checkpoint at the signer's current size (the note the witness returns).
+2. `python -m keyclerk.records_keys statement ... --new-public HEX --origin NEW_ORIGIN --note NOTE --out next`: a new
+   key is a new log origin.
+3. An officer and a root trust owner each sign `next.tosign` (`ssh-keygen -Y sign -n keyclerk-trustee@REALM -f KEY
+   next.tosign`, or raw Ed25519 from a PIV card).
+4. `python -m keyclerk.records_keys seal ... --new-key NEW.key --pinned CURRENT.json --trustees SET.json`: verified
+   before it is written.
+5. `python -m keyclerk.records_keys rotate ...`, then start the signer with the new key. Followers adopt the version
+   from the signer; services that read no links (witnesses, backup checks) take the new history file.
+
+After a compromise the same steps run from the last checkpoint the trustees still trust: restore the signer's state to
+it first (decision 0019); followers drop what the stolen key signed after it and keep it as evidence.
+
+## The key custodian (0.29.0)
+In production the records key lives in `keyclerk-custodian` (decision 0033), a small Go process of its own user, not
+in the signer: it signs a link only at the next position in its exact canonical form, and a checkpoint, note or
+snapshot statement only over the tree it computed itself; it never goes below the witness's countersigned checkpoint
+and never signs a position twice; everything else is refused. The signer's `--key` stays for development, tests and
+the one-time migration of a signed YAML store (a custodian never signs a YAML revision).
+1. Build it: `cd cmd/keyclerk-custodian && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o keyclerk-custodian .`
+2. Run it as its own user. The key file is that user's only: on Unix `chmod 600` (the custodian refuses anything
+   wider); on Windows a directory whose ACL grants only the custodian's account, inheritance removed.
+3. A new log: `keyclerk-custodian init --state DIR --realm REALM --origin ORIGIN --key records.key`. An existing log
+   (or a lost state) reaches a custodian only through the two-person ceremony: export the links with the signer stopped
+   (`python -m keyclerk.commit_witness seed ... --out SEED`), write a `kc-custodian-recovery-v1` statement
+   `{format, realm, origin, size, root, head, at}` in canonical JSON, have an officer and a root trust owner of the
+   pinned set sign it (`python -m keyclerk.trustees statement kc-custodian-recovery-v1 STMT.json`), then
+   `keyclerk-custodian recover --state DIR --realm REALM --origin ORIGIN --key records.key --links SEED/links.jsonl
+   --trustees SET.json --statement STMT.json --sig ID=FILE --sig ID=FILE --witness URL --witness-vkey VKEY` (a rotated
+   log adds `--origins` and `--retired HEX@UNTIL` for its earlier keys). It checks every link, and never goes below a
+   state the key still reads or below the witness.
+4. Serve: `keyclerk-custodian serve --state DIR --realm REALM --key records.key --listen
+   unix:/run/keyclerk/custodian.sock --witness URL --witness-vkey VKEY` (the commit witness, or the detection witness
+   outside HA); start the signer with `--custodian` and the same address instead of `--key`. Where there is no Unix
+   socket, `--listen tcp:127.0.0.1:PORT --token-file FILE` and the signer's `--custodian-token FILE`: any local user
+   reaches a loopback port, so every request carries the token. At start the custodian reads the witness and refuses
+   while its state is behind it, holds another tree at its size, or the witness keeps nothing of a log with links;
+   `--unwitnessed` is for development only.
+5. Two signer nodes run one custodian each, with the same key and the commit witness's `--witness-vkey`: a standby's
+   custodian follows the links the active node committed, exactly to the witness's countersigned checkpoint. A deposed
+   node whose own uncommitted tail the active node has not yet passed waits; it never signs a position twice. A
+   restarted standby custodian behind the witness serves with its floor raised and follows; it signs nothing until
+   it has (a single node behind the witness is a state restored from an older copy: the ceremony recovers it).
+6. Moving a custodian: `export --state DIR --key FILE --out WATERMARK` on the old machine retires it (its state is
+   overwritten and removed); `import --state DIR --key FILE --from WATERMARK` on the new one only raises. The watermark
+   is sealed under the key.
+7. Rotating the records key: the ceremony's `rotate` step takes `--custodian ADDR` (and `--custodian-token`) instead of
+   `--key`; then, with the custodian stopped, `keyclerk-custodian rotate --key OLD.key --next NEW.key --origin
+   NEW_ORIGIN --from-seq N` (N the history's switch). It overwrites and removes the old key file; on journalled,
+   copy-on-write or flash storage that is no erasure, so destroy its copies in backups and snapshots too.
+8. With a TPM (recommended where the host has one):
+   - Seal the key file to the machine's boot state: `keyclerk-custodian seal-key --key records.key --out records.sealed
+     --tpm device [--pcrs 7]`, then destroy the plain file on the host and keep its backup offline. Every command then
+     takes `--key records.sealed --tpm device`. A firmware or boot change (a PCR moves) stops the unseal: seal again
+     from the backup. The TPM never holds the key itself (no TPM implements Ed25519).
+   - Bind the state to a TPM counter: once per machine `keyclerk-custodian tpm-init --key ... --tpm device
+     --tpm-counter 0x01810C10`, then add `--tpm device --tpm-counter 0x01810C10` to `serve`, `recover` and `import`.
+     The counter is raised once per `--counter-epoch` (default an hour, about 8,800 writes a year; TPM counters wear
+     out after roughly 100,000) and at every recovery and import. A state copied back from an older backup or disk
+     image is then refused at start even when the witness cannot be read; the two-person ceremony recovers it. After a
+     rotation, define a new counter for the new key the same way.
+9. A key in an HSM (YubiHSM 2 or another token with `CKM_EDDSA`) needs the separate PKCS#11 build, which links
+   dynamically: `CGO_ENABLED=1 go build -tags pkcs11 -o keyclerk-custodian-pkcs11 .` Every command takes `--pkcs11
+   CONFIG.json`, `{"module": "/usr/lib/.../pkcs11.so", "token": "LABEL", "key": "LABEL", "pin_file": "FILE"}` (the PIN
+   file is the custodian's user's only), instead of `--key`. At start the custodian checks that the token signs
+   Ed25519 under the key's public half, and every signature is checked before it leaves. `rotate` refuses: a token's
+   key is rotated by the token's own ceremony, then recovered onto.
+10. After a recovery the signer records it in the log once, as its own record `custodian_recoveries` (the statement's
+   sha256, its size, who signed it): at start, or on two nodes when a node becomes active.
+
+## Rolling the bundle key over (0.29.0)
+Edges move to a new bundle key only on a statement their own officer co-signed (`kc-edge-key-rollover-v2`, #41 F6).
+With the signer stopped:
+1. `python -m keyclerk.signer rollover begin --key RECORDS_KEY --state DIR --config FILE --out statements.json`
+   writes one statement per live edge, signed by the current bundle key. Two signer nodes share one bundle key: make
+   the next key once (`python -m keyclerk.init bundle-key --out NEXT`) and begin on every node with `--next NEXT`.
+2. Each edge's officer co-signs their edge's statement (`python -m keyclerk.edge_cli cosign`); collect them all.
+3. `python -m keyclerk.signer rollover finish --key RECORDS_KEY --state DIR --config FILE --statements cosigned.json`.
+   It refuses unless every live edge's statement carries its officer's signature. On two nodes, finish the standby
+   first, then the active.
+4. Start the signer. Each edge fetches its own statement (`GET /api/v1/edge-key?edge=ID`) and pins the new key. Once
+   every edge has moved, destroy `bundle-retired-N.key` and the NEXT file.
 
 ## Privileged roles granted in the broker by hand
 KeyClerk grants access through the groups it manages, never through a role mapping. A privileged role mapped to a user

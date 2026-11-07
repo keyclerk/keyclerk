@@ -25,6 +25,7 @@ REASONS = ("head", "places", "situations", "sod", "catalogue", "group_tree", "sc
            "forced", "config")   # the metric's reason label values (keyclerk.metrics.VALUES)
 EDGE_KINDS = ("edges", "person_keys", "edge_rotations", "edge_visit_leases")
 VISIT_KINDS = ("visits", "visit_events", "badges")
+EXCLUSION_READS = ("memberships", "edge_visit_leases", "edges", "admin_revocations", "groups", "edge_exclusions")
 
 
 class Wide(Exception):
@@ -73,6 +74,8 @@ def subject_of(error: str, doc: dict) -> str:
             return _id_of(m.group(1), doc[m.group(1)][int(m.group(2))])
         return "schema"
     head = e.split(": ", 1)[0]
+    if head in {x.get("exclusion_id") for x in doc.get("edge_exclusions") or []}:
+        return "exclusions"                     # 0.29 review X1: judged over every edge and person it names
     return head.split("/", 1)[0]
 
 
@@ -374,6 +377,8 @@ def _reach(ix, ops):
         kind, key = op["kind"], op["key"]
         out.add(key)
         out.add(f"adminrev:{key}")
+        if kind in EXCLUSION_READS:              # X1: an overlap can come from any of these
+            out.add("exclusions")
         if kind == "groups":                     # a new, removed, moved or top group: the tree and every cover
             a, b = ix[0].get(kind, key), ix[1].get(kind, key)
             if a is None or b is None or a.get("parent") != b.get("parent") or a.get("parent") is None:
@@ -507,6 +512,8 @@ def _one(kind, rec, x: Ix, out, groups_changed, anchors, persons_touched):
         out.add(rec["grant_id"])
     elif kind in EDGE_KINDS:
         out |= {e for k in EDGE_KINDS for e in x.ids(k)}
+    elif kind in R.SIGNER_KINDS:                 # 0.29 D3: judged on their own shape; nothing reads them but the signer
+        pass
     elif kind in VISIT_KINDS:
         out |= {e for k in VISIT_KINDS for e in x.ids(k)}
     elif kind in ("approval_proofs", "proposal_proofs"):

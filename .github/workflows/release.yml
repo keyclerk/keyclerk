@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: EUPL-1.2
 # A tag v* becomes a release: the wheel and source distribution built here, their SHA-256 sums, a build provenance
 # attestation GitHub signs, a GitHub release, and PyPI through trusted publishing (no stored token; the pypi
-# environment requires a maintainer's approval). Verify: gh attestation verify FILE --repo keyclerk/keyclerk
+# environment requires a maintainer's approval), and the container images (image.yml, issue 49).
+# Verify: gh attestation verify FILE --repo keyclerk/keyclerk
 name: release
 on:
   push:
@@ -49,6 +50,14 @@ jobs:
       - name: Build the wheel and the source distribution
         run: |
           python3 -m pip install --quiet --user --require-hashes -r requirements-build.txt
+          python3 - <<'PY'          # the tag publishes the version the package says, or nothing (0.29.0-rc.1 is 0.29.0rc1)
+          import os, tomllib
+          from packaging.version import Version
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          pkg = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          if Version(tag) != Version(pkg):
+              raise SystemExit(f"the tag says {tag} and pyproject.toml {pkg}: not released")
+          PY
           python3 -m build --outdir dist .
           cd dist && sha256sum * > SHA256SUMS     # the SBOM is in the sums, so the provenance covers it too
       - name: Take the release notes from CHANGELOG.md
@@ -94,8 +103,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          pre=()
+          case "$GITHUB_REF_NAME" in *-*) pre=(--prerelease) ;; esac     # v0.29.0-rc.1: a pre-release, never latest
           gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --title "${GITHUB_REF_NAME}" \
-            --notes-file notes/notes.md \
+            "${pre[@]}" --notes-file notes/notes.md \
             dist/*
   pypi:
     needs: build
@@ -112,3 +123,22 @@ jobs:
       - name: Keep only the distributions
         run: rm -f dist/SHA256SUMS dist/*.cdx.json
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+  image:
+    needs: build                                    # the tests and the release notes passed first
+    strategy:
+      matrix:
+        include:
+          - name: keyclerk
+            context: .
+          - name: keyclerk-custodian
+            context: cmd/keyclerk-custodian
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/image.yml
+    with:
+      name: ${{ matrix.name }}
+      context: ${{ matrix.context }}
+      ref: ${{ github.ref_name }}

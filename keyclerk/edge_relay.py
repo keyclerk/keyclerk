@@ -38,7 +38,9 @@ from keyclerk import edge as E
 
 RELAY_FORMAT = "kc-edge-relay-v1"
 TIGHTEN_FORMAT = "kc-edge-tighten-v1"
-SITE_FORMAT = "kc-edge-site-v1"
+SITE_FORMAT = "kc-edge-site-v1"                  # a provisional replacement
+SITE_FORMAT_V2 = "kc-edge-site-v2"               # edge protocol 1.6: a promotion, with not_after
+SITE_MAX_HOURS = 24                              # a promotion statement's longest life: it promotes once, soon
 OPERATIONS = ("revoke_lease", "end_lease", "cut_sessions", "suspend_edge", "rollback_release", "hold_release")
 SITE_PURPOSES = ("provisional", "promotion")
 MAX_DAYS = 31                                    # a relay certificate's life: short, so a lost key lapses soon
@@ -47,6 +49,12 @@ MAX_OPS = 200
 CERT_FIELDS = {"format", "officer_key", "relay_key", "edges", "operations", "serial", "issued", "expires"}
 TIGHTEN_FIELDS = {"format", "key_id", "cert_sha256", "edge", "parent_serial", "counter", "signed_at", "ops"}
 SITE_FIELDS = {"format", "purpose", "edge", "site_key", "node_key", "at", "reason"}
+SITE_FIELDS_V2 = SITE_FIELDS | {"not_after"}
+
+
+def site_format(purpose: str) -> str:
+    """The format a site statement of this purpose is signed under: a promotion is kc-edge-site-v2 from 1.6."""
+    return SITE_FORMAT_V2 if purpose == "promotion" else SITE_FORMAT
 
 
 def relay_certificate(officer_key: str, relay_key: str, edges: list[str], operations: list[str], serial: int,
@@ -62,12 +70,18 @@ def tightening(cert: dict, edge: str, parent_serial: int, counter: int, ops: lis
             "parent_serial": parent_serial, "counter": counter, "signed_at": E._iso(signed_at), "ops": ops}
 
 
-def site_statement(purpose: str, edge: str, site_key: str, node_key: str, at: datetime, reason: str) -> dict:
-    """The object the site key and the node both sign (E.cosign with SITE_FORMAT)."""
+def site_statement(purpose: str, edge: str, site_key: str, node_key: str, at: datetime, reason: str,
+                   not_after: datetime | None = None) -> dict:
+    """The object the site key and the node both sign (E.cosign with site_format(purpose)). A promotion
+    (kc-edge-site-v2, edge protocol 1.6) carries not_after, at most SITE_MAX_HOURS after at (the default): a statement
+    found later cannot promote the node again."""
     if purpose not in SITE_PURPOSES:
         raise ValueError(f"purpose: {' or '.join(SITE_PURPOSES)}")
-    return {"format": SITE_FORMAT, "purpose": purpose, "edge": edge, "site_key": site_key, "node_key": node_key,
+    base = {"format": SITE_FORMAT, "purpose": purpose, "edge": edge, "site_key": site_key, "node_key": node_key,
             "at": E._iso(at), "reason": reason}
+    if purpose != "promotion":
+        return base
+    return {**base, "format": SITE_FORMAT_V2, "not_after": E._iso(not_after or at + timedelta(hours=SITE_MAX_HOURS))}
 
 
 def _cert(sealed: dict, officer_key: str) -> dict:
@@ -184,25 +198,39 @@ def verify_tighten(cert: dict, sealed: dict, pins: dict, state: dict, applied: d
     return [], effect
 
 
-def verify_site(sealed: dict, site_key: str, edge: str, purpose: str) -> dict:
+def verify_site(sealed: dict, site_key: str, edge: str, purpose: str, now: datetime | None = None) -> dict:
     """A site statement for this edge and this purpose, signed by exactly the pinned site key and the node it names;
-    ValueError otherwise."""
+    ValueError otherwise. A promotion is kc-edge-site-v2 (edge protocol 1.6): its not_after is after its at and at
+    most SITE_MAX_HOURS later, and with now, not passed."""
     if purpose not in SITE_PURPOSES:
         raise ValueError(f"purpose: {' or '.join(SITE_PURPOSES)}")
     body = E.opened(sealed) if isinstance(sealed, dict) and "bytes" in sealed else None
     node = (body or {}).get("node_key")
     if not isinstance(node, str) or not E.HEX64.fullmatch(node):
         raise ValueError("a site statement names the node's 64-hex enrolment key")
-    st = E.unseal_multi(sealed, [site_key, node], SITE_FORMAT)
-    if set(st) != SITE_FIELDS or st["site_key"] != site_key:
-        raise ValueError(f"a site statement is exactly {{{', '.join(sorted(SITE_FIELDS))}}}, naming the pinned site key")
+    fmt = site_format(purpose)
+    if (body or {}).get("format") != fmt:
+        if purpose == "promotion":
+            raise ValueError("a promotion is kc-edge-site-v2 (edge protocol 1.6), with not_after: a statement without "
+                             "one could promote the node again")
+        raise ValueError(f"a statement for {purpose} is {fmt}")
+    fields = SITE_FIELDS_V2 if fmt == SITE_FORMAT_V2 else SITE_FIELDS
+    st = E.unseal_multi(sealed, [site_key, node], fmt)
+    if set(st) != fields or st["site_key"] != site_key:
+        raise ValueError(f"a site statement is exactly {{{', '.join(sorted(fields))}}}, naming the pinned site key")
     if st["purpose"] != purpose:
         raise ValueError(f"a statement for {st['purpose']} is not one for {purpose}")
     if st["edge"] != edge:
         raise ValueError("a site statement for another edge")
-    E._ts(st["at"])
+    at = E._ts(st["at"])
     if not isinstance(st["reason"], str) or not 3 <= len(st["reason"]) <= 300:
         raise ValueError("reason: 3 to 300 characters")
+    if fmt == SITE_FORMAT_V2:
+        na = E._ts(st["not_after"])
+        if not at < na <= at + timedelta(hours=SITE_MAX_HOURS):
+            raise ValueError(f"not_after: after at, and at most {SITE_MAX_HOURS} hours later")
+        if now is not None and now > na:
+            raise ValueError(f"the promotion statement expired at {st['not_after']}")
     return st
 
 

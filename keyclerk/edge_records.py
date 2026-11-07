@@ -261,9 +261,58 @@ def rotation_errors(doc: dict, r: dict) -> list[str]:
     return errs
 
 
+def _end_of(doc: dict, rid: str, end: datetime) -> datetime:
+    times = [_ts(r["at"]) for r in doc.get("admin_revocations", []) if r["id"] == rid]
+    return min([end] + times)
+
+
+def exclusion_errors(doc: dict) -> list[str]:
+    """An exclusion names existing edges; no person holds two of its edges in overlapping windows, counting visit
+    leases and direct memberships of groups that carry an edge's targets (access through rules and included groups
+    is held apart when a bundle is derived, edge_grants.excluded)."""
+    errs, edges = [], {e["edge_id"]: e for e in doc.get("edges", [])}
+    ents = {eid: {t["entitlement"] for t in e.get("targets", [])} for eid, e in edges.items()}
+    for x in doc.get("edge_exclusions", []):
+        xid = x["exclusion_id"]
+        missing = [eid for eid in x["edges"] if eid not in edges]
+        if missing:
+            errs.append(f"{xid}: no such edge {', '.join(missing)}")
+            continue
+        if any(r["id"] == xid for r in doc.get("admin_revocations", [])):
+            continue
+        since = _ts(x["at"])                             # X3: overlaps ended before the exclusion are history
+        spans = []                                       # (person, edge, from, until, record id)
+        for v in doc.get("edge_visit_leases", []):
+            if v["edge"] in x["edges"]:
+                spans.append((v["person"], v["edge"], _ts(v["from"]), _end_of(doc, v["lease_id"], _ts(v["until"])),
+                              v["lease_id"]))
+        groups = {g["group_id"]: {c.get("entitlement") for c in g.get("carries", [])} for g in doc.get("groups", [])}
+        for m in doc.get("memberships", []):
+            a = (m.get("member") or {}).get("anchor")
+            if not a:
+                continue
+            for eid in x["edges"]:
+                if groups.get(m["group"], set()) & ents[eid]:
+                    spans.append((a, eid, _ts(m["start"]), _end_of(doc, m["membership_id"], _ts(m["end"])),
+                                  m["membership_id"]))
+        seen = set()
+        spans = [(p, eid, max(t0, since), t1, rid) for p, eid, t0, t1, rid in spans if t1 > since]
+        for i, (p, e1, a0, a1, r1) in enumerate(spans):
+            for q, e2, b0, b1, r2 in spans[i + 1:]:
+                if e1 != e2 and D.same(doc, p, q) and a0 < b1 and b0 < a1 and a0 < a1 and b0 < b1:
+                    k = tuple(sorted((r1, r2)))
+                    if k not in seen:
+                        seen.add(k)
+                        errs.append(f"{xid}: {r1} gives one person both {e1} and {e2}: its group carries a target "
+                                    f"of each; split the targets over two groups" if r1 == r2 else
+                                    f"{xid}: {r1} on {e1} and {r2} on {e2} give one person both edges at the same "
+                                    f"time; end one, or let them not overlap")
+    return errs
+
+
 def check(doc: dict) -> list[str]:
     from keyclerk import policy_wasm
-    errs = []
+    errs = exclusion_errors(doc)
     for e in doc.get("edges", []):
         errs += edge_errors(doc, e)
     now_keys = [k for k in doc.get("person_keys", []) if not _ended(doc, k["key_id"], _ts(k["at"]))]

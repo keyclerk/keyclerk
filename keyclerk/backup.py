@@ -239,6 +239,7 @@ def verify(stage: Path, names: list[str], records_key: str) -> dict:
     from keyclerk.store.link import StoreRefused
     pub = E.load_public(records_key)
     out: dict = {}
+    keys = None                                   # the signer's records-key history's keys, for its audit chain (#41)
     current = f"desk/{(stage / 'desk' / 'log.current').read_text(encoding='utf-8').strip()}" \
         if (stage / "desk" / "log.current").exists() else "desk/log.db"
     for name in sorted(n for n in names if _is_sqlite(stage / n)):
@@ -250,7 +251,9 @@ def verify(stage: Path, names: list[str], records_key: str) -> dict:
         except StoreRefused as e:
             raise BackupRefused(f"{name}: {e}") from None
         try:
-            replay.verify(st, records_key, st.realm)
+            replay.verify(st, st.pinned, st.realm)    # the store's own history after a rotation (#41)
+            if part == "signer" and not isinstance(st.pinned, str):
+                keys = [w["key"] for w in st.pinned.doc["keys"]]
             got = {"store": "log", "file": name, "realm": st.realm, "links": st.size(),
                    "head": st.head().hex() if st.head() else None, "revision": replay.revision(st)}
             if part == "signer":
@@ -267,7 +270,7 @@ def verify(stage: Path, names: list[str], records_key: str) -> dict:
         out[part] = got
     if "signer/audit.jsonl" in names:
         with open(stage / "signer" / "audit.jsonl", "rb") as f:
-            why, _, n = signer.audit_chain(f, pub)
+            why, _, n = signer.audit_chain(f, pub, keys)
         if why:
             raise BackupRefused(why)
         out.setdefault("signer", {})["audit_lines"] = n

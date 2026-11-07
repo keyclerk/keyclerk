@@ -24,10 +24,17 @@ SSH = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBk4bU2mPbJ6n0dO0eWq5d0q8v0k9s7rT1c2x
 
 @pytest.fixture
 def desk(tmp_path):
-    key = tmp_path / "key"
-    key.write_text(Ed25519PrivateKey.generate().private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex(), encoding="utf-8")
-    d = Desk(Store(tmp_path / "store", key, FIXTURES / "records.yaml"),
-             clock=Clock(datetime(2026, 10, 24, 8, 0, tzinfo=timezone.utc)))
+    return edge_desk(tmp_path, clock=Clock(datetime(2026, 10, 24, 8, 0, tzinfo=timezone.utc)))
+
+
+def edge_desk(tmp_path, name="store", seed=None, **kw):
+    """A desk on signed YAML whose checking signer holds the records key and the bundle key (0021): the desk holds
+    neither, and the signer cuts edge objects on the desk's clock."""
+    from keyclerk.signer import Signer
+    signer = Signer(Ed25519PrivateKey.generate(), tmp_path / f"{name}-signer")
+    d = Desk(Store(tmp_path / name, None, seed or FIXTURES / "records.yaml", signer=signer), **kw)
+    signer.configure_edge_clock(d.clock)
+    signer.bundle_public()                        # read before any edge is enrolled, as an installation does
     return d
 
 
@@ -160,10 +167,7 @@ def test_with_proofs_required_an_edge_enrolment_is_approved_by_a_proof_that_name
     policy = {"proofs": "required", "max_age_seconds": 300, "accepted_without_proof": []}
     real = config.current
     monkeypatch.setattr(config, "current", lambda: {**real(), "approvals": policy})
-    key = tmp_path / "key"
-    key.write_text(Ed25519PrivateKey.generate().private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()).hex(), encoding="utf-8")
-    desk = Desk(Store(tmp_path / "store", key, FIXTURES / "records.yaml"), proofs=proofs,
-                clock=Clock(datetime(2026, 10, 24, 8, 0, tzinfo=timezone.utc)))
+    desk = edge_desk(tmp_path, proofs=proofs, clock=Clock(datetime(2026, 10, 24, 8, 0, tzinfo=timezone.utc)))
     r = enrol(desk)
     own = desk.statement(W(OWNER), r["change_id"])                    # the root signs its own enrolment first
     assert own["purpose"] == "proposal" and own["records"] == ["plant-a"]
