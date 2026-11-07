@@ -16,7 +16,7 @@ files:
   .github/workflows/cflite.yml  sha256 78901a94d77e75df1f60917e047518dac96c7ba07248bb7fe64993f941bb55e2
   .github/workflows/ci.yml  sha256 c8af0732e842e5ab21390e7a6e53c4d416468667ab62660fe3328d832a6a23e1
   .github/workflows/image-rebuild.yml  sha256 0de5d791d8e40374f635b1a56a799a5633ccc7429d13931e4106ef5da127d7e3
-  .github/workflows/image.yml  sha256 842e03eb925575e9ef05c82e00ea8822d379232fc49a3179455863b9613fe6cc
+  .github/workflows/image.yml  sha256 e8d1f6ca075e5852584b631a1b3af3f44e5787b4bce2217d0b993e556abcda6f
   .github/workflows/public-text.yml  sha256 97151acd9e843db1ea2c78b98b98292f988895bbda4692e5c948c148f86e2907
   .github/workflows/release.yml  sha256 be5194cf82368759180d84feaccd520b285ecfc7e2ff6a9aa1b9c75002a270a8
   .github/workflows/scorecard.yml  sha256 0cf17ddfdfc913e415a80f8c0c14f23e584fe375930d00a53b9787b8a6cd8566
@@ -25,7 +25,7 @@ files:
   CLA.md  sha256 e3c71aa14f1afa369eb41d86db6ad16475cb76e89c45497896a91557173e310f
   CODE_OF_CONDUCT.md  sha256 ef45f8b74bed9f725eba033667af8893b1c2c352d910ef3efc2478874eb5ba29
   CONTRIBUTING.md  sha256 bde2f3c5ba92ec36494f104f34e8145e67e72e7f98dcdccf37086bf3ef2d2fc4
-  Containerfile  sha256 e29fef2fe3326e781416dedaa1cd81ebd64af8809f1529ddcc72b029322cdfcb
+  Containerfile  sha256 8b9405c90bb6ad2bc226616db72b7aafafdc8d84e23263c8360f912053bab10b
   GOVERNANCE.md  sha256 044c01971815d1e8c5298e188826b6d402d9d63938781a3ab9c142ade434d4fb
   LICENSE  sha256 57fb42fbcd0b037ce528ed8f72f1ec095d67bc6825ecf1448ff39be1fe68a4b4
   LICENSES/EUPL-1.2.txt  sha256 57fb42fbcd0b037ce528ed8f72f1ec095d67bc6825ecf1448ff39be1fe68a4b4
@@ -63,6 +63,7 @@ files:
   brand/wordmark/keyclerk-lockup-light.svg  sha256 ad0bc0750e72ed3e3ae229a3a63e974cffea4ba36d1e4281ddc89ef11c3028d6
   brand/wordmark/lockup-dark.src.svg  sha256 a1b79f38dc4a1fe4bd5d489a140e3c35051a585eb99178f58cd029aef8d78654
   brand/wordmark/lockup-light.src.svg  sha256 1edfe8f9217bb9b91fd80c44bfd696d9a604b33c7ac734ab72b50adc0dc08de0
+  changelog.d/49-image-fix.fixed.md  sha256 5242d8d078dce8b368f4bb3e02ace5e9fcf5ea8f67fbe77699ae26de2503c144
   changelog.d/README.md  sha256 a2f672046f68237bb315b637bdf90117aa784a4330ed31f0834cde427da64928
   cmd/keyclerk-custodian/Containerfile  sha256 409e7c28432a03b6dbf7d06978b4ca194fe2211bcf2f49bb61168c6051a0d34b
   cmd/keyclerk-custodian/canon.go  sha256 c571bf75f87f1dcb42c4d21c44774ca2b055855f093d04b106353c63b19e7ca3

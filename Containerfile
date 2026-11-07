@@ -3,7 +3,7 @@
 # Reproducible (issue 49): the base pinned by digest, no bytecode, no dated files; built with the commit's time as
 # SOURCE_DATE_EPOCH (podman build --timestamp, or buildx with rewrite-timestamp) a rebuild reaches the same digest.
 # The daily rebuild passes BASE to move a released image onto a fixed base; the label says which base it is on.
-ARG BASE=docker.io/library/python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
+ARG BASE=docker.io/library/python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
 
 FROM ${BASE} AS deps
 ENV PYTHONDONTWRITEBYTECODE=1
