@@ -63,11 +63,11 @@ chardet==7.7.0 \
     --hash=sha256:f8783b6e24a044ed9b53aa130ffafac4286aaf4a953f7843a3c1a261d7c77971 \
     --hash=sha256:feb66c96264e3e6a9ff0c7318ce0028800b6c18ad07c8000d2404a108d1ef767
     # via cyclonedx-bom
-cyclonedx-bom==7.6.0 \
-    --hash=sha256:4db70eb524e859317c645bbe927347e18bdd3cfa31906b1e482b4b936f8c36ef \
-    --hash=sha256:ab8a8c4cf0d8704f75029f75826993047783b8fd416e7dc3431af54c03e8adab
-    # via -r sbom-in.txt
-cyclonedx-python-lib==11.12.0 \
+cyclonedx-bom==8.0.1 \
+    --hash=sha256:a32c8bb2c4b436e0d6b7ee3b9f0899efdfc91e8f5d9652975467d31e4c20b900 \
+    --hash=sha256:b91ac00e0d031aaee0bc69fd3851384b2c36e569859df13b2a564b5d2d67aab3
+    # via -r requirements-sbom.in
+cyclonedx-python-lib[validation]==11.12.0 \
     --hash=sha256:0e807521a921a5c3cb8ce1153f8a61d29eedfe76a46aac2796b7c6b573391a54 \
     --hash=sha256:16767c4039de90c04e9f03348f8f0ed4b8ff842eaa7eefcad3a95685f970dacf
     # via cyclonedx-bom
@@ -91,7 +91,7 @@ jsonpointer==3.8 \
     --hash=sha256:a627a255641390bfb4d51d4cfbb90648078ae855b45804ef7e19ea13a4cca355 \
     --hash=sha256:d69af85adaea202111bbc931067ead68dc16bca4592c74e1a1953152e2a330ab
     # via jsonschema
-jsonschema==4.26.0 \
+jsonschema[format-nongpl]==4.26.0 \
     --hash=sha256:0c26707e2efad8aa1bfc5b7ce170f3fccc2e4918ff85989ba9ffa9facb2be326 \
     --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
     # via cyclonedx-python-lib
