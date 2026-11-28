@@ -3,7 +3,7 @@
 Each release's notes come from its section here. Earlier entries are the releases' own one-line summaries;
 the decision records (docs/decisions) hold the reasoning.
 
-## 0.29.0 (2026-11-28)
+## 0.29.0-rc.2 (2026-11-28)
 - The image workflow names the Containerfile (BuildKit looks for a Dockerfile by default, so 0.29.0-rc.1's image jobs
   found nothing to build), and a maintainer can build a tag's images again by hand. The engine image moves to the
   current Python 3.12 slim base (Python 3.12.16): the scan found a fixable critical finding in the earlier one.
