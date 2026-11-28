@@ -93,14 +93,18 @@ def release(root: Path, version: str, date: str) -> str:
     if bad:
         raise SystemExit("fix the fragments first:\n" + "\n".join(bad))
     frags = fragments(root)
+    path = root / "CHANGELOG.md"
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    top = re.search(r"^## (\S+) \(([^)]*)\)\n", text, re.M)
+    if top and re.fullmatch(rf"{re.escape(version)}-rc\.\d+", top.group(1)):
+        # the candidate becomes the release, with what was fixed after it on top: the release's notes (which the
+        # release workflow reads for the tag) are the whole release, not only the changes since its candidate
+        section = f"## {version} ({date})\n" + (body(root) if frags else "")
+        path.write_text(text[:top.start()] + section + text[top.end():], encoding="utf-8", newline="\n")
+        for f in frags:
+            f.unlink()
+        return section + text[top.end():].split("\n## ", 1)[0]
     if not frags:
-        path = root / "CHANGELOG.md"
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        top = re.search(r"^## (\S+) \(([^)]*)\)\n", text, re.M)
-        if top and re.fullmatch(rf"{re.escape(version)}-rc\.\d+", top.group(1)):   # the candidate becomes the release
-            section = f"## {version} ({date})\n"
-            path.write_text(text[:top.start()] + section + text[top.end():], encoding="utf-8", newline="\n")
-            return section + text[top.end():].split("\n## ", 1)[0]
         raise SystemExit("no fragments in changelog.d/: a release without notes fails at the tag")
     if contract_changed(root) and "**Upgrading:**" not in body(root):
         raise SystemExit("what a deployer must supply changed since the last release (docs/deployer-contract.md): "

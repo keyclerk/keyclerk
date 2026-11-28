@@ -40,6 +40,11 @@ into place only when every check passes.
 
 ## Running it
 
+From PyPI (`pip install keyclerk`) rather than the container image: the image takes out of its trust store the three
+emSign roots certifi dropped after the eMudhra key incident (`tools/distrust_cas.sh`); a host install does not. On a
+Debian or Ubuntu host run that script once as root, or use a Python whose trust store no longer has them (Python
+3.12.16 and later).
+
 In a terminal, init asks for every value it is not given:
 
 ```
