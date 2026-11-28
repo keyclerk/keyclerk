@@ -1,5 +1,5 @@
 profile: engine
-KeyClerk: 0.29.0rc1
+KeyClerk: 0.29.0rc2
 files:
   .clusterfuzzlite/Dockerfile  sha256 6bf1105f920b65f7e42987704590747b52c3aa73b5c48f476d13c5dd06119b9e
   .clusterfuzzlite/build.sh  sha256 a4b4235d0cb4106745be0c991160b548925951fcc8bd2c209fa8fb7a377f5484
@@ -21,7 +21,7 @@ files:
   .github/workflows/release.yml  sha256 be5194cf82368759180d84feaccd520b285ecfc7e2ff6a9aa1b9c75002a270a8
   .github/workflows/scorecard.yml  sha256 0cf17ddfdfc913e415a80f8c0c14f23e584fe375930d00a53b9787b8a6cd8566
   .gitignore  sha256 ef1ccfcc955004643e7245693d7354008f0ba91f74780ca9d68212a99b8827fc
-  CHANGELOG.md  sha256 5aceecb65cc7c776448fde2b6397880823ae2a9759678e04a141cfaf0f466a98
+  CHANGELOG.md  sha256 fcece1289634ccc21b9520f12aac0e99f32766f5ed824b2fae8391e33fb251c9
   CLA.md  sha256 e3c71aa14f1afa369eb41d86db6ad16475cb76e89c45497896a91557173e310f
   CODE_OF_CONDUCT.md  sha256 ef45f8b74bed9f725eba033667af8893b1c2c352d910ef3efc2478874eb5ba29
   CONTRIBUTING.md  sha256 bde2f3c5ba92ec36494f104f34e8145e67e72e7f98dcdccf37086bf3ef2d2fc4
@@ -32,7 +32,7 @@ files:
   LICENSES/MIT.txt  sha256 b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5
   MAINTAINERS.md  sha256 6705a31dceb074478400989a2e94d8b8a5bea7050a73783c8460e397f972ca0f
   NOTICE  sha256 6e6a422362f953e3bcb77b258746afba662cb29df799ccc7deba4c0a89c67317
-  README.md  sha256 618f773e4323a18abaf7da7e63ed1b0fe27cc3d481985ce1a1aa43b61f7c020e
+  README.md  sha256 edb4cabd9c0c6d254b2fd0674cfb09f47d0a6b29e21af81e5539e9f3f1681502
   REUSE.toml  sha256 519c75d50035eb67653d06556a178e8014f6a7d2f346bbbecae3e95c146dc1b3
   ROADMAP.md  sha256 2d1ee533b53ef933f52fb59c1e40bebbe4ef3280c2491638d5639a60a5f4530f
   SECURITY.md  sha256 7037b2de4f19026dec298344ff9956c8088884aea1a64cffb3de8834cab71700
@@ -63,7 +63,6 @@ files:
   brand/wordmark/keyclerk-lockup-light.svg  sha256 ad0bc0750e72ed3e3ae229a3a63e974cffea4ba36d1e4281ddc89ef11c3028d6
   brand/wordmark/lockup-dark.src.svg  sha256 a1b79f38dc4a1fe4bd5d489a140e3c35051a585eb99178f58cd029aef8d78654
   brand/wordmark/lockup-light.src.svg  sha256 1edfe8f9217bb9b91fd80c44bfd696d9a604b33c7ac734ab72b50adc0dc08de0
-  changelog.d/49-image-fix.fixed.md  sha256 dadaa39e8e5eed2eae8f4df374d303a5dcc7cbc2dca24bfca5ca2889597fa371
   changelog.d/README.md  sha256 a2f672046f68237bb315b637bdf90117aa784a4330ed31f0834cde427da64928
   cmd/keyclerk-custodian/Containerfile  sha256 409e7c28432a03b6dbf7d06978b4ca194fe2211bcf2f49bb61168c6051a0d34b
   cmd/keyclerk-custodian/canon.go  sha256 c571bf75f87f1dcb42c4d21c44774ca2b055855f093d04b106353c63b19e7ca3
@@ -128,7 +127,7 @@ files:
   docs/decisions/README.md  sha256 4383fb6eaaf7184aecad36916037acb7944e93d5604ff1e54d2169e1f9679e4d
   docs/deployer-contract.md  sha256 fe8e03cdf8fd0cdb9ad9bbc7c0c1c3166a791410c6aa0889691519e9f0f628c8
   docs/examples/wallet-registry.yaml  sha256 fd15ca9ac56492b9004f598f4c76372d1fec9d8ea080a97fac749eda7e1992c3
-  docs/install.md  sha256 fb40e085c45f4c4d91f929658f3a70283ed5ea5426a666b0d3f3464094f20eb6
+  docs/install.md  sha256 d6a8a87aaa8472f076f7bfaf45963e4fea66143e429260d584c685775010e1c1
   docs/keyclerk-edge-interface.md  sha256 b5bae19813a00d217accb80ac4bb0d655e2f3314da2b44cacd83e75141f481b9
   docs/migrate-to-change-log.md  sha256 3f39a66c3bb6b6eed75100a1f179f6eb6d806eacacacca198c7ce4203bb5aad4
   docs/references.md  sha256 0e6734f0604e23ceb28b42870117c7defef4a588be8df305e095424d589cb400
@@ -165,7 +164,7 @@ files:
   docs/ux/persona-history.md  sha256 191c456333ad0384b47ff5f8f79e9f76b6fa942f933e93957311bbd001e5a4fe
   docs/what-sets-keyclerk-apart.md  sha256 2678b7ddec692729004b404c822b18083afcb2491bdf66f92e1bcb3c2fe8d8db
   hooks/pre-push  sha256 163764eb7cfdd1efca7d929845730313ce700c4256935cab83e5b5454fddf0a7
-  keyclerk/__init__.py  sha256 f596d0ad76af2f51418cbec407336ddae0fef5c0fc473a25d9abf5c35c6b8b0f
+  keyclerk/__init__.py  sha256 4d95c2c0a012a442f567a0f2b72d27120a488d5e16ee5141c8035341dc3395d0
   keyclerk/access_paths.py  sha256 fc696e9c1070d8472a1dee680c2da92972fa6f6c75928c4bd0405fb623585e1c
   keyclerk/access_state.py  sha256 6bfb9381c4b2e036d7ee1ee7958c288ba11bfc19c0d3451435e4063db5674fa3
   keyclerk/age.py  sha256 b49b54841e8446395ef64c04549b298e38d59b6d8ad28e219e8a7679c7944746
@@ -187,7 +186,7 @@ files:
   keyclerk/contract.py  sha256 4b9d2f8d6ba9e73b202460bd96ea9211fc5523ae8b868eaaef699dd8d2d04204
   keyclerk/custodian.py  sha256 b2523ab2cc9a0abc16a16befc985422d4fbb9ce551d6a02d18b74c7101fe58ce
   keyclerk/delegation.py  sha256 18e0d3890f6c3cd4ad3131d6667e9a16c670a5058b19252972c8f8b25265c2f6
-  keyclerk/desk.py  sha256 84fba38f6cef32af5bc9aa965939299d8f24a75df8ece2574c181debdc1b61ab
+  keyclerk/desk.py  sha256 ea1ae2e0c978c14a9b41cded4b1b8708f5a9078edd445e9a672a7d2a35d28f75
   keyclerk/dpop.py  sha256 badaffb54c4cf07fd55c8bca6c0597fdf87b3c90b512d7cdd9510633564baa32
   keyclerk/edge.py  sha256 d5d5b662030335d5fd17715287bb965d3cacb19d94002d3ea3da3bce4cbda230
   keyclerk/edge_cli.py  sha256 8c9a520c65c62012f7cea0a621f98c63e0f9af8031bc039cb98c388ef9874698
@@ -302,7 +301,7 @@ files:
   keyclerk/visits.py  sha256 7d99afdc0fef10737c916b9b0a25263626aa00d85b5b5a927447d1aab706b42e
   keyclerk/wallet_registry.py  sha256 e12be1e9bab87329faa69d2623aa63691ef0e129600acb11dc9ae5a2388e0339
   keyclerk/witness.py  sha256 7a3618d79acd286c2e0be1c38beb42fd42d7e845c77c5dc23f4bf74536ca359c
-  pyproject.toml  sha256 fc399d8a812591b25441f070d76c9deaa7c59eb145e20b5894009b8c322b0a08
+  pyproject.toml  sha256 6f677a6c7e223048e366378ef848b9c054be9d34e960f34a7f8dc4f9b77bcfa7
   requirements-build.txt  sha256 21b314b7ac10696eb838eb7d5a4c105f5f12c9dacbc9c770880dc49cbb2ec8d1
   requirements-ci.txt  sha256 d60b207cdee89c63239112987f89248e191aca130c151233bd8fd3758e289fea
   requirements-sbom.in  sha256 0e394d88940231c7c11bff68d4d1ee26a904ab38afa5f9c86c2d59f627612dd3
@@ -370,7 +369,7 @@ files:
   tests/test_broker_features.py  sha256 6fe8960c79356d88c0303a2eda36ead70db4893696dd467bcfc26baa02f94a9e
   tests/test_c2sp.py  sha256 85aed9d57a35062cee794fc997005a2e56af978882cbd85d86b99d282788e5c3
   tests/test_ceiling_hours.py  sha256 5e2befb0553914f80dd6a5382a28518d8cf3f740dbd820fbc32acb11bc9e63b4
-  tests/test_changelog.py  sha256 06ce5538cbabd552c341761ab889e19329a23a4b2677aab6c294e6bba507aaf1
+  tests/test_changelog.py  sha256 99ca87318bcb738cc4f8a4a8cb3969e650e1b743b402aa9789ea9ce2b14a0d5f
   tests/test_clock.py  sha256 ac846412e3797a0ab0c0b9d02ca33eace4890894ef49a2f94d94ac9f93890543
   tests/test_commit_witness.py  sha256 63703aa861d09289e38b02cd70f6fb792cb8cee219691a54c7e5130cb117d5f1
   tests/test_commit_witness_keys.py  sha256 0d5709875c55a446a6d8b5d0abf7e01ac307f8b38de0777c8bd3179da893533e
@@ -380,7 +379,7 @@ files:
   tests/test_console.py  sha256 09ef0db857e475d3ac3084dc2077ad49e5ee02295b4990bda8d9f1891f1ace09
   tests/test_console_grants.py  sha256 78ca025fcfd331cdf158ddcf840f3f7636234f2c285cff3e0136a39364812965
   tests/test_contract.py  sha256 3ed4a639d59010345068a9e0ae773116d471cbfcb617932dcf562591f547acad
-  tests/test_custodian.py  sha256 6be64ad7c1eff5d3fe10c92b32220cc383a8ee07610089d59fccd5705404ddc2
+  tests/test_custodian.py  sha256 c5a8848dd060f137bb386a4a2609ac09518c0c6fda788d83d2638921788f9fb3
   tests/test_custodian_vectors.py  sha256 1a80011440ce642574bdfa1173b264ff9811a9da40c918f1692f85dc47a4c255
   tests/test_delegation.py  sha256 b7d9a436cf20f72b02a8890716a05bef729e87a90143ecf5cb11b2843ec29754
   tests/test_delegation_tree.py  sha256 024da7fc58a75c85f8370ec2b88a04c5de994160e2b0a15d6441f1820d2ba8bb
@@ -406,7 +405,7 @@ files:
   tests/test_edge_relay_holder.py  sha256 2bb4e55c28178f1ead75122ebe54409bd580fa62b7864c46b8d32c14a9061824
   tests/test_edge_report_14.py  sha256 9bcad2eb365e0190c12ed52db10bf9dcc7c741970b1094792bc0061e6f8688e5
   tests/test_edge_rotation_keys.py  sha256 e0b4d4d97c41db3214aa5c23efc7403f59b852f48b752090a5bee2964f8a63c7
-  tests/test_edge_sealer.py  sha256 1603bd05bcc0030f09a444c7461a27d84c97c7ad6afaafd3f6af024fc5ab09eb
+  tests/test_edge_sealer.py  sha256 e3cb0fbba34c3b5d2e48fddcfcd43059819682ae13c5adf7b306c683297392ac
   tests/test_edge_slice_d.py  sha256 585dc0bd010d124f7d81693799938be4b2d37709dd7863df1425988b8a84f566
   tests/test_edge_two_node_end_unlock.py  sha256 086a4b4f506d799e56ff498866c3b997d440ec8b341797c12228b7a130e15c3c
   tests/test_edge_two_nodes.py  sha256 a6630a41f50b649fa39e5db647fc932002037c6bf6ec1ecb86a850fb26faaad1
@@ -507,7 +506,7 @@ files:
   tools/bench_scale.py  sha256 7680187d5948a8715bd59c4df5ffe0ae07fcdcaa03ef18999441ac93afd800e4
   tools/bench_store.py  sha256 c52df9188bef84ef3bd3375eb60e404b3eed7236324f085ea9859b193a98cc07
   tools/build_policy.py  sha256 a33fa31c1be51c050a3dd4d9221f0baed8b16d62199d23d18e18f22fe14c7fa2
-  tools/changelog.py  sha256 3889699a5ea6fbc02a3203219ef62e896e42642097696bd3d0e97c6da68a8f11
+  tools/changelog.py  sha256 c1c22b17b0969e5bf8cd5f310b1332c64703f643e5e77f3c1f26ec395dbd1043
   tools/check_people_model.py  sha256 f4f583695b4e63f2e3aaec60b81dfab7bd6a172202478a17a1bba17e7669d146
   tools/distrust_cas.sh  sha256 2cf067ac52353d2c9bfe183c8742c0c426873f6fb2eae0eb55e16fb6f679e5c5
   tools/edge_verifier_vectors.py  sha256 1a006268bf0ba6b879b124f2c75322261fa495a905451769a586c183ecd8bccd
@@ -526,4 +525,4 @@ files:
   tools/model_signer_failover.py  sha256 080c4fdf8c7047bb798a8192976f9f7d2efb1017babbdc62c024e0b6187f5be0
   tools/public_text_check.py  sha256 21383f2559bfbceacde7e4ce9f611fe078b1f3124c86a907383a1bf5d2f28a06
   tools/sign_policy_release.py  sha256 c4fc82ad667408e444a3e7b37c4f435e9271758d610a4344e907639e227a4707
-  tools/soak_core.py  sha256 d3f3dbf2cf51b8bd286f72ab6751c9125c93675e81fe57a939b35b06cf0a8d8c
+  tools/soak_core.py  sha256 5df8521a48b89c9762be4dd80db66be875dd75139da196b3b8ff83590705ef13

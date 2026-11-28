@@ -3,7 +3,20 @@
 Each release's notes come from its section here. Earlier entries are the releases' own one-line summaries;
 the decision records (docs/decisions) hold the reasoning.
 
-## 0.29.0-rc.1 (2026-11-07)
+## 0.29.0-rc.2 (2026-11-28)
+- The image workflow names the Containerfile (BuildKit looks for a Dockerfile by default, so 0.29.0-rc.1's image jobs
+  found nothing to build), and a maintainer can build a tag's images again by hand. The engine image moves to the
+  current Python 3.12 slim base (Python 3.12.16): the scan found a fixable critical finding in the earlier one.
+- The pushed image is the digest the two builds reproduced: BuildKit's own attestations are off (GitHub's attest the
+  digest instead) and the push uses OCI media types, as the comparison builds do.
+- After an HA failover edges get bundles again at once (found by the 0.29.0-rc.1 lab run): the desk passed the
+  reconciler's identity map only when it changed, so the node that took over, a standby that never received it,
+  refused every bundle until the reconciler next wrote the map, and no new lease or revocation reached an edge. A
+  refusal saying the signer holds no map now makes the desk pass it again and repeat the call, once.
+- The 0.29.0-rc.1 lab run (docs/reviews/2026-11-07-rc1-lab-run.md): the soak harness starts on 0.29 again (it pins a
+  trustee set, the commit witness pins it too, the unlock key is imported); the custodian tests take a published
+  binary (`KC_CUSTODIAN_BIN`); the install guide says that a pip install, unlike the image, keeps the emSign roots
+  certifi dropped.
 - HA change links and restore links can be confirmed by trustee signatures that every verifier checks (#41, F1). Their
   confirmations were hashes of broker tokens, which only the signer could check: whoever held the records key could
   sign HA off or break-glass with made-up hashes, and a desk adopted that link without the commit witness's

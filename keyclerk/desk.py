@@ -1347,13 +1347,38 @@ class Desk:
                              "records": {}, "outcome": "refused", "reasons": [refused[:300]]})
         self._identity_sha = sha
 
+    NO_MAP = "the signer holds no identity map yet"
+
+    def _with_identity(self, call):
+        """A signer call that needs the reconciler's identity map. The desk passes the map only when it changed, so after
+        an HA failover (0.29.0-rc.1 lab run) the newly active node, a standby that never received it, refuses every
+        bundle until the reconciler next writes the map: no new lease and no revocation would reach an edge. A refusal
+        saying the signer holds no map passes the map again, once, and repeats the call."""
+        from keyclerk.signer import SignerRefused
+        self._push_identity()
+        for again in (True, False):
+            try:
+                out = call()
+            except SignerRefused as e:
+                if again and self.NO_MAP in str(e):
+                    self._identity_sha = None
+                    self._push_identity()
+                    continue
+                raise
+            if again and isinstance(out, dict) and len(out) == 1 and self.NO_MAP in str(out.get("refused", "")):
+                self._identity_sha = None
+                self._push_identity()
+                continue
+            return out
+
     def _seal(self, kind: str, edge_id: str, **fields) -> dict:
         from keyclerk.signer import SignerRefused
         req = {"kind": kind, "edge_id": edge_id, "fields": fields}
-        if kind in ("email", "carried"):
-            self._push_identity()
         try:
-            out = self._edge_signer().seal_edge(req)
+            if kind in ("email", "carried"):
+                out = self._with_identity(lambda: self._edge_signer().seal_edge(req))
+            else:
+                out = self._edge_signer().seal_edge(req)
         except SignerRefused as e:
             raise Refusal(f"the checking signer refused: {e}") from None
         if isinstance(out, dict) and "refused" in out and len(out) == 1:
@@ -1617,11 +1642,10 @@ class Desk:
             if state.get("silent"):
                 self.edge_store.update_state(edge_id, silent=False)
             from keyclerk.signer import SignerRefused
-            self._push_identity()
             try:                                         # the signer derives every entry from its own records (0021)
-                got = signer.seal_bundle({"edge_id": edge_id, "serial": want, "ceiling": sealed_ceiling,
-                                          "policy": policy, "attested": attested, "first_seen": seen,
-                                          "quote": quote, "request": list(request) if request else None})
+                got = self._with_identity(lambda: signer.seal_bundle({
+                    "edge_id": edge_id, "serial": want, "ceiling": sealed_ceiling, "policy": policy, "attested": attested,
+                    "first_seen": seen, "quote": quote, "request": list(request) if request else None}))
             except SignerRefused as x:
                 raise Refusal(f"the checking signer refused the bundle: {x}") from None
             if "refused" in got and len(got) == 1:

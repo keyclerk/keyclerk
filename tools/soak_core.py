@@ -108,6 +108,33 @@ def _verify(token, nonce, by):
         raise ValueError("this proof is for another statement")
 
 
+def _pin_trustees(d: Path, cfg: dict, doc: dict, root: dict, since: int) -> None:
+    """HA mode needs a pinned trustee set (0.29 review N8): two officers and two root trust owners with raw Ed25519
+    keys (DIR/trustee-*.key), the realm's officer and root holders first, pinned in the configuration every process
+    reads from link `since` on. The HA change that switches HA on lies before it; any later HA change or restore link
+    would need two trustees' signatures, which the soak never makes."""
+    from keyclerk import trustees as T
+    others = [p["anchors"][0] for p in doc["persons"] if p["anchors"][0] not in
+              {root["officer"], *(h["anchor"] for h in root["holders"])}]
+    officers = [root["officer"], others.pop(0)]
+    roots = ([h["anchor"] for h in root["holders"]] + others)[:2]
+    people = []
+    for i, (anchor, role) in enumerate([(a, "officer") for a in officers] + [(a, "root") for a in roots]):
+        k = Ed25519PrivateKey.generate()
+        (d / f"trustee-{i}.key").write_text(_hex(k), encoding="utf-8")
+        people.append({"trustee_id": f"{role}-{i}", "anchor": anchor, "role": role,
+                       "key": {"type": "ed25519", "public_key": E.public_hex(k)}})
+    ts = {"format": T.FORMAT, "realm": doc["realm"], "version": 1,
+          "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "trustees": people}
+    errs = T.check(ts)
+    if errs:
+        raise SystemExit(f"the soak's trustee set does not hold: {errs[0]}")
+    (d / "trustees.json").write_text(json.dumps(ts, indent=1), encoding="utf-8")
+    cfg["trustees"] = {"set": str(d / "trustees.json"), "since": since}
+    (d / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    config.configure(d / "config.yaml")
+
+
 def build(d: Path) -> dict:
     """A fresh realm with HA on and its commit witness seeded, from the stopped signer (the runbook's order)."""
     if d.exists() and any(d.iterdir()):
@@ -130,10 +157,14 @@ def build(d: Path) -> dict:
     from keyclerk.edge_sealer import EdgeSealer       # HA nodes share one bundle key (0021): made once, imported;
     E.load_or_make_key(d / "bundle.key", allow_create=True)   # node-b is copied from node-a below, key included
     EdgeSealer(d / "node-a", None).import_key(d / "bundle.key")
+    (d / "unlock-v2.key").write_text(E.new_unlock_private(), encoding="utf-8")   # and the unlock key (0.29, #38): a
+    EdgeSealer(d / "node-a", None).import_unlock_key(d / "unlock-v2.key")       # node in HA mode makes none itself
     hcfg = {"origin": ORIGIN, "commit_witness": N.vkey(WITNESS, N.COSIGNATURE, N.raw_public(wkey)),
             "nodes": ["node-a", "node-b"]}
-    root = replay.records(signer.replica)["root"]
+    doc = replay.records(signer.replica)
+    root = doc["root"]
     size, head = signer.replica.size(), signer.replica.head().hex()
+    _pin_trustees(d, cfg, doc, root, since=size + 1)
     proofs = [(by, json.dumps({"nonce": HA.statement("example", by, "set", size, head, hcfg, None), "by": by}))
               for by in (root["officer"], root["holders"][0]["anchor"])]
     signer.ha_change("set", hcfg, None, proofs, _verify)
@@ -158,9 +189,11 @@ class Core:
 
     def argv(self, name):
         py, d = sys.executable, self.d
-        if name == "witness":
+        if name == "witness":                       # it pins the trustee set the configuration pins (0.29 review N8)
+            pin = yaml.safe_load((d / "config.yaml").read_text(encoding="utf-8"))["trustees"]
             return [py, "-m", "keyclerk.witness", "serve", "--commit", "--key", str(d / "witness.key"), "--name", WITNESS,
-                    "--state", str(d / "cw"), "--log", self.log_vkey, "--listen", f"127.0.0.1:{self.ports['witness']}"]
+                    "--state", str(d / "cw"), "--log", self.log_vkey, "--listen", f"127.0.0.1:{self.ports['witness']}",
+                    "--trustees", pin["set"], "--trustees-since", str(pin["since"])]
         return [py, "-m", "keyclerk.signer", "--key", str(d / "signer.key"), "--state", str(d / name),
                 "--config", str(d / "config.yaml"), "--listen", f"tcp:127.0.0.1:{self.ports[name]}",
                 "--token", str(d / "token"), "--ha-node", name,

@@ -113,3 +113,16 @@ def test_a_release_candidate_has_its_section_and_becomes_the_release(tmp_path):
     assert "## 0.29.0 (2026-11-08)\n- Added.\n" in text and "rc.1" not in text
     with pytest.raises(SystemExit, match="no fragments"):
         changelog.release(root, "0.30.0", "2026-11-09")       # another version's notes are never taken over
+
+
+def test_what_was_fixed_after_the_candidate_joins_the_release_section(tmp_path):
+    """Fixes found by testing the candidate land as fragments; the release puts them on top of the candidate's notes
+    in one section, since the release workflow reads only the tag's section for the release notes."""
+    root = _repo(tmp_path, {"31.added.md": "- Added.\n"})
+    changelog.release(root, "0.29.0-rc.1", "2026-11-07")
+    (root / "changelog.d" / "32.fixed.md").write_text("- Fixed after the candidate.\n", encoding="utf-8")
+    changelog.release(root, "0.29.0", "2026-11-08")
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## 0.29.0 (2026-11-08)\n- Fixed after the candidate.\n- Added.\n" in text
+    assert "rc.1" not in text and text.count("## 0.29.0") == 1
+    assert changelog.fragments(root) == []

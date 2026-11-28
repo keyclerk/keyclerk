@@ -448,3 +448,28 @@ def test_the_long_poll_digest_counts_dropped_as_content():
     c = E.build_bundle("edge-a", 3, t, {"low": 1}, [], [], [], None, pol, key,
                        dropped=[{"lease_id": "L-1", "why": ["longer than the ceiling's longest lease"]}])
     assert len({E.bundle_digest(a), E.bundle_digest(b), E.bundle_digest(c)}) == 3
+
+
+def test_after_a_failover_the_desk_passes_the_identity_map_again():
+    """The 0.29.0-rc.1 lab run: the desk passes the reconciler's map only when it changed, so the node that took over
+    (a standby that never received it) refused every bundle. A refusal saying the signer holds no map makes the desk
+    pass the map again and repeat the call, once; any other refusal is never retried."""
+    from keyclerk.desk import Desk
+    from keyclerk.signer import SignerRefused
+    d = object.__new__(Desk)
+    pushes = []
+    d._identity_sha = "sent-to-the-old-node"
+    d._push_identity = lambda: pushes.append(d._identity_sha)
+    answers = iter([{"refused": Desk.NO_MAP + ": the desk passes ..."}, {"bundle": "B"}])
+    assert d._with_identity(lambda: next(answers)) == {"bundle": "B"}
+    assert pushes == ["sent-to-the-old-node", None]          # the cache forgotten before the second push
+    calls = []
+
+    def raising():
+        calls.append(1)
+        raise SignerRefused(Desk.NO_MAP)
+    with pytest.raises(SignerRefused):
+        d._with_identity(raising)
+    assert len(calls) == 2                                  # once more, then the refusal stands
+    other = iter([{"refused": "the ceiling is refused"}])
+    assert d._with_identity(lambda: next(other)) == {"refused": "the ceiling is refused"}   # not retried

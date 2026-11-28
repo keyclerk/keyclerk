@@ -33,6 +33,8 @@ ORIGIN = "keyclerk.example/log-1"
 
 @pytest.fixture(scope="module")
 def binary(tmp_path_factory):
+    if os.environ.get("KC_CUSTODIAN_BIN"):           # a published custodian (the release image's), for an RC walk
+        return Path(os.environ["KC_CUSTODIAN_BIN"])
     if shutil.which("go") is None:
         pytest.skip("no Go toolchain: the custodian is built with it")
     out = tmp_path_factory.mktemp("custodian-bin") / EXE
