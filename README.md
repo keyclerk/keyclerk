@@ -17,7 +17,7 @@
 Access leases for Keycloak. KeyClerk receives people, checks who they are, and hands out keys that end by
 themselves: for employees, contractors, visitors and partners, for applications, privileged roles and doors.
 
-> Status: engine 0.29.0rc2 (2026-11-28, a release candidate; 0.28.0 is the latest release). The source is public and released on PyPI (`pip install keyclerk`). It runs on one host for a demo
+> Status: engine 0.29.0 (2026-11-28). The source is public and released on PyPI (`pip install keyclerk`). It runs on one host for a demo
 > and a local test stack; nobody else should run it in production yet. What follows separates what runs today, what exists as a tested library that nothing runs yet,
 > and what is designed only. A claim moves up a column only with the code and a test.
 
