@@ -3,7 +3,13 @@
 Each release's notes come from its section here. Earlier entries are the releases' own one-line summaries;
 the decision records (docs/decisions) hold the reasoning.
 
-## 0.29.0-rc.2 (2026-11-28)
+## 0.29.0 (2026-11-28)
+- Released after two candidates. 0.29.0-rc.2 passed its lab run from the published artifacts
+  (docs/reviews/2026-11-28-rc2-lab-run.md): the suite, and an HA soak with three node kills and five edge cuts
+  without a breach; the final differs from it only in these notes, the version and the base-image pin below.
+- The engine image's base moves to the current Python 3.12 slim (sha256:5b5fe805): the release scan of 0.29.0-rc.2
+  found fixable high findings in zlib (CVE-2026-85091) and glibc (CVE-2026-5435, CVE-2026-19499) in the earlier one,
+  so 0.29.0-rc.2's images were rebuilt from its tag on this base through image.yml before they were published.
 - The image workflow names the Containerfile (BuildKit looks for a Dockerfile by default, so 0.29.0-rc.1's image jobs
   found nothing to build), and a maintainer can build a tag's images again by hand. The engine image moves to the
   current Python 3.12 slim base (Python 3.12.16): the scan found a fixable critical finding in the earlier one.
