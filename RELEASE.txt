@@ -32,7 +32,7 @@ files:
   LICENSES/MIT.txt  sha256 b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5
   MAINTAINERS.md  sha256 6705a31dceb074478400989a2e94d8b8a5bea7050a73783c8460e397f972ca0f
   NOTICE  sha256 6e6a422362f953e3bcb77b258746afba662cb29df799ccc7deba4c0a89c67317
-  README.md  sha256 49cb64bf0861c62b403a944be060e0bb68ec25bf13594918f45a2e783570e62c
+  README.md  sha256 9f2dbc002e868c67b46a3d09700f8ee888bd90ccf2c226134a9abd655e4449f9
   REUSE.toml  sha256 519c75d50035eb67653d06556a178e8014f6a7d2f346bbbecae3e95c146dc1b3
   ROADMAP.md  sha256 6542ca8333985bba73b68002da46e273760b5a89a39757d5854055e7f7dcc852
   SECURITY.md  sha256 7037b2de4f19026dec298344ff9956c8088884aea1a64cffb3de8834cab71700
@@ -126,6 +126,8 @@ files:
   docs/decisions/0034-receiving-eudi-wallet-credentials.md  sha256 e39431b65569d868b36416aabd28f4ef555c33f3a0f99ffef794990c2bd6499b
   docs/decisions/README.md  sha256 4383fb6eaaf7184aecad36916037acb7944e93d5604ff1e54d2169e1f9679e4d
   docs/deployer-contract.md  sha256 fe8e03cdf8fd0cdb9ad9bbc7c0c1c3166a791410c6aa0889691519e9f0f628c8
+  docs/estate/estate-dark.svg  sha256 3827b63a9048614180c1ea37006147e43e64b01fdaa70c48058bfab91bbc220b
+  docs/estate/estate-light.svg  sha256 d1332d25ca2ba81baed0eb039babe14817ec96cfaa0bcee41894693659da794e
   docs/examples/wallet-registry.yaml  sha256 fd15ca9ac56492b9004f598f4c76372d1fec9d8ea080a97fac749eda7e1992c3
   docs/install.md  sha256 d6a8a87aaa8472f076f7bfaf45963e4fea66143e429260d584c685775010e1c1
   docs/keyclerk-edge-interface.md  sha256 b5bae19813a00d217accb80ac4bb0d655e2f3314da2b44cacd83e75141f481b9
@@ -524,5 +526,6 @@ files:
   tools/model_claim_lease.py  sha256 3e04e9778e8a17c6c97213c447fc6ca93aa0fe341c22afe9977d898d00e65e0e
   tools/model_signer_failover.py  sha256 080c4fdf8c7047bb798a8192976f9f7d2efb1017babbdc62c024e0b6187f5be0
   tools/public_text_check.py  sha256 21383f2559bfbceacde7e4ce9f611fe078b1f3124c86a907383a1bf5d2f28a06
+  tools/render_estate.py  sha256 4002c26c980e57d06111267a5aeeeec22bb3ca99634a4c3cf872baaf4370a309
   tools/sign_policy_release.py  sha256 c4fc82ad667408e444a3e7b37c4f435e9271758d610a4344e907639e227a4707
   tools/soak_core.py  sha256 5df8521a48b89c9762be4dd80db66be875dd75139da196b3b8ff83590705ef13

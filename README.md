@@ -21,6 +21,18 @@ themselves: for employees, contractors, visitors and partners, for applications,
 > and a local test stack; nobody else should run it in production yet. What follows separates what runs today, what exists as a tested library that nothing runs yet,
 > and what is designed only. A claim moves up a column only with the code and a test.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/estate/estate-dark.svg">
+    <img src="docs/estate/estate-light.svg" alt="The KeyClerk estate, drawn as the mark's two interlaced rings: on the orange ring the guest's side (external guests and their own sign-in); where the rings cross the public edge (the lobby, in development, and the broker); on the ink ring, inside each organisation, homes (desk nodes, signer, custodian, signed records) that pull sealed requests and trust the broker's tokens, and edges that pull signed bundles, with a bastion enforcing each lease in front of legacy systems." width="900">
+  </picture>
+</p>
+
+The estate, drawn as the mark's two keys on one ring: the guest's side and the inside meet only at the public edge,
+every arrow points from the side that opens the connection, and nothing outside connects in. Desk,
+signer, custodian, broker integration and edges run today (below); the lobby, one public entry for many homes, is in
+development. Drawn by `tools/render_estate.py`.
+
 ## Why
 
 Keycloak signs people in very well. It does not answer the governance questions around that: who asked for this
