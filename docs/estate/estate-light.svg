@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 580" width="1000" height="580" role="img" aria-labelledby="t d" font-family="'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', Arial, sans-serif">
+<title id="t">The KeyClerk estate</title>
+<desc id="d">Drawn as the KeyClerk mark: two interlaced rings. On the orange ring, the guest's side: external guests and their own organisation's sign-in. Where the rings cross, the public edge: the lobby (in development), where guests ask, and the broker, where they sign in, federated with their own sign-in. On the ink ring, inside each organisation: homes, each a KeyClerk deployment with desk nodes, signer, custodian and signed records, which pull sealed requests from the lobby and trust the broker's tokens; and edges at the sites, which pull signed bundles from their home and work offline, with a bastion enforcing each lease in front of legacy systems. Every connection is opened from the inside.</desc>
+<defs><marker id="hi" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#17142b"/></marker><marker id="ha" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#c85d16"/></marker></defs>
+<rect width="1000" height="580" rx="16" fill="#f2f4f7"/>
+<g transform="translate(1000,0) scale(-1,1)">
+<path d="M467.4,201.6 A186,186 0 1 1 432.2,247.9" fill="none" stroke="#d6d8e0" stroke-width="26" stroke-linecap="butt"/>
+<path d="M428.6,470.4 A186,186 0 1 1 463.8,424.1" fill="none" stroke="#f3d2bd" stroke-width="26" stroke-linecap="butt"/>
+<circle cx="114.0" cy="336.0" r="7" fill="#c85d16" stroke="#c85d16" stroke-width="2.5"/>
+<circle cx="185.5" cy="482.6" r="7" fill="#f2f4f7" stroke="#c85d16" stroke-width="2.5"/>
+<rect x="388.0" y="262.0" width="120" height="44" rx="13" fill="#ffffff" stroke="#c85d16" stroke-width="1.6"/>
+<rect x="388.0" y="366.0" width="120" height="44" rx="13" fill="#ffffff" stroke="#17142b" stroke-width="1.6"/>
+<rect x="584" y="262" width="140" height="128" rx="12" fill="#ffffff" stroke="#17142b" stroke-width="1" opacity="0.35"/>
+<rect x="579" y="267" width="140" height="128" rx="12" fill="#ffffff" stroke="#17142b" stroke-width="1" opacity="0.6"/>
+<rect x="574" y="272" width="140" height="128" rx="12" fill="#ffffff" stroke="#17142b" stroke-width="1.6"/>
+<circle cx="596" cy="332" r="5" fill="none" stroke="#17142b" stroke-width="1.6"/>
+<circle cx="612" cy="332" r="5" fill="none" stroke="#17142b" stroke-width="1.6"/>
+<circle cx="628" cy="332" r="5" fill="none" stroke="#17142b" stroke-width="1.6"/>
+<circle cx="782.0" cy="336.0" r="7" fill="#17142b" stroke="#17142b" stroke-width="2.5"/>
+<circle cx="896.0" cy="336.0" r="7" fill="#f2f4f7" stroke="#17142b" stroke-width="2.5"/>
+<circle cx="896.0" cy="446.0" r="7" fill="#f2f4f7" stroke="#17142b" stroke-width="2.5"/>
+<path d="M124.0,316.0 C174.0,236.0 308.0,280 382.0,284" fill="none" stroke="#c85d16" stroke-width="1.8" stroke-linecap="round" marker-end="url(#ha)"/>
+<path d="M124.0,376.0 C174.0,406.0 308.0,388 382.0,386" fill="none" stroke="#c85d16" stroke-width="1.8" stroke-linecap="round" marker-end="url(#ha)"/>
+<path d="M428.0,412 C408.0,476 255.48696558942754,476.57000017085034 197.48696558942754,479.57000017085034" fill="none" stroke="#17142b" stroke-width="1.8" stroke-linecap="round" marker-end="url(#hi)"/>
+<path d="M572,288 C550,280 538.0,284 512.0,284" fill="none" stroke="#17142b" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="6 5" marker-end="url(#hi)"/>
+<path d="M572,384 C550,390 538.0,388 512.0,388" fill="none" stroke="#17142b" stroke-width="1.8" stroke-linecap="round" marker-end="url(#hi)"/>
+<path d="M772.0,328.0 C742.0,292.0 750,302 720,312" fill="none" stroke="#17142b" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="6 5" marker-end="url(#hi)"/>
+<path d="M794.0,336.0 L882,336.0" fill="none" stroke="#17142b" stroke-width="1.8" stroke-linecap="round" marker-end="url(#hi)"/>
+<path d="M896,350.0 L896,432.0" fill="none" stroke="#17142b" stroke-width="1.8" stroke-linecap="round" marker-end="url(#hi)"/>
+</g>
+<text x="552.0" y="228.0" font-size="13" font-weight="600" fill="#17142b" text-anchor="middle">Public edge</text>
+<text x="552.0" y="244.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="middle">where the rings cross</text>
+<text x="868.0" y="332.0" font-size="14" font-weight="600" fill="#17142b" text-anchor="end">External guests</text>
+<text x="868.0" y="349.0" font-size="12" font-weight="400" fill="#555a67" text-anchor="end">visitors, contractors,</text>
+<text x="868.0" y="364.0" font-size="12" font-weight="400" fill="#555a67" text-anchor="end">partner staff</text>
+<text x="830.5" y="510.6" font-size="14" font-weight="600" fill="#17142b" text-anchor="start">Partner sign-in</text>
+<text x="830.5" y="526.6" font-size="12" font-weight="400" fill="#555a67" text-anchor="start">their own identity provider</text>
+<text x="552.0" y="280.0" font-size="13" font-weight="600" fill="#17142b" text-anchor="middle">Lobby</text>
+<text x="552.0" y="296.0" font-size="11" font-weight="500" fill="#9a4a12" text-anchor="middle">in development</text>
+<text x="552.0" y="384.0" font-size="13" font-weight="600" fill="#17142b" text-anchor="middle">Broker</text>
+<text x="552.0" y="400.0" font-size="11" font-weight="500" fill="#555a67" text-anchor="middle">Keycloak sign-in</text>
+<text x="300.0" y="296.0" font-size="14" font-weight="600" fill="#17142b" text-anchor="start">Home</text>
+<text x="300.0" y="312.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="start">one deployment</text>
+<text x="300.0" y="336.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="start">desk nodes</text>
+<text x="300.0" y="358.0" font-size="12" font-weight="500" fill="#17142b" text-anchor="start">signer, custodian</text>
+<text x="300.0" y="375.0" font-size="12" font-weight="500" fill="#17142b" text-anchor="start">signed records</text>
+<text x="214.0" y="370.0" font-size="14" font-weight="600" fill="#17142b" text-anchor="middle">Edge</text>
+<text x="214.0" y="386.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="middle">works offline</text>
+<text x="104.0" y="300.0" font-size="14" font-weight="600" fill="#17142b" text-anchor="middle">Bastion</text>
+<text x="104.0" y="316.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="middle">enforces the lease</text>
+<text x="104.0" y="476.0" font-size="14" font-weight="600" fill="#17142b" text-anchor="middle">Legacy systems</text>
+<text x="104.0" y="492.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="middle">SSH, RDP, web apps</text>
+<text x="766.0" y="262.0" font-size="12" font-weight="500" fill="#9a4a12" text-anchor="end">asks</text>
+<text x="758.0" y="412.0" font-size="12" font-weight="500" fill="#9a4a12" text-anchor="end">signs in</text>
+<text x="604.0" y="472.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="start">federates</text>
+<text x="486.0" y="252.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="end">pulls</text>
+<text x="486.0" y="266.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="end">requests</text>
+<text x="484.0" y="418.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="end">trusts</text>
+<text x="484.0" y="432.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="end">tokens</text>
+<text x="216.0" y="274.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="middle">pulls signed</text>
+<text x="216.0" y="288.0" font-size="11" font-weight="400" fill="#555a67" text-anchor="middle">bundles</text>
+<text x="254.0" y="128.0" font-size="14" font-weight="600" fill="#17142b" text-anchor="start">Inside</text>
+<text x="306.0" y="128.0" font-size="12" font-weight="400" fill="#555a67" text-anchor="start">each organisation</text>
+<text x="730.0" y="128.0" font-size="14" font-weight="600" fill="#9a4a12" text-anchor="start">Outside</text>
+<text x="792.0" y="128.0" font-size="12" font-weight="400" fill="#555a67" text-anchor="start">the guest's side</text>
+<g transform="translate(28,22) scale(0.9)"><path fill-rule="evenodd" fill="#17142b" d="M24.60 14.01L25.49 14L25.61 13.97L25.72 13.90L25.81 13.83L26.34 13.06L26.77 12.48L27.03 12.15L27.53 11.58L28.03 11.05L28.58 10.53L29.15 10.03L29.54 9.72L29.62 9.64L29.69 9.54L29.73 9.43L29.75 9.31L29.75 9.20L29.73 9.08L29.68 8.97L29.61 8.87L29.53 8.79L29.38 8.70L29.07 8.61L28.07 8.34L27.39 8.20L26.36 8.07L25.68 8.02L24.66 8L23.96 8.04L22.95 8.15L22.26 8.27L21.27 8.51L20.60 8.71L19.65 9.06L19.01 9.35L18.39 9.66L17.52 10.17L16.93 10.56L16.11 11.18L15.34 11.87L14.62 12.60L13.97 13.38L13.36 14.22L12.99 14.81L12.50 15.70L12.07 16.64L11.82 17.29L11.51 18.27L11.27 19.28L11.10 20.29L11.02 21.31L11 22.34L11.07 23.36L11.15 24.06L11.34 25.06L11.51 25.73L11.70 26.38L11.94 27.03L12.20 27.67L12.50 28.30L12.82 28.91L13.36 29.77L13.75 30.33L14.18 30.89L14.63 31.41L15.11 31.90L15.60 32.38L16.12 32.83L16.93 33.44L17.50 33.82L18.09 34.18L18.71 34.51L19.64 34.93L20.28 35.18L20.94 35.40L21.61 35.58L22.28 35.73L22.95 35.85L23.64 35.93L24.32 35.98L25.34 36L26.02 35.96L26.72 35.89L27.40 35.79L28.07 35.66L29 35.42L29 57L29.03 57.43L29.09 57.72L29.17 58L29.28 58.28L29.42 58.54L29.59 58.78L29.77 59.01L29.98 59.22L30.21 59.41L30.45 59.57L30.71 59.71L30.98 59.82L31.26 59.91L31.55 59.97L31.86 60L32.15 60L32.45 59.97L32.88 59.87L33.28 59.72L33.61 59.53L33.95 59.28L34.23 59.01L34.50 58.66L34.71 58.29L34.85 57.93L34.96 57.51L35 57.08L35 52L40.08 52L40.51 51.96L40.93 51.85L41.29 51.71L41.66 51.50L41.97 51.27L42.28 50.95L42.54 50.60L42.74 50.22L42.87 49.86L42.97 49.45L42.99 49.21L43 48.93L42.95 48.48L42.89 48.21L42.83 48L42.74 47.78L42.61 47.53L42.49 47.33L42.32 47.10L42.01 46.77L41.79 46.59L41.61 46.47L41.21 46.25L40.93 46.15L40.66 46.07L40.43 46.03L40.14 46L35 46L35 31.80L35.60 31.15L36.04 30.61L36.64 29.78L37 29.20L37.35 28.59L37.80 27.68L38.06 27.05L38.30 26.38L38.49 25.73L38.73 24.74L38.85 24.05L38.96 23.04L39 22.34L38.98 21.32L38.93 20.62L38.85 19.94L38.66 18.93L38.39 17.93L38.06 16.95L37.80 16.32L37.70 16.12L37.64 16.02L37.52 15.91L37.39 15.83L37.23 15.80L37.07 15.80L36.82 15.88L36.52 15.99L35.93 16.27L35.52 16.51L35.12 16.78L34.75 17.08L34.30 17.51L33.97 17.88L33.68 18.26L33.42 18.66L33.13 19.21L32.88 19.80L32.82 19.98L32.80 20.10L32.80 20.23L32.91 20.82L32.96 21.22L33 21.80L33 22.20L32.96 22.78L32.88 23.36L32.80 23.76L32.65 24.33L32.47 24.88L32.23 25.42L31.96 25.94L31.76 26.28L31.42 26.77L31.06 27.22L30.79 27.52L30.38 27.93L29.92 28.30L29.45 28.65L28.95 28.96L28.42 29.23L28.06 29.39L27.51 29.60L26.94 29.76L26.36 29.88L25.78 29.96L25.19 30L24.60 29.99L24.02 29.94L23.44 29.85L22.87 29.71L22.31 29.53L21.76 29.32L21.23 29.05L20.56 28.65L20.08 28.30L19.49 27.80L19.07 27.37L18.58 26.77L18.24 26.28L17.86 25.60L17.61 25.06L17.35 24.33L17.19 23.75L17.06 22.98L17.01 22.39L17.01 21.61L17.09 20.83L17.20 20.24L17.40 19.49L17.61 18.94L17.94 18.23L18.24 17.72L18.69 17.08L19.07 16.62L19.62 16.07L20.08 15.69L20.72 15.24L21.23 14.94L21.94 14.61L22.49 14.40L23.24 14.20L23.83 14.09Z"/><path fill-rule="evenodd" fill="#c85d16" d="M26.29 27.86L26.39 28.02L26.54 28.13L26.71 28.20L26.90 28.20L27.05 28.17L27.49 28L27.92 27.81L28.21 27.65L28.60 27.41L28.88 27.22L29.24 26.93L29.49 26.70L29.81 26.37L30.03 26.12L30.31 25.75L30.50 25.47L30.73 25.07L30.88 24.77L31.07 24.33L31.19 23.95L31.20 23.77L31.09 23.17L31.02 22.59L31 22.19L31.01 21.61L31.06 21.02L31.15 20.44L31.24 20.05L31.40 19.49L31.61 18.94L31.77 18.58L32.04 18.05L32.35 17.56L32.58 17.23L32.94 16.77L33.35 16.34L33.77 15.94L34.23 15.58L34.56 15.35L35.05 15.04L35.58 14.77L35.94 14.61L36.49 14.40L37.05 14.24L37.44 14.15L38.02 14.06L38.60 14.01L39.19 14L39.59 14.02L40.17 14.09L40.75 14.19L41.14 14.29L41.70 14.47L42.42 14.77L42.95 15.04L43.60 15.46L44.22 15.94L44.66 16.35L45.19 16.93L45.65 17.55L46.05 18.23L46.39 18.94L46.60 19.49L46.81 20.25L46.94 21.02L47 21.80L46.99 22.40L46.91 23.18L46.76 23.94L46.60 24.51L46.32 25.24L46.05 25.77L45.65 26.44L45.19 27.07L44.79 27.52L44.23 28.06L43.76 28.43L43.12 28.86L42.59 29.15L41.88 29.46L41.33 29.65L40.56 29.85L39.98 29.94L39.39 29.99L38.52 30L38.33 30.06L38.17 30.19L37.46 31.22L36.99 31.82L36.62 32.26L36.53 32.43L36.50 32.62L36.51 35.37L36.56 35.53L36.67 35.69L36.83 35.80L37 35.86L37.96 35.96L38.65 36L39.34 36L40.04 35.96L40.72 35.89L41.40 35.79L42.07 35.66L42.73 35.49L43.72 35.18L44.36 34.93L44.98 34.66L45.59 34.35L46.19 34.01L46.77 33.64L47.33 33.25L47.88 32.83L48.40 32.38L48.89 31.90L49.37 31.41L49.82 30.89L50.24 30.35L50.64 29.78L51 29.20L51.34 28.61L51.65 27.99L51.93 27.36L52.18 26.72L52.39 26.07L52.58 25.41L52.73 24.74L52.85 24.06L52.93 23.38L52.98 22.69L53 22.01L52.98 21.32L52.93 20.64L52.85 19.95L52.73 19.28L52.58 18.61L52.40 17.94L52.18 17.29L51.94 16.65L51.66 16.02L51.35 15.41L51.01 14.81L50.64 14.23L50.25 13.67L49.83 13.12L49.38 12.60L48.90 12.11L48.41 11.63L47.89 11.18L47.35 10.76L46.78 10.36L46.20 10L45.61 9.66L44.99 9.35L44.36 9.07L43.72 8.82L43.07 8.61L42.41 8.42L41.74 8.27L41.06 8.15L40.38 8.07L39.69 8.02L39.01 8L38.32 8.02L37.64 8.07L36.95 8.15L36.28 8.27L35.61 8.42L34.94 8.60L34.29 8.82L33.65 9.06L33.02 9.34L32.41 9.65L31.81 9.99L31.23 10.36L30.67 10.75L30.12 11.17L29.60 11.62L29.11 12.10L28.63 12.59L28.18 13.11L27.76 13.65L27.36 14.22L27 14.80L26.66 15.39L26.35 16.01L26.07 16.64L25.82 17.28L25.61 17.93L25.42 18.59L25.27 19.26L25.15 19.94L25.07 20.62L25.02 21.31L25 21.99L25.02 22.68L25.07 23.36L25.15 24.05L25.27 24.72L25.42 25.39L25.60 26.06L25.82 26.71L26.06 27.35Z"/></g>
+<text x="92.0" y="52.0" font-size="22" font-weight="600" fill="#17142b" text-anchor="start">The KeyClerk estate</text>
+<text x="92.0" y="74.0" font-size="13" font-weight="400" fill="#555a67" text-anchor="start">Every key signed. Every key returned.</text>
+<path d="M32,552 L64,552" fill="none" stroke="#c85d16" stroke-width="1.8" stroke-linecap="round" marker-end="url(#ha)"/>
+<text x="74.0" y="556.0" font-size="12" font-weight="400" fill="#555a67" text-anchor="start">what a guest does</text>
+<path d="M228,552 L260,552" fill="none" stroke="#17142b" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="6 5" marker-end="url(#hi)"/>
+<text x="270.0" y="556.0" font-size="12" font-weight="400" fill="#555a67" text-anchor="start">pulled from inside: nothing outside connects in</text>
+<text x="968.0" y="556.0" font-size="12" font-weight="600" fill="#555a67" text-anchor="end">KeyClerk 0.29</text>
+</svg>
